@@ -1,306 +1,307 @@
 """Build the City Edit presentation panels.
 
-Two groups, no basemap and no captions — the drawings carry themselves:
-
-  01–04  the selection gesture: start → end → midpoint → midpoint removed
-  05–08  how the core algorithms work, as stage-by-stage schematics
-
-Route geometry is real (a slice of the NYC walk graph) but drawn on plain
-paper; the algorithm panels are schematic. Markers, strokes and the heat ramp
-are the app's own (see deck.py's palette).
+Eight slides: the basemap, the selection built up waypoint by waypoint, the
+graph→block mapping, block heat, and the two families of top proposal. Art on
+the right, a short scannable note on the left. Everything drawn is the app's
+own asset (see deck.py).
 """
 
+import base64
 import math
 from pathlib import Path
 
 from deck import (
-    END, H, HEAT, INK, PAPER, SEL, START, W, Scene,
-    heat_edges, kite, panel, path_d, selection_line, tick,
+    END, INK, PAPER, SEL, START, W, H, Scene,
+    at, block_heat, block_selected, fit_into, kite, line, panel,
+    path_d, poly_d, proposal_icon, selection_line, text_block, tick,
 )
 
 OUT = Path(__file__).resolve().parent.parent.parent / "docs/presentation/story"
 OUT.mkdir(parents=True, exist_ok=True)
+HERE = Path(__file__).resolve().parent
 
 wide = Scene("scene.json")
 panels: list[tuple[str, str, str]] = []
+
+TEXT_X = 96
+ART = (700, 90, 1540, 810)      # the art column: x0, y0, x1, y1
 
 
 def add(name, title, body):
     panels.append((name, title, panel(body)))
 
 
-# ---------------------------------------------------------------------------
-# Layout helpers
-# ---------------------------------------------------------------------------
-def fitter(groups, pad_x=210, pad_y=150):
-    """One shared transform for several polylines, so frames stay aligned."""
-    pts = [p for g in groups for p in g]
-    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
-    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
-    k = min((W - 2 * pad_x) / max(1.0, x1 - x0), (H - 2 * pad_y) / max(1.0, y1 - y0))
-    ox = W / 2 - (x0 + x1) / 2 * k
-    oy = H / 2 - (y0 + y1) / 2 * k
-    return lambda pt: (pt[0] * k + ox, pt[1] * k + oy)
-
-
-def scale_g(body, s):
-    return f'<g transform="scale({s})">{body}</g>'
-
-
-def at(cx, cy, body):
-    return f'<g transform="translate({cx:.1f},{cy:.1f})">{body}</g>'
-
-
-def arrow(x, y, length=88, opacity=0.32):
-    """A thin step arrow between two stages."""
-    return (f'<g opacity="{opacity}">'
-            f'<line x1="{x:.1f}" y1="{y:.1f}" x2="{x + length - 13:.1f}" y2="{y:.1f}" '
-            f'stroke="{INK}" stroke-width="1.6"/>'
-            f'<path d="M {x + length:.1f} {y:.1f} L {x + length - 15:.1f} {y - 6.5:.1f} '
-            f'L {x + length - 15:.1f} {y + 6.5:.1f} Z" fill="{INK}"/></g>')
-
-
-def rng(seed):
-    """Tiny deterministic LCG — same drawing every build."""
-    state = seed
-
-    def nxt():
-        nonlocal state
-        state = (state * 1103515245 + 12345) % 2147483648
-        return state / 2147483648
-
-    return nxt
-
-
-def line(a, b, color=INK, width=2.0, opacity=1.0, dash=None, cap="round"):
-    d = f' stroke-dasharray="{dash}"' if dash else ""
-    return (f'<path d="{path_d([a, b])}" fill="none" stroke="{color}" stroke-width="{width}" '
-            f'stroke-opacity="{opacity}" stroke-linecap="{cap}"{d}/>')
-
-
-def rounded_rect(x, y, w, h, r, color=SEL, opacity=0.85, width=2.2, dash=None, fill="none"):
-    d = f' stroke-dasharray="{dash}"' if dash else ""
-    return (f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" rx="{r}" ry="{r}" '
-            f'fill="{fill}" stroke="{color}" stroke-opacity="{opacity}" stroke-width="{width}"{d}/>')
-
-
-def heat_seg(a, b, intensity=1.0, sign=1, scale=1.0):
-    return heat_edges([{"a": a, "b": b}], intensity, sign, 1 / scale)
+# ===========================================================================
+# 01 — The basemap: Leaflet + CARTO
+# ===========================================================================
+def slide_basemap():
+    png = base64.b64encode((HERE / "basemap.png").read_bytes()).decode()
+    b = [f'<image href="data:image/png;base64,{png}" x="0" y="0" width="{W}" height="{H}"/>',
+         f'<rect x="0" y="0" width="660" height="{H}" fill="{PAPER}" opacity="0.88"/>',
+         f'<rect x="660" y="0" width="260" height="{H}" fill="url(#scrimRight)"/>',
+         text_block(TEXT_X, 300, "Basemap", [
+             "**Leaflet** owns the camera —",
+             "42 kB, imperative, plugin-rich.",
+             "**CARTO dark** raster tiles, split",
+             "**nolabels** + **only_labels**, so text",
+             "sits **above** the vote heat.",
+         ])]
+    add("01-basemap", "Basemap", "".join(b))
 
 
 # ===========================================================================
-# 01–04 — the selection: markers and the route they derive
+# 02–04 — The selection, one waypoint at a time
 # ===========================================================================
-def selection_frames():
+def slides_selection():
     s_id = wide.node_at((700, 762))
     e_id = wide.node_at((1148, 236))
     m_id = wide.node_at((1272, 512))
     direct_raw, _ = wide.route(s_id, e_id)
     via_raw, _ = wide.multi_route([s_id, m_id, e_id])
-
-    f = fitter([direct_raw, via_raw])
+    f = fit_into([direct_raw, via_raw], (ART[0] + 70, ART[1] + 50, ART[2] - 70, ART[3] - 50))
     direct = [f(p) for p in direct_raw]
     via = [f(p) for p in via_raw]
     S, E, M = direct[0], direct[-1], f(wide.nodes[m_id])
-    K = 1.9   # nothing else in frame, so the markers carry it
+    K = 1.7
 
-    add("01-start", "Start", kite(S, START, K))
+    add("02-waypoint-start", "Start waypoint",
+        kite(S, START, K) +
+        text_block(TEXT_X, 205, "Waypoints", [
+            "One **ordered list of coordinates**",
+            "is the whole interface.",
+            "The URL is the serialization:",
+            "**?w=lat,lng;…&vt=<label>**",
+            "A point **snaps to the walk graph** —",
+            "**Flatbush** R-tree hit-test, O(log n)",
+            "over 3.3 M edges. Coordinates survive",
+            "a **graph rebuild**; edge ids don't.",
+        ]))
 
-    add("02-end", "End", selection_line(direct, k=0.72, halo=False) + kite(S, START, K) + kite(E, END, K))
+    add("03-waypoint-route", "Route",
+        selection_line(direct) + kite(S, START, K) + kite(E, END, K) +
+        text_block(TEXT_X, 205, "Routing", [
+            "The path between waypoints is",
+            "**derived**, never stored.",
+            "**OSRM**, self-hosted: **foot profile**,",
+            "**MLD** partitioning, sub-ms queries.",
+            "**annotations=nodes** hands back **OSM**",
+            "**node ids** → our edge ids, 1:1.",
+            "The votable graph is built from the",
+            "**same PBF + foot filter** as OSRM.",
+        ]))
 
-    add("03-midpoint", "Midpoint",
-        selection_line(direct, opacity=0.10, dashed=True, halo=False, k=0.72) +
-        selection_line(via, k=0.72, halo=False) + kite(S, START, K) + kite(M, SEL, K) + kite(E, END, K))
-
-    add("04-midpoint-removed", "Midpoint removed",
-        selection_line(via, opacity=0.10, dashed=True, halo=False, k=0.72) +
-        selection_line(direct, k=0.72, halo=False) + kite(M, SEL, K, ghost=True, opacity=0.7, struck=True) +
-        kite(S, START, K) + kite(E, END, K))
-
-
-# ===========================================================================
-# 05 — Blocks: many edges in, one counted place out
-# ===========================================================================
-def street_schematic(length=300.0, gap=26.0, spans=4):
-    """A street the way OSM has it: roadway, both sidewalks, crossing stubs —
-    returns (svg, list of sub-edges as (a, b))."""
-    half = length / 2
-    step = length / spans
-    edges = []
-    for row in (-gap, 0.0, gap):
-        for i in range(spans):
-            edges.append(((-half + i * step, row), (-half + (i + 1) * step, row)))
-    for i in range(spans + 1):
-        x = -half + i * step
-        edges.append(((x, -gap), (x, gap)))
-    svg = "".join(line(a, b, INK, 2.2, 0.5) for a, b in edges)
-    nodes = {p for e in edges for p in e}
-    svg += "".join(tick(p, INK, 3.0, 0.45) for p in sorted(nodes))
-    return svg, edges
-
-
-def alg_blocks():
-    length, gap, spans = 300.0, 26.0, 4
-    schematic, edges = street_schematic(length, gap, spans)
-    r = rng(7)
-    picks, seen = [], set()
-    while len(picks) < 10:
-        i = int(r() * len(edges))
-        if i in seen:
-            continue
-        seen.add(i)
-        (ax, ay), (bx, by) = edges[i]
-        t = 0.3 + r() * 0.4
-        picks.append((ax + (bx - ax) * t, ay + (by - ay) * t))
-
-    votes = "".join(tick(p, INK, 5.4, 0.95) for p in picks)
-    block = rounded_rect(-length / 2 - 20, -gap - 20, length + 40, gap * 2 + 40, 22, SEL, 0.85)
-    lit = "".join(heat_seg(a, b, 0.95) for a, b in edges)
-
-    lit = (rounded_rect(-length / 2 - 20, -gap - 20, length + 40, gap * 2 + 40, 22,
-                        HEAT["warm"], 0.5, 1.6, fill=HEAT["warm"]).replace(
-               'fill="rgb(196,96,56)"', 'fill="rgb(196,96,56)" fill-opacity="0.10"') +
-           heat_seg((-length / 2, 0), (length / 2, 0), 1.0))
-
-    y = H / 2
-    body = [
-        at(270, y, scale_g(schematic + votes, 1.25)),
-        arrow(505, y, 80),
-        at(800, y, scale_g(schematic + votes + block, 1.25)),
-        arrow(1035, y, 80),
-        at(1330, y, scale_g(lit + tick((0, -gap - 62), INK, 5.6, 1.0), 1.25)),
-    ]
-    add("05-algorithm-blocks", "Blocks", "".join(body))
+    add("04-waypoint-mid", "Midpoint",
+        selection_line(direct, opacity=0.10, dashed=True) + selection_line(via) +
+        kite(S, START, K) + kite(M, SEL, K) + kite(E, END, K) +
+        text_block(TEXT_X, 150, "Mid waypoints", [
+            "**Drag the polyline** to pull out a mid;",
+            "the route re-derives through it.",
+            "Tap vs drag is **time-based** —",
+            "**TAP_MAX_MS = 300**, one feel for the",
+            "marker and the path alike.",
+            "First is **start**, last is **end**, the",
+            "middle **rebalances**. Phase, vote type",
+            "and button state are all **derived**.",
+            "**Tap a kite to delete** it — one pure",
+            "reducer, no async, 46 unit tests.",
+        ]))
 
 
 # ===========================================================================
-# 06 — Corridor growth: seed, grow off both tips, pin ghosts
+# 05–07 — An X intersection: graph → blocks → heat → the point proposal
 # ===========================================================================
-CORRIDOR = [(-190, 120), (-96, 96), (-16, 34), (58, 8), (128, -58), (196, -120)]
+T1, T2 = math.radians(24), math.radians(24 + 78)
+D1 = (math.cos(T1), math.sin(T1))
+D2 = (math.cos(T2), math.sin(T2))
+N1 = (-math.sin(T1), math.cos(T1))
+N2 = (-math.sin(T2), math.cos(T2))
+WALK = 23.0            # sidewalk offset from the roadway centreline
+BAND1 = BAND2 = 41.0   # block half-width across the street
+ARM = 232.0            # arm length out from the junction
+STUB = 62.0            # crossing-stub station along each arm
 
 
-def vote_field(seed=11, n=22, spread=(235, 125)):
-    r = rng(seed)
+def solve(r1, v1, r2, v2):
+    det = r1[0] * r2[1] - r1[1] * r2[0]
+    return ((v1 * r2[1] - r1[1] * v2) / det, (r1[0] * v2 - v1 * r2[0]) / det)
+
+
+def axis_pt(d, n, s, o):
+    return (d[0] * s + n[0] * o, d[1] * s + n[1] * o)
+
+
+def street_lines():
     out = []
-    for _ in range(n):
-        x = (r() - 0.5) * spread[0] * 2
-        y = (r() - 0.5) * spread[1] * 2
-        ang = r() * math.pi
-        ln = 26 + r() * 34
-        a = (x - math.cos(ang) * ln / 2, y - math.sin(ang) * ln / 2)
-        b = (x + math.cos(ang) * ln / 2, y + math.sin(ang) * ln / 2)
-        out.append((a, b, 0.22 + r() * 0.4))
+    for d, n in ((D1, N1), (D2, N2)):
+        for o in (-WALK, 0.0, WALK):          # roadway + both sidewalks
+            out.append((axis_pt(d, n, -ARM, o), axis_pt(d, n, ARM, o)))
+        for s in (-STUB, STUB):               # the crossing stubs
+            out.append((axis_pt(d, n, s, -WALK), axis_pt(d, n, s, WALK)))
     return out
 
 
-def alg_corridor():
-    field = vote_field()
-    field_svg = "".join(heat_seg(a, b, i) for a, b, i in field)
-    seed_a, seed_b = CORRIDOR[2], CORRIDOR[3]
-
-    def corridor_svg(upto):
-        return "".join(heat_seg(CORRIDOR[i], CORRIDOR[i + 1], 0.95)
-                       for i in range(len(CORRIDOR) - 1) if i in upto)
-
-    # 1 — the vote field
-    stage1 = field_svg
-    # 2 — the heaviest edge is the seed
-    stage2 = field_svg + heat_seg(seed_a, seed_b, 1.0) + rounded_rect(
-        min(seed_a[0], seed_b[0]) - 22, min(seed_a[1], seed_b[1]) - 22,
-        abs(seed_b[0] - seed_a[0]) + 44, abs(seed_b[1] - seed_a[1]) + 44, 18, SEL, 0.9, 2.0)
-    # 3 — grow off either tip
-    field_dim = "".join(heat_seg(a, b, i * 0.3) for a, b, i in field)
-    stage3 = (field_dim + corridor_svg({1, 2, 3}) +
-              arrow_along(CORRIDOR[2], CORRIDOR[1]) + arrow_along(CORRIDOR[3], CORRIDOR[4]))
-    # 4 — the finished corridor, expressed as waypoints
-    ghosts = [CORRIDOR[1], CORRIDOR[2], CORRIDOR[4]]
-    stage4 = (corridor_svg(set(range(len(CORRIDOR) - 1))) +
-              selection_line(CORRIDOR, k=1.35, opacity=0.9, halo=False) +
-              "".join(kite(g, SEL, 0.95, ghost=True) for g in ghosts) +
-              kite(CORRIDOR[0], START, 1.05) + kite(CORRIDOR[-1], END, 1.05))
-
-    cx1, cx2, cy1, cy2 = 440, 1160, 265, 655
-    body = [at(cx1, cy1, scale_g(stage1, 1.15)), at(cx2, cy1, scale_g(stage2, 1.15)),
-            at(cx1, cy2, scale_g(stage3, 1.15)), at(cx2, cy2, scale_g(stage4, 1.15)),
-            arrow(cx1 + 300, cy1), arrow(cx1 + 300, cy2)]
-    add("06-algorithm-corridor", "Corridor growth", "".join(body))
+def street_nodes():
+    pts = [solve(N1, o1, N2, o2) for o1 in (-WALK, 0, WALK) for o2 in (-WALK, 0, WALK)]
+    for d, n in ((D1, N1), (D2, N2)):
+        for s in (-STUB, STUB):
+            pts += [axis_pt(d, n, s, o) for o in (-WALK, 0, WALK)]
+    return pts
 
 
-def arrow_along(a, b, length=38, opacity=0.55):
-    """A growth arrow pointing from a towards b, drawn past b's tip."""
-    ang = math.atan2(b[1] - a[1], b[0] - a[0])
-    sx, sy = b[0] + math.cos(ang) * 12, b[1] + math.sin(ang) * 12
-    ex, ey = sx + math.cos(ang) * length, sy + math.sin(ang) * length
-    hx, hy = ex - math.cos(ang) * 15, ey - math.sin(ang) * 15
-    n = (-math.sin(ang) * 6.5, math.cos(ang) * 6.5)
-    return (f'<g opacity="{opacity}">'
-            f'<line x1="{sx:.1f}" y1="{sy:.1f}" x2="{hx:.1f}" y2="{hy:.1f}" stroke="{INK}" stroke-width="1.8"/>'
-            f'<path d="M {ex:.1f} {ey:.1f} L {hx + n[0]:.1f} {hy + n[1]:.1f} '
-            f'L {hx - n[0]:.1f} {hy - n[1]:.1f} Z" fill="{INK}"/></g>')
+def junction_poly():
+    return [solve(N1, s1 * BAND1, N2, s2 * BAND2)
+            for s1, s2 in ((1, 1), (1, -1), (-1, -1), (-1, 1))]
 
 
-# ===========================================================================
-# 07 — Signed heat: up minus down, and zero is invisible
-# ===========================================================================
-def tally(up, down, width=190):
-    """Up-triangles over down-triangles — the two sides of one block's argument."""
+def arm_polys():
     out = []
-    for i in range(up):
-        x = -width / 2 + (i + 0.5) * (width / max(up, 1))
-        out.append(f'<path d="M {x:.1f} -104 L {x + 7:.1f} -91 L {x - 7:.1f} -91 Z" '
-                   f'fill="{INK}" fill-opacity="0.9"/>')
-    for i in range(down):
-        x = -width / 2 + (i + 0.5) * (width / max(down, 1))
-        out.append(f'<path d="M {x:.1f} -60 L {x + 7:.1f} -73 L {x - 7:.1f} -73 Z" '
-                   f'fill="{INK}" fill-opacity="0.45"/>')
-    out.append(line((-width / 2 - 14, -80), (width / 2 + 14, -80), INK, 1.2, 0.28))
-    return "".join(out)
+    for d, n, on, ob in ((D1, N1, N2, BAND2), (D2, N2, N1, BAND1)):
+        sigma = 1 if (on[0] * d[0] + on[1] * d[1]) > 0 else -1
+        half = BAND1 if n is N1 else BAND2
+        for way in (1, -1):
+            s = sigma * way
+            out.append([
+                solve(n, half, on, s * ob),
+                solve(n, half, d, way * ARM),
+                solve(n, -half, d, way * ARM),
+                solve(n, -half, on, s * ob),
+            ])
+    return out
 
 
-def alg_heat():
-    bar_a, bar_b = (-115, 20), (115, 20)
-    cols = [(300, 9, 1, 1, 1.0), (800, 1, 9, -1, 0.95), (1300, 5, 5, 0, 0.0)]
-    body = []
-    for cx, up, down, sign, intensity in cols:
-        if sign == 0:
-            heat = (line(bar_a, bar_b, INK, 15, 0.06) +
-                    line(bar_a, bar_b, INK, 1.2, 0.16, dash="6 7"))
-        else:
-            heat = heat_seg(bar_a, bar_b, intensity, sign)
-        body.append(at(cx, H / 2 + 40, scale_g(tally(up, down) + heat, 1.5)))
-    add("07-algorithm-heat", "Signed heat", "".join(body))
+def x_scene(block_paint=None, ghost=1.0, extra=""):
+    """The X intersection. `block_paint(i, path)` paints the five blocks
+       (0 = junction, 1–4 = arms); `ghost` fades the graph beneath them."""
+    g = []
+    for a, b in street_lines():                       # the graph, ghosted underneath
+        g.append(line(a, b, INK, 2.2, 0.6 * ghost))
+    for p in street_nodes():
+        g.append(tick(p, INK, 3.6, 0.85 * ghost))
+    if block_paint:
+        for i, p in enumerate([junction_poly()] + arm_polys()):
+            g.append(block_paint(i, path_d(p, close=True)))
+    g.append(extra)
+    return at((ART[0] + ART[2]) / 2, (ART[1] + ART[3]) / 2, "".join(g), 1.42)
+
+
+HEATS = [0.92, 0.0, 0.46, 0.0, 0.18]   # junction hottest; two arms carry nothing
+
+
+def slides_blocks():
+    add("05-graph-to-blocks", "Graph → blocks",
+        x_scene(lambda i, d: block_selected(d), ghost=0.85) +
+        text_block(TEXT_X, 150, "Blocks", [
+            "One street is **6–20 OSM edges**:",
+            "roadway, both sidewalks, crossing stubs.",
+            "Membership is decided **topologically**",
+            "**first**, edge by edge — then each polygon",
+            "is generated **from its own members**.",
+            "Junction nodes **cluster** into a single",
+            "intersection block; a **Voronoi trim**",
+            "keeps every block **disjoint**.",
+            "Coverage holds **by construction**, and a",
+            "device counts **once per block, per type**.",
+        ]))
+
+    add("06-block-heat", "Block heat",
+        x_scene(lambda i, d: block_heat(d, HEATS[i], 2.0), ghost=0.55) +
+        text_block(TEXT_X, 205, "Heat", [
+            "A block's heat is its **top proposal's**",
+            "**differential** — up minus down.",
+            "**Log-normalized per arm**, with ceilings",
+            "floored so a quiet map can't saturate.",
+            "Warm arm, cold arm, and **zero is**",
+            "**invisible** — cancelled signal, no heat.",
+            "Applied as **MapLibre feature-state**,",
+            "diffed per block, never re-styled.",
+        ]))
+
+    pin = proposal_icon((0, 4), "safety", heat=0.92, selected=True, scale=1.7)
+    add("07-top-proposal-point", "Point proposal",
+        x_scene(lambda i, d: block_heat(d, HEATS[i], 2.0), ghost=0.5, extra=pin) +
+        text_block(TEXT_X, 150, "Top proposal · point", [
+            "Per block, per **vote type**:",
+            "**net = up − down**, ranked by differential.",
+            "The block's winner becomes **one pin**.",
+            "Support floor: **TOP_PROPOSAL_MIN_NET**",
+            "**= 100**, overridable per map.",
+            "**6 per type** reach the spacing step, then",
+            "same-type **non-max suppression at 600 m**",
+            "so one avenue can't stack identical pins.",
+            "Rank drives the **glow ring** — never the",
+            "outline, which belongs to hover.",
+        ]))
 
 
 # ===========================================================================
-# 08 — Threading: a waypoint dropped on a proposal routes through it
+# 08 — The route family
 # ===========================================================================
-def alg_threading():
-    a, b = (-250, 130), (250, -130)
-    shortest = [a, (-90, 118), (10, -10), (150, -50), b]
-    proposal = [(-140, 40), (-40, 92), (70, 74), (150, 6), (196, -74)]
-    drop = proposal[2]
-    threaded = [a, (-150, 126)] + proposal[2:] + [(230, -108), b]
+def slide_route_proposal():
+    edges = wide.street_edges("Broadway", (120, 300, 1480, 800))
+    blocks = wide.blocks_of(edges)
+    # Drop the junction blocks: a block carrying a second street name is a
+    # crossing, not part of this corridor.
+    names = {}
+    for e in wide.streets:
+        names.setdefault(e["bid"], set()).add(e["n"])
+    blocks = [b for b in blocks if names.get(b["id"], set()) <= {"Broadway", ""}]
 
-    stage1 = ("".join(heat_seg(proposal[i], proposal[i + 1], 0.85)
-                      for i in range(len(proposal) - 1)) +
-              selection_line(shortest, k=1.3, halo=False) + kite(a, START, 1.1) + kite(b, END, 1.1))
+    ordered = sorted(blocks, key=lambda b: b["c"][1])
+    ang = math.atan2(ordered[-1]["c"][1] - ordered[0]["c"][1],
+                     ordered[-1]["c"][0] - ordered[0]["c"][0])
+    turn = math.radians(122) - ang          # lay the corridor across the frame
+    ca, sa = math.cos(turn), math.sin(turn)
+    piv = ordered[0]["c"]
 
-    stage2 = ("".join(heat_seg(proposal[i], proposal[i + 1], 0.85)
-                      for i in range(len(proposal) - 1)) +
-              selection_line(shortest, opacity=0.10, dashed=True, halo=False, k=1.3) +
-              selection_line(threaded, k=1.3, halo=False) +
-              kite(a, START, 1.1) + kite(drop, SEL, 1.1) + kite(b, END, 1.1))
+    def rot(p):
+        dx, dy = p[0] - piv[0], p[1] - piv[1]
+        return (piv[0] + dx * ca - dy * sa, piv[1] + dx * sa + dy * ca)
 
-    body = [at(400, H / 2, stage1), arrow(W / 2 - 44, H / 2), at(1200, H / 2, stage2)]
-    add("08-algorithm-threading", "Threading a proposal", "".join(body))
+    rings = [[rot(p) for p in r] for b in blocks for r in b["rings"]]
+    f = fit_into(rings, (ART[0] + 40, ART[1] + 60, ART[2] - 40, ART[3] - 60))
+    mv = sorted(
+        ({"rings": [[list(f(rot(p))) for p in r] for r in b["rings"]], "c": f(rot(b["c"]))}
+         for b in ordered),
+        key=lambda b: b["c"][0],
+    )
+    # Heat tapers from the corridor's heart out to its tips — what peeling from
+    # the heaviest edge actually leaves behind.
+    def profile(i):
+        t = i / max(1, len(mv) - 1)
+        return round(0.32 + 0.63 * math.sin(math.pi * t) ** 0.7, 3)
+
+    art = "".join(block_heat(poly_d(b), profile(i), 2.0) for i, b in enumerate(mv))
+
+    spine = [b["c"] for b in mv]
+    ghosts = [spine[len(spine) // 4], spine[len(spine) // 2], spine[3 * len(spine) // 4]]
+    art += selection_line(spine, opacity=0.9, width=5)
+    art += "".join(kite(g, SEL, 1.3) for g in ghosts)
+    art += kite(spine[0], START, 1.4) + kite(spine[-1], END, 1.4)
+    art += proposal_icon(spine[len(spine) // 2 - 1], "walkways", diamond=True,
+                         heat=0.95, selected=True, scale=2.3)
+
+    add("08-top-proposal-route", "Route proposal", art +
+        text_block(TEXT_X, 120, "Top proposal · route", [
+            "Edges with **net ≥ 1** form a per-type",
+            "subgraph → **connected components**.",
+            "**Peel** a corridor from the heaviest edge,",
+            "taking the strongest arc off either tip.",
+            "Budget **2700 m + 660·√score**, cap 10.5 km",
+            "— support buys reach **sublinearly**.",
+            "Keep an extension only if routing still",
+            "**hands the stretch back** (**≥ 85 % of blocks**);",
+            "otherwise **pin a ghost waypoint** there.",
+            "**MAX_GHOST_WAYPOINTS = 3**, so a corridor",
+            "is always **≤ 5 waypoints** — shareable,",
+            "re-routable, **deterministic** on every client.",
+        ], size=19, leading=36))
 
 
 # ===========================================================================
-selection_frames()
-alg_blocks()
-alg_corridor()
-alg_heat()
-alg_threading()
+slide_basemap()
+slides_selection()
+slides_blocks()
+slide_route_proposal()
 
 for old in OUT.glob("*.svg"):
     old.unlink()
@@ -323,4 +324,3 @@ pages = "\n".join(
 {pages}
 """)
 print(f"wrote {len(panels)} panels to {OUT}")
-print("\n".join(n for n, _, _ in panels))

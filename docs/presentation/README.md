@@ -1,48 +1,48 @@
 # Presentation assets
 
-Slide images for the story in [docs/story.md](../story.md). No basemap, no
-captions — plain paper and the app's own drawing vocabulary (kite waypoints,
-the desire-path selection stroke, block polygons, the signed heat ramp, colours
-straight out of `globals.css` / `colors.ts` / `mapStyles.ts`).
+Eight slides for talking through City Edit's front end. Art on the right, a
+short scannable note on the left — bold words are the keywords to land on.
 
-- **`story/city-edit-story.pdf`** — all 8 panels, 16:9, one per page.
-- **`story/*.svg`** — the panels (vector, 1600×900); **`story/png/*.png`** at 2× (3200×1800).
+- **`story/city-edit-story.pdf`** — the deck, 16:9, one panel per page.
+- **`story/*.svg`** — the panels (vector, 1600×900); **`story/png/*.png`** at 2×.
 - **`story/deck.html`** — the page-per-panel wrapper used to print the PDF.
 
-## 01–04 · The selection, built up
+Everything drawn is the app's own asset, not an approximation:
 
-Four frames on the same transform, so they overlay exactly when clicked through:
-
-| | |
+| Panel element | Source in the client |
 |---|---|
-| `01-start` | the start waypoint alone |
-| `02-end` | the end waypoint — the route between them appears, derived |
-| `03-midpoint` | a midpoint inserted; the route re-derives through it (old route dashed) |
-| `04-midpoint-removed` | the midpoint deleted; the route snaps back |
+| basemap | CARTO `dark_nolabels` + `dark_only_labels` tiles (`mapStyles.ts`), fetched by `fetch_basemap.py` |
+| kite waypoints | `utils/kiteIcon.ts` + `.ascii-marker` CSS; mids are the selection colour (solid white) |
+| selection line | `RouteLayer` desire-path stroke |
+| block selection wash | `MapLibreBackground` `block-select` layers (fill 0.11 / casing 0.6) |
+| block heat | `blockFillPaint` / `blockLinePaint` ramps, evaluated in Python from the same stops |
+| top-proposal pin + diamond | `GraphLayer/voteTypeIcon.ts` paths, with a real `/icons/*.svg` glyph and the rank glow ring |
 
-Route geometry is real — shortest paths through the NYC walk graph — drawn on
-plain paper rather than over a map.
+## The slides
 
-## 05–08 · How the algorithms work
-
-Stage-by-stage schematics, read left→right (06 reads in a Z):
-
-| | |
-|---|---|
-| `05-algorithm-blocks` | **Block aggregation.** One street is many OSM edges (roadway, both sidewalks, crossing stubs); ten votes land on ten different edges → the block that owns those edges → one place, counted once per device per vote type. |
-| `06-algorithm-corridor` | **Corridor growth (route proposals).** The vote field → the heaviest edge is the seed → grow off either tip while support pays for the metres → the finished corridor expressed as ≤ 5 waypoints (2 anchors + 3 ghosts). |
-| `07-algorithm-heat` | **Signed heat.** Up-votes over down-votes: net positive rides the warm arm, net negative the cold arm, and a cancelled block carries no heat at all. |
-| `08-algorithm-threading` | **Threading a proposal.** Left: the shortest path ignores a nearby proposal. Right: drop a waypoint onto the proposal and the segment leaving it follows the corridor verbatim (old path dashed). |
+| | Art | Talks about |
+|---|---|---|
+| `01-basemap` | bare CARTO dark map | **Leaflet** as the camera; the `nolabels` / `only_labels` split |
+| `02-waypoint-start` | one start kite | the waypoint list as the whole UI, `?w=` serialization, snapping lat/lng onto the walk graph |
+| `03-waypoint-route` | start + end + route | **OSRM** foot/MLD routing, `annotations=nodes` → edge ids |
+| `04-waypoint-mid` | mid pulled out of the line | drag-to-insert, `TAP_MAX_MS`, sequencing, tap-to-delete |
+| `05-graph-to-blocks` | an X intersection: graph ghosted under 4 street blocks + 1 junction block | the clustering rules |
+| `06-block-heat` | the same blocks, lit | signed differential, log normalization, zero is invisible |
+| `07-top-proposal-point` | the square pin on the junction | PBTP: per-block winner, floor, spacing |
+| `08-top-proposal-route` | a heated corridor with its diamond + 5 waypoints | RBTP: peeling, budget, ghost waypoints |
 
 ## Rebuilding
 
 ```bash
-tools/presentation/render.sh        # panels + 2x PNGs + PDF
+tools/presentation/render.sh        # build → validate → 2x PNGs → PDF
 ```
 
-Scene geometry is cached in `tools/presentation/scene.json` (wide) and
-`scene_close.json` (a 240 m close-up including sidewalks and crossings).
-Regenerate from the graph — needs `server/osm_data/nyc` and the server venv:
+`render.sh` parses every panel before rendering: a raw `&` or `<` in slide copy
+produces an SVG the browser silently refuses to draw (blank PDF page).
+
+The basemap tile mosaic is cached as `tools/presentation/basemap.png`
+(`fetch_basemap.py` re-fetches it). Scene geometry is cached in `scene.json` /
+`scene_close.json`; regenerate from the graph with the server venv:
 
 ```bash
 server/env/bin/python tools/presentation/extract_scene.py --out scene.json

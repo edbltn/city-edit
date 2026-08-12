@@ -1,9 +1,13 @@
 """City Edit presentation panels — drawing kit.
 
-Draws the app's own front-end vocabulary — kite waypoints, the desire-path
-selection line, block polygons, the signed heat ramp — over a real slice of the
-NYC walk graph (Flatiron / Madison Square). One SVG per frame; frames in a set
-are pixel-aligned so they can be flipped through in a talk.
+Everything here is a direct restatement of something the app actually draws:
+
+  * kite waypoint markers          → utils/kiteIcon.ts + .ascii-marker CSS
+  * the desire-path selection line → RouteLayer's getDesirePathStyles
+  * block selection wash           → MapLibreBackground "block-select" layers
+  * block heat fill/outline        → MapLibreBackground blockFillPaint/blockLinePaint
+  * top-proposal pin + diamond     → GraphLayer/voteTypeIcon.ts geometry
+  * the basemap                    → CARTO dark tiles (fetch_basemap.py)
 """
 
 import base64
@@ -13,25 +17,64 @@ import math
 from pathlib import Path
 
 HERE = Path(__file__).parent
+REPO = HERE.parent.parent
 W, H = 1600.0, 900.0
 
 # ---------------------------------------------------------------------------
-# Palette — lifted from the running client (globals.css / colors.ts / mapStyles.ts)
+# Palette — lifted from the client (globals.css / colors.ts / mapStyles.ts)
 # ---------------------------------------------------------------------------
 PAPER = "#0d0d0d"
 INK = "#d4d4d4"
+HAIRLINE = "rgba(212,212,212,0.2)"
 START = "#00C4D4"
 END = "#DC343B"
 SEL = "#FFFFFF"
+ACCENT = "#E0A23A"
 HEAT = {
-    "halo": "rgb(96,56,120)",
-    "warm": "rgb(196,96,56)",
-    "hot": "rgb(232,154,54)",
-    "peak": "rgb(250,214,120)",
-    "cold": "rgb(74,84,190)",
-    "coldDeep": "rgb(92,118,250)",
+    "warm": (196, 96, 56),
+    "hot": (232, 154, 54),
+    "peak": (250, 214, 120),
+    "cold": (74, 84, 190),
+    "coldDeep": (92, 118, 250),
 }
 FONT = "RedHatMono, ui-monospace, Menlo, monospace"
+
+
+def rgb(c):
+    return f"rgb({c[0]},{c[1]},{c[2]})"
+
+
+def mix(a, b, t):
+    return tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
+
+
+def _lerp_stops(stops, v):
+    """MapLibre ["interpolate", ["linear"], h, ...] in Python."""
+    if v <= stops[0][0]:
+        return stops[0][1]
+    for (x0, y0), (x1, y1) in zip(stops, stops[1:]):
+        if v <= x1:
+            t = 0 if x1 == x0 else (v - x0) / (x1 - x0)
+            if isinstance(y0, tuple):
+                return mix(y0, y1, t)
+            return y0 + (y1 - y0) * t
+    return stops[-1][1]
+
+
+# heatTip(): peak mixed 68% toward the dark basemap's near-white tip.
+HEAT_TIP = mix(HEAT["peak"], (255, 252, 242), 0.68)
+
+HEAT_COLOR_STOPS = [
+    (-1.0, HEAT["coldDeep"]), (-0.001, HEAT["cold"]), (0.0, HEAT["warm"]),
+    (0.35, HEAT["hot"]), (0.7, HEAT["peak"]), (1.0, HEAT_TIP),
+]
+FILL_OPACITY_STOPS = [(-1.0, 0.72), (-0.001, 0.38), (0.0, 0.0), (0.001, 0.38), (1.0, 0.66)]
+LINE_WIDTH_STOPS = [(-1.0, 2.0), (-0.7, 1.4), (0.0, 1.1), (0.7, 1.4), (1.0, 2.0)]
+LINE_OPACITY_STOPS = [(-1.0, 1.0), (-0.001, 0.72), (0.0, 0.0), (0.001, 0.72), (1.0, 1.0)]
+
+
+def heat_color(h):
+    return rgb(_lerp_stops(HEAT_COLOR_STOPS, h))
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +93,6 @@ class Scene:
             self.adj.setdefault(e["u"], []).append((e["v"], d, e))
             self.adj.setdefault(e["v"], []).append((e["u"], d, e))
 
-    # -- lookup ------------------------------------------------------------
     def node_at(self, pt, named=None):
         best, bestd = None, 1e18
         for e in self.roads:
@@ -62,41 +104,19 @@ class Scene:
                     best, bestd = nid, d
         return best
 
-    def block_at(self, pt):
-        best, bestd = None, 1e18
-        for b in self.blocks.values():
-            d = math.dist(b["c"], pt)
-            if d < bestd:
-                best, bestd = b, d
-        return best
-
-    def edges_in_block(self, bid):
-        return [e for e in self.streets if e["bid"] == bid]
-
     def street_edges(self, name, bbox=None):
-        """Every edge of one named street inside a pixel bbox — a clean corridor,
-        the way a proposal reads, rather than a routed zigzag."""
         x0, y0, x1, y1 = bbox or (0, 0, W, H)
-        out = []
-        for e in self.roads:
-            if name.lower() not in e["n"].lower():
-                continue
-            if all(x0 <= p[0] <= x1 and y0 <= p[1] <= y1 for p in (e["a"], e["b"])):
-                out.append(e)
+        return [e for e in self.roads if name.lower() in e["n"].lower()
+                and all(x0 <= p[0] <= x1 and y0 <= p[1] <= y1 for p in (e["a"], e["b"]))]
+
+    def blocks_of(self, edges):
+        seen, out = set(), []
+        for e in edges:
+            if e["bid"] > 0 and e["bid"] not in seen and e["bid"] in self.blocks:
+                seen.add(e["bid"])
+                out.append(self.blocks[e["bid"]])
         return out
 
-    def bbox_of(self, edges):
-        xs = [p[0] for e in edges for p in (e["a"], e["b"])]
-        ys = [p[1] for e in edges for p in (e["a"], e["b"])]
-        return min(xs), min(ys), max(xs), max(ys)
-
-    def fit(self, edges, pad=1.55):
-        """Zoom factor + centre that frames a group of edges."""
-        x0, y0, x1, y1 = self.bbox_of(edges)
-        k = min(W / max(60.0, (x1 - x0) * pad), H / max(60.0, (y1 - y0) * pad))
-        return round(k, 3), ((x0 + x1) / 2, (y0 + y1) / 2)
-
-    # -- routing -----------------------------------------------------------
     def route(self, a: int, b: int):
         dist, prev = {a: 0.0}, {}
         pq, seen = [(0.0, a)], set()
@@ -112,8 +132,6 @@ class Scene:
                 if nd < dist.get(m, 1e18):
                     dist[m], prev[m] = nd, (n, e)
                     heapq.heappush(pq, (nd, m))
-        if a == b:
-            return [self.nodes[a]], []
         if b not in prev:
             return [], []
         pts, edges, cur = [self.nodes[b]], [], b
@@ -131,56 +149,53 @@ class Scene:
             edges += e
         return pts, edges
 
-    def blocks_of(self, edges):
-        seen, out = set(), []
-        for e in edges:
-            if e["bid"] > 0 and e["bid"] not in seen and e["bid"] in self.blocks:
-                seen.add(e["bid"])
-                out.append(self.blocks[e["bid"]])
-        return out
 
-    # -- basemap -----------------------------------------------------------
-    def basemap(self, block_outline=0.0, block_fill=0.0, dim=1.0, k=1.0, only_roads=False):
-        out = ['<g id="basemap">']
-        if block_outline or block_fill:
-            b = "".join(
-                f'<path d="{poly_d(bl)}" fill="{INK}" fill-opacity="{block_fill}" '
-                f'stroke="{INK}" stroke-opacity="{block_outline}" stroke-width="{1 / k:.2f}"/>'
-                for bl in self.blocks.values()
-            )
-            out.append(f"<g>{b}</g>")
-        if not only_roads:
-            minor = " ".join(path_d([e["a"], e["b"]]) for e in self.streets if e["c"] == "minor")
-            out.append(f'<path d="{minor}" fill="none" stroke="{INK}" '
-                       f'stroke-opacity="{0.115 * dim:.3f}" stroke-width="{1.2 / k:.2f}"/>')
-        road = " ".join(path_d([e["a"], e["b"]]) for e in self.roads)
-        out.append(f'<path d="{road}" fill="none" stroke="{INK}" stroke-opacity="{0.26 * dim:.3f}" '
-                   f'stroke-width="{2.0 / k:.2f}" stroke-linecap="round"/>')
-        out.append("</g>")
-        return "".join(out)
-
-
-def path_d(pts):
-    return "M " + " L ".join(f"{x:.1f} {y:.1f}" for x, y in pts)
+# ---------------------------------------------------------------------------
+# Geometry helpers
+# ---------------------------------------------------------------------------
+def path_d(pts, close=False):
+    return "M " + " L ".join(f"{x:.1f} {y:.1f}" for x, y in pts) + (" Z" if close else "")
 
 
 def poly_d(block):
-    return " ".join(
-        "M " + " L ".join(f"{x} {y}" for x, y in ring) + " Z" for ring in block["rings"]
-    )
+    return " ".join(path_d(ring, close=True) for ring in block["rings"])
 
 
-def zoom(body, cx, cy, k):
-    """Scale the map group about a scene point, keeping it centred in frame."""
-    tx, ty = W / 2 - cx * k, H / 2 - cy * k
-    return f'<g transform="translate({tx:.1f},{ty:.1f}) scale({k})">{body}</g>'
+def fit_into(groups, box):
+    """One shared transform mapping several point groups into a pixel box."""
+    x0b, y0b, x1b, y1b = box
+    pts = [p for g in groups for p in g]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    k = min((x1b - x0b) / max(1.0, x1 - x0), (y1b - y0b) / max(1.0, y1 - y0))
+    ox = (x0b + x1b) / 2 - (x0 + x1) / 2 * k
+    oy = (y0b + y1b) / 2 - (y0 + y1) / 2 * k
+    return lambda pt: (pt[0] * k + ox, pt[1] * k + oy)
+
+
+def at(cx, cy, body, scale=1.0):
+    return f'<g transform="translate({cx:.1f},{cy:.1f}) scale({scale})">{body}</g>'
+
+
+def line(a, b, color=INK, width=2.0, opacity=1.0, dash=None, cap="round"):
+    d = f' stroke-dasharray="{dash}"' if dash else ""
+    return (f'<path d="{path_d([a, b])}" fill="none" stroke="{color}" stroke-width="{width}" '
+            f'stroke-opacity="{opacity}" stroke-linecap="{cap}"{d}/>')
+
+
+def tick(pt, color=INK, r=4.0, opacity=0.95, ring=PAPER):
+    x, y = pt
+    return (f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{color}" fill-opacity="{opacity}" '
+            f'stroke="{ring}" stroke-width="1.4"/>')
 
 
 # ---------------------------------------------------------------------------
-# Front-end assets, redrawn as pure SVG
+# App assets, redrawn
 # ---------------------------------------------------------------------------
-def kite(pt, color, scale=1.0, ghost=False, opacity=1.0, struck=False):
-    """The app's waypoint marker: a ◆ head over a short stem, anchored at pt."""
+def kite(pt, color, scale=1.0, opacity=1.0):
+    """The waypoint marker: ◆ head over a short stem, anchored at pt
+       (utils/kiteIcon.ts + .ascii-marker). Mids are the selection colour —
+       solid white, same weight as start/end."""
     x, y = pt
     s = 12.0 * scale
     stem_h, stem_w = 14 * scale, 2.4 * scale
@@ -188,138 +203,106 @@ def kite(pt, color, scale=1.0, ghost=False, opacity=1.0, struck=False):
     ring = "rgba(0,0,0,0.72)"
     d = (f"M {x:.1f} {hy - s:.1f} L {x + s * 0.80:.1f} {hy:.1f} "
          f"L {x:.1f} {hy + s:.1f} L {x - s * 0.80:.1f} {hy:.1f} Z")
-    g = [f'<g opacity="{opacity}">']
-    if ghost:
-        g.append(f'<path d="{d}" fill="{PAPER}" fill-opacity="0.72" stroke="{ring}" stroke-width="4.2"/>')
-        g.append(f'<path d="{d}" fill="none" stroke="{color}" stroke-width="2.6" '
-                 f'stroke-dasharray="5 3.6"/>')
-        g.append(f'<rect x="{x - stem_w / 2:.1f}" y="{y - stem_h:.1f}" width="{stem_w:.1f}" '
-                 f'height="{stem_h:.1f}" fill="{color}" opacity="0.45" stroke="{ring}" stroke-width="1"/>')
-    else:
-        g.append(f'<path d="{d}" fill="{color}" stroke="{ring}" stroke-width="2.6"/>')
-        g.append(f'<rect x="{x - stem_w / 2:.1f}" y="{y - stem_h:.1f}" width="{stem_w:.1f}" '
-                 f'height="{stem_h:.1f}" fill="{color}" opacity="0.72" stroke="{ring}" stroke-width="1"/>')
-    if struck:
-        bx, by, r = x + s * 1.9, hy - s * 1.4, s * 0.62
-        g.append(f'<rect x="{bx - r * 1.7:.1f}" y="{by - r * 1.7:.1f}" width="{r * 3.4:.1f}" '
-                 f'height="{r * 3.4:.1f}" fill="{PAPER}" fill-opacity="0.85" stroke="{color}" '
-                 f'stroke-width="1.6" stroke-opacity="0.8"/>')
-        g.append(f'<path d="M {bx - r:.1f} {by - r:.1f} L {bx + r:.1f} {by + r:.1f} '
-                 f'M {bx + r:.1f} {by - r:.1f} L {bx - r:.1f} {by + r:.1f}" '
-                 f'stroke="{color}" stroke-width="2.4" stroke-opacity="0.95" stroke-linecap="round"/>')
+    return (f'<g opacity="{opacity}">'
+            f'<path d="{d}" fill="{color}" stroke="{ring}" stroke-width="2.6"/>'
+            f'<rect x="{x - stem_w / 2:.1f}" y="{y - stem_h:.1f}" width="{stem_w:.1f}" '
+            f'height="{stem_h:.1f}" fill="{color}" opacity="0.72" stroke="{ring}" stroke-width="1"/>'
+            f'</g>')
+
+
+def selection_line(pts, color=SEL, opacity=1.0, width=7.0, dashed=False):
+    """RouteLayer's desire-path stroke."""
+    dash = f' stroke-dasharray="{width * 1.5:.1f} {width * 1.3:.1f}"' if dashed else ""
+    return (f'<path d="{path_d(pts)}" fill="none" stroke="{color}" stroke-width="{width}" '
+            f'stroke-opacity="{opacity}" stroke-linecap="round" stroke-linejoin="round"{dash}/>')
+
+
+def block_selected(poly_path, color=SEL, w=1.5):
+    """The block-select wash: fill 0.11, casing 1.5 px @ 0.6 (MapLibreBackground)."""
+    return (f'<path d="{poly_path}" fill="{color}" fill-opacity="0.11" stroke="{color}" '
+            f'stroke-opacity="0.6" stroke-width="{w}" stroke-linejoin="round"/>')
+
+
+def block_heat(poly_path, h, width_scale=1.0):
+    """Block heat exactly as MapLibre paints it: one ramp colour, opacity and
+       outline width driven by |heat|. Zero paints nothing."""
+    if h == 0:
+        return ""
+    col = heat_color(h)
+    return (f'<path d="{poly_path}" fill="{col}" fill-opacity="{_lerp_stops(FILL_OPACITY_STOPS, h):.3f}" '
+            f'stroke="{col}" stroke-opacity="{_lerp_stops(LINE_OPACITY_STOPS, h):.3f}" '
+            f'stroke-width="{_lerp_stops(LINE_WIDTH_STOPS, h) * width_scale:.2f}" '
+            f'stroke-linejoin="round"/>')
+
+
+# -- top-proposal indicators (GraphLayer/voteTypeIcon.ts, 34x42 viewBox) -----
+PIN_OUTER = "M3,3 H31 V31 H23 L17,36 L11,31 H3 Z"
+PIN_INNER = "M5.25,5.25 H28.75 V28.75 H22.2 L17,33.1 L11.8,28.75 H5.25 Z"
+DIAMOND_OUTER = "M17,3 L31,17 L17,36 L3,17 Z"
+DIAMOND_INNER = "M17,6.2 L28,17.2 L17,32.2 L6,17.2 Z"
+
+
+def _icon_data_uri(name):
+    svg = (REPO / "client-react/public/icons" / f"{name}.svg").read_bytes()
+    return "data:image/svg+xml;base64," + base64.b64encode(svg).decode()
+
+
+def proposal_icon(pt, icon, diamond=False, heat=0.0, selected=False, scale=2.2):
+    """The top-proposal indicator: paper-filled pin (point) or diamond (route),
+       hairline outline, themed icon at 16 px, and the solid heat glow ring
+       whose width grows with rank (1.75 + heat*2.25 px)."""
+    outer = DIAMOND_OUTER if diamond else PIN_OUTER
+    inner = DIAMOND_INNER if diamond else PIN_INNER
+    hc = heat_color(max(heat, 0.001)) if heat > 0 else None
+    fill = rgb(mix((13, 13, 13), _lerp_stops(HEAT_COLOR_STOPS, max(heat, 0.001)), heat * 0.26)) \
+        if heat > 0 else PAPER
+    g = [f'<g transform="translate({pt[0]:.1f},{pt[1]:.1f}) scale({scale}) translate(-17,-36)">']
+    if hc:
+        g.append(f'<path d="{outer}" fill="none" stroke="{hc}" '
+                 f'stroke-width="{1.75 + heat * 2.25:.2f}" stroke-linejoin="round"/>')
+    g.append(f'<path d="{outer}" fill="{fill}"/>')
+    g.append(f'<path d="{outer}" fill="none" stroke="{SEL if selected else HAIRLINE}" '
+             f'stroke-width="1.5" stroke-linejoin="round"/>')
+    if selected:
+        g.append(f'<path d="{inner}" fill="none" stroke="{SEL}" stroke-width="1.5" '
+                 f'stroke-linejoin="round"/>')
+    g.append(f'<image href="{_icon_data_uri(icon)}" x="9" y="9" width="16" height="16"/>')
     g.append("</g>")
     return "".join(g)
 
 
-def selection_line(pts, color=SEL, opacity=1.0, dashed=False, k=1.0, halo=True):
-    """The desire-path selection polyline (RouteLayer's white stroke + halo)."""
-    d = path_d(pts)
-    dash = f' stroke-dasharray="{10 / k:.1f} {9 / k:.1f}"' if dashed else ""
-    glow = (f'<path d="{d}" fill="none" stroke="{color}" stroke-opacity="0.14" '
-            f'stroke-width="{18 / k:.1f}" stroke-linecap="round" stroke-linejoin="round"/>') if halo else ""
-    return f"""<g opacity="{opacity}" style="mix-blend-mode:screen">
-    {glow}
-    <path d="{d}" fill="none" stroke="{color}" stroke-width="{7 / k:.1f}" stroke-linecap="round" stroke-linejoin="round"{dash}/>
-  </g>"""
-
-
-def heat_edges(edges, intensity=1.0, sign=1, k=1.0):
-    """Cross-section heat, the way the canvas renderer strokes it: wide faint
-    halo, warm body, hot core, peak filament — screen-blended."""
-    if not edges or intensity <= 0:
-        return ""
-    if sign > 0:
-        stops = [(HEAT["halo"], 26, 0.40), (HEAT["warm"], 15, 0.70),
-                 (HEAT["hot"], 8.0, 0.90), (HEAT["peak"], 3.4, 1.0)]
-    else:
-        stops = [(HEAT["cold"], 24, 0.30), (HEAT["cold"], 13, 0.55),
-                 (HEAT["coldDeep"], 6.0, 0.80)]
-    d = " ".join(path_d([e["a"], e["b"]]) for e in edges)
-    body = "".join(
-        f'<path d="{d}" fill="none" stroke="{c}" stroke-width="{w * (0.5 + 0.5 * intensity) / k:.1f}" '
-        f'stroke-opacity="{o * (0.3 + 0.7 * intensity):.2f}" stroke-linecap="round" stroke-linejoin="round"/>'
-        for c, w, o in stops
-    )
-    return f'<g style="mix-blend-mode:screen">{body}</g>'
-
-
-def block_glow(block, color, opacity, k=1.0):
-    return (f'<path d="{poly_d(block)}" fill="{color}" fill-opacity="{opacity}" '
-            f'stroke="{color}" stroke-opacity="{min(1, opacity * 2.6):.2f}" stroke-width="{1.4 / k:.2f}" '
-            f'style="mix-blend-mode:screen"/>')
-
-
-def block_outline(block, color=SEL, opacity=0.9, k=1.0, dashed=False):
-    dash = f' stroke-dasharray="{7 / k:.1f} {5 / k:.1f}"' if dashed else ""
-    return (f'<path d="{poly_d(block)}" fill="none" stroke="{color}" stroke-opacity="{opacity}" '
-            f'stroke-width="{2.2 / k:.2f}"{dash}/>')
-
-
-def tick(pt, color=INK, r=4.0, opacity=0.95, k=1.0):
-    x, y = pt
-    return (f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r / k:.1f}" fill="{color}" fill-opacity="{opacity}" '
-            f'stroke="{PAPER}" stroke-width="{1.4 / k:.1f}"/>')
-
-
 # ---------------------------------------------------------------------------
-# Panel chrome — brand furniture (logo mark, hairlines, caption, step ticks)
+# Text — scannable, bold keywords. `**word**` renders bright + bold.
 # ---------------------------------------------------------------------------
-LOGO_CELLS = [
-    (0, 0, "x"), (1, 0, ""), (2, 0, ""), (3, 0, ""), (4, 0, ""), (5, 0, "x"),
-    (0, 1, "C"), (1, 1, "I"), (2, 1, "T"), (3, 1, "Y"), (4, 1, ""), (5, 1, ""),
-    (0, 2, ""), (1, 2, ""), (2, 2, "E"), (3, 2, "D"), (4, 2, "I"), (5, 2, "T"),
-    (0, 3, ""), (1, 3, "x"), (2, 3, ""), (3, 3, ""), (4, 3, ""), (5, 3, ""),
-]
+def _xml(t):
+    """Escape for SVG text — a raw & or < in a URL example breaks the whole file."""
+    return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def logo(x, y, cell=16.0, color=INK):
-    gap = cell * 0.25
-    out = [f'<g transform="translate({x},{y})">']
-    for col, row, kind in LOGO_CELLS:
-        cx, cy = col * (cell + gap), row * (cell + gap)
-        op = 0.16 if kind == "" else (0.3 if kind == "x" else 1.0)
-        out.append(f'<rect x="{cx:.1f}" y="{cy:.1f}" width="{cell}" height="{cell}" fill="none" '
-                   f'stroke="{color}" stroke-width="{cell * 0.075:.2f}" opacity="{op}"/>')
-        if kind == "x":
-            p = cell * 0.2
-            out.append(f'<path d="M {cx + p:.1f} {cy + p:.1f} L {cx + cell - p:.1f} {cy + cell - p:.1f} '
-                       f'M {cx + cell - p:.1f} {cy + p:.1f} L {cx + p:.1f} {cy + cell - p:.1f}" '
-                       f'stroke="{color}" stroke-width="{cell * 0.11:.2f}" opacity="0.7"/>')
-        elif kind:
-            out.append(f'<text x="{cx + cell / 2:.1f}" y="{cy + cell / 2 + 0.5:.1f}" '
-                       f'font-size="{cell * 0.66:.1f}" font-weight="600" fill="{color}" '
-                       f'text-anchor="middle" dominant-baseline="central">{kind}</text>')
-    out.append("</g>")
-    return "".join(out)
-
-
-def chrome(set_label, caption, step=None, steps=0, note=""):
-    out = [f'<rect x="0" y="0" width="{W}" height="170" fill="url(#scrimTop)"/>',
-           f'<rect x="0" y="{H - 260}" width="{W}" height="260" fill="url(#scrimBottom)"/>',
-           logo(64, 58, 15)]
-    out.append(f'<text x="{W - 64}" y="76" font-size="15" letter-spacing="5" '
-               f'fill="{INK}" fill-opacity="0.5" text-anchor="end">{set_label.upper()}</text>')
-    y = H - 92
-    out.append(f'<line x1="64" y1="{y - 46}" x2="380" y2="{y - 46}" stroke="{INK}" '
-               f'stroke-opacity="0.3" stroke-width="1"/>')
-    out.append(f'<text x="64" y="{y}" font-size="40" font-weight="600" letter-spacing="2.5" '
-               f'fill="{INK}">{caption.upper()}</text>')
-    if note:
-        out.append(f'<text x="64" y="{y + 34}" font-size="16" letter-spacing="1.2" '
-                   f'fill="{INK}" fill-opacity="0.45">{note}</text>')
-    for i in range(steps):
-        cx = W - 64 - (steps - 1 - i) * 24
-        cur = i == step
-        out.append(f'<rect x="{cx - 7.5}" y="{H - 106}" width="15" height="15" '
-                   f'fill="{INK if cur else "none"}" stroke="{INK}" stroke-width="1.3" '
-                   f'opacity="{0.95 if i <= (step or 0) else 0.22}"/>')
+def text_block(x, y, heading, lines, size=21, leading=41, dim=0.62):
+    out = [f'<text x="{x}" y="{y}" font-size="13.5" letter-spacing="5" fill="{INK}" '
+           f'fill-opacity="0.42">{_xml(heading.upper())}</text>',
+           f'<line x1="{x}" y1="{y + 18}" x2="{x + 430}" y2="{y + 18}" stroke="{INK}" '
+           f'stroke-opacity="0.22" stroke-width="1"/>']
+    ty = y + 62
+    for raw in lines:
+        spans = []
+        for i, part in enumerate(raw.split("**")):
+            if not part:
+                continue
+            if i % 2:
+                spans.append(f'<tspan font-weight="700" fill="{SEL}">{_xml(part)}</tspan>')
+            else:
+                spans.append(f'<tspan fill-opacity="{dim}">{_xml(part)}</tspan>')
+        out.append(f'<text x="{x}" y="{ty}" font-size="{size}" fill="{INK}" '
+                   f'xml:space="preserve">{"".join(spans)}</text>')
+        ty += leading
     return "".join(out)
 
 
 # ---------------------------------------------------------------------------
 # Panel assembly
 # ---------------------------------------------------------------------------
-REPO = HERE.parent.parent
 FONT_B64 = base64.b64encode(
     (REPO / "tools/merch/fonts/RedHatMono[wght].woff2").read_bytes()
 ).decode()
@@ -331,28 +314,19 @@ DEFS = f"""<defs>
       font-weight: 300 700; }}
     text {{ font-family: {FONT}; }}
   </style>
-  <linearGradient id="scrimTop" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="{PAPER}" stop-opacity="0.9"/>
+  <linearGradient id="scrimRight" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="{PAPER}" stop-opacity="0.78"/>
     <stop offset="1" stop-color="{PAPER}" stop-opacity="0"/>
   </linearGradient>
-  <linearGradient id="scrimBottom" x1="0" y1="0" x2="0" y2="1">
+  <linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1">
     <stop offset="0" stop-color="{PAPER}" stop-opacity="0"/>
-    <stop offset="0.5" stop-color="{PAPER}" stop-opacity="0.8"/>
-    <stop offset="1" stop-color="{PAPER}" stop-opacity="0.96"/>
+    <stop offset="0.45" stop-color="{PAPER}" stop-opacity="0.72"/>
+    <stop offset="1" stop-color="{PAPER}" stop-opacity="0.94"/>
   </linearGradient>
-  <linearGradient id="scrimLeft" x1="0" y1="0" x2="1" y2="0">
-    <stop offset="0" stop-color="{PAPER}" stop-opacity="0.9"/>
-    <stop offset="1" stop-color="{PAPER}" stop-opacity="0"/>
-  </linearGradient>
-  <radialGradient id="vignette" cx="0.5" cy="0.44" r="0.8">
-    <stop offset="0.5" stop-color="{PAPER}" stop-opacity="0"/>
-    <stop offset="1" stop-color="{PAPER}" stop-opacity="0.45"/>
-  </radialGradient>
 </defs>"""
 
 
 def panel(body: str) -> str:
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W:.0f}" height="{H:.0f}" '
             f'viewBox="0 0 {W:.0f} {H:.0f}">{DEFS}'
-            f'<rect width="{W}" height="{H}" fill="{PAPER}"/>{body}'
-            f'<rect width="{W}" height="{H}" fill="url(#vignette)" pointer-events="none"/></svg>')
+            f'<rect width="{W}" height="{H}" fill="{PAPER}"/>{body}</svg>')

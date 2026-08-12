@@ -9,6 +9,20 @@ SHELL_BIN="/Users/ericbolton/.cache/puppeteer/chrome-headless-shell/mac_arm-148.
 
 python3 "$HERE/build.py"
 
+# A raw & or < in slide copy silently produces an SVG the browser refuses to
+# render (the PDF page comes out blank), so parse every panel before shipping.
+python3 - "$OUT" <<'PY'
+import glob, sys, xml.dom.minidom
+bad = []
+for f in sorted(glob.glob(f"{sys.argv[1]}/*.svg")):
+    try:
+        xml.dom.minidom.parse(f)
+    except Exception as e:
+        bad.append(f"{f}: {e}")
+if bad:
+    sys.exit("invalid SVG:\n  " + "\n  ".join(bad))
+PY
+
 mkdir -p "$OUT/png"
 for f in "$OUT"/*.svg; do
   n="$(basename "$f" .svg)"
