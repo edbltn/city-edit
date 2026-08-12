@@ -59,6 +59,12 @@ function contrast(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
+/** The two `format` branches of the zoom-stepped text-field: [wide, close]. */
+function textFieldBranches(field: unknown): [unknown[], unknown[]] {
+  const e = field as unknown[]; // ["step", ["zoom"], wide, stop, close]
+  return [e[2] as unknown[], e[4] as unknown[]];
+}
+
 describe("proposal label expressions", () => {
   // The reason this file exists, same as its place-label sibling: MapLibre
   // allows ONE zoom curve per expression and rejects the whole layer for a
@@ -69,24 +75,45 @@ describe("proposal label expressions", () => {
     expect(countZoomCurves(PROPOSAL_PUCK_SIZE)).toBe(1);
   });
 
-  // The count line rides the label's ramp via font-scale rather than carrying a
-  // ramp of its own — which is what keeps the two-line label to one zoom curve.
-  it("keeps the two-line text-field free of zoom curves", () => {
-    expect(countZoomCurves(proposalTextField("rgb(1, 2, 3)"))).toBe(0);
+  // The count rides the claim's size ramp via font-scale rather than carrying a
+  // ramp of its own, so the whole field spends its single zoom curve on the
+  // step that drops the count at wide zoom.
+  it("spends exactly one zoom curve on the text-field", () => {
+    expect(countZoomCurves(proposalTextField("rgb(1, 2, 3)"))).toBe(1);
   });
 
   // Claim first, nearest the pin; count below it, smaller and dimmer. The other
   // order put the faintest text in the most crowded slot (directly under the
   // pin's tail) and made you read a number before knowing what it counted.
   it("puts the claim first and the count under it, dimmed and smaller", () => {
-    const field = proposalTextField("rgb(9, 9, 9)") as unknown[];
-    expect(field[0]).toBe("format");
-    expect(field[1]).toEqual(["get", "text"]);
-    expect(field[2]).toEqual({});
-    expect(field[3]).toBe("\n");
-    expect(field[5]).toEqual(["get", "count"]);
-    expect(field[6]).toEqual({ "font-scale": PROPOSAL_COUNT_SCALE, "text-color": "rgb(9, 9, 9)" });
+    const [wide, close] = textFieldBranches(proposalTextField("rgb(9, 9, 9)"));
+    expect(close[0]).toBe("format");
+    expect(close[1]).toEqual(["get", "text"]);
+    expect(close[2]).toEqual({});
+    expect(close[3]).toBe("\n");
+    expect(close[5]).toEqual(["get", "count"]);
+    expect(close[6]).toEqual({ "font-scale": PROPOSAL_COUNT_SCALE, "text-color": "rgb(9, 9, 9)" });
     expect(PROPOSAL_COUNT_SCALE).toBeLessThan(1);
+    // And the claim is never the thing dropped.
+    expect(wide[1]).toEqual(["get", "text"]);
+  });
+
+  // Dropping the count takes a wrapped label from three lines to two, which is
+  // a third off the collision box exactly where labels compete hardest.
+  it("drops the count at wide zoom and restores it further in", () => {
+    const [wide, close] = textFieldBranches(proposalTextField("rgb(9, 9, 9)"));
+    expect(JSON.stringify(wide)).not.toContain("count");
+    expect(JSON.stringify(close)).toContain("count");
+    expect(wide.filter((s) => s === "\n")).toHaveLength(0);
+    expect(close.filter((s) => s === "\n")).toHaveLength(1);
+  });
+
+  it("switches the count in on a MapLibre stop, not a Leaflet one", () => {
+    const field = proposalTextField("rgb(9, 9, 9)") as unknown[];
+    expect(field[0]).toBe("step");
+    expect(field[1]).toEqual(["zoom"]);
+    // Leaflet z13 is MapLibre z12 — the same −1 the minz filter compensates for.
+    expect(field[3]).toBe(12);
   });
 });
 
@@ -164,14 +191,26 @@ describe("the reveal schedule", () => {
     }
   });
 
-  it("lets only a headline pair speak at the city-wide view", () => {
-    expect(proposalRevealZoom(0)).toBe(12);
-    expect(proposalRevealZoom(1)).toBe(12);
-    expect(proposalRevealZoom(2)).toBeGreaterThan(12);
+  it("opens with a handful of headline claims at the city-wide view", () => {
+    expect(proposalRevealZoom(0)).toBe(11);
+    expect(proposalRevealZoom(3)).toBe(11);
+    expect(proposalRevealZoom(4)).toBeGreaterThan(11);
   });
 
-  it("has everything revealed by z15, so zooming in stops adding text", () => {
-    expect(proposalRevealZoom(999)).toBe(15);
+  it("has everything revealed by z14, so zooming in stops adding text", () => {
+    expect(proposalRevealZoom(999)).toBe(14);
+  });
+
+  // The schedule can only ever be a CEILING on how many labels are eligible;
+  // collision does the real thinning and can only remove. So an over-tight
+  // schedule silences proposals that had room, while a generous one cannot
+  // produce a wall of type — it just gives placement a wider pool to pick the
+  // best-ranked from. This pins the generous direction against a future
+  // "let's calm it down" that would reintroduce the original 2-at-z12.
+  it("lets a full screenful compete well before the deepest zooms", () => {
+    // By z13 every proposal either family can produce (20 each) is eligible.
+    expect(proposalRevealZoom(19)).toBeLessThanOrEqual(13);
+    expect(proposalRevealZoom(9)).toBeLessThanOrEqual(12);
   });
 
   // `minz` is a LEAFLET zoom and MapLibre's camera runs one lower. Comparing it

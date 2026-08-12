@@ -93,21 +93,27 @@ export const PROPOSAL_TEXT_MAX_WIDTH = 14;
 // ── Reveal schedule ─────────────────────────────────────────────────────────
 
 /** Leaflet zoom at which the strongest proposals are allowed to speak. */
-const REVEAL_BASE_Z = 12;
+const REVEAL_BASE_Z = 11;
 /** Reveal zoom of each successive rank band, as offsets from REVEAL_BASE_Z.
  *  Index = band, value = how many proposals that band and all before it hold. */
-const REVEAL_BANDS = [2, 5, 10];
+const REVEAL_BANDS = [4, 10, 20];
 
 /**
  * The Leaflet zoom at which the proposal ranked `rank` (0 = strongest) may show
  * its label.
  *
- * Collision alone would already thin these — and it does the fine work — but it
- * thins by geometry, not by importance, so at a city-wide view it would scatter
- * whichever dozen labels happened not to touch. A rank schedule makes the
- * coarse decision on purpose: two headline proposals at z12, five by z13, ten by
- * z14, everything from z15. Zooming in is then a steady reveal rather than a
- * wall of type that appears all at once.
+ * Collision thins by geometry, not by importance, so at a city-wide view it
+ * would scatter whichever labels happened not to touch. This makes the coarse
+ * decision on purpose — four headline claims at z11, ten by z12, twenty by z13,
+ * everything from z14.
+ *
+ * The schedule is DELIBERATELY generous, and was loosened once already (it began
+ * at two labels at z12). The reason is that the two mechanisms are not
+ * symmetrical in their failure: collision can only ever remove labels, so being
+ * permissive here cannot produce a wall of type — it just widens the pool
+ * collision gets to choose the best-ranked from. Being stingy, on the other
+ * hand, silences proposals that had room to speak. When in doubt, let more
+ * through and let placement arbitrate.
  */
 export function proposalRevealZoom(rank: number): number {
   for (let band = 0; band < REVEAL_BANDS.length; band++) {
@@ -184,12 +190,29 @@ export function formatProposalCount(net: number): string {
  * through FormatSectionOverride) is what lets the two carry different colors
  * inside that one symbol; `countColor` is per-STYLE, not per-feature, so it is
  * baked into the expression rather than shipped on every proposal.
+ *
+ * BELOW `PROPOSAL_COUNT_MIN_LEAFLET_ZOOM` the count is dropped and the claim
+ * stands alone. This is a placement decision, not a tidiness one: a wrapped
+ * claim plus a count is three lines, and dropping to two shrinks the collision
+ * box by about a third exactly where labels are competing hardest for room. It
+ * costs nothing that matters — at a city-wide view you are reading what the city
+ * is asking for, not comparing magnitudes, and the number is back the moment you
+ * lean in. One `step` on zoom, so the whole field still holds ONE zoom curve.
  */
+const PROPOSAL_COUNT_MIN_LEAFLET_ZOOM = 13;
+
 export function proposalTextField(countColor: string): maplibregl.ExpressionSpecification {
-  return [
+  const claim: unknown[] = ["format", ["get", "text"], {}];
+  const claimAndCount: unknown[] = [
     "format",
     ["get", "text"], {},
     "\n", {},
     ["get", "count"], { "font-scale": PROPOSAL_COUNT_SCALE, "text-color": countColor },
+  ];
+  return [
+    "step", ["zoom"],
+    claim,
+    // A MAPLIBRE zoom stop, one below its Leaflet counterpart.
+    PROPOSAL_COUNT_MIN_LEAFLET_ZOOM - 1, claimAndCount,
   ] as unknown as maplibregl.ExpressionSpecification;
 }
