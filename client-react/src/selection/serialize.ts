@@ -19,10 +19,17 @@
 // node clusters resolves to the same feature the user picked.
 //
 // Legacy links (?slat/slng/elat/elng[,vt]) from before the `w` param are still
-// read, so old shares keep working.
+// read, so old shares keep working. They are READ-ONLY: nothing in the app emits
+// them any more, and the URL mirror rewrites them to `w=` on the first render, so
+// a printed QR poster from the old format normalises itself the moment it lands.
+// Those links exist on paper and cannot be reissued — never stop parsing them.
+//
+// See docs/url-routing.md#query-param-inventory for the full param taxonomy
+// (which params are state and get mirrored, which are load-time input and get
+// consumed).
 
 import type { LatLng } from "../types";
-import type { Selection } from "./types";
+import type { Selection, SelWaypoint } from "./types";
 
 const PRECISION = 6;
 
@@ -57,9 +64,23 @@ function legacyPair(params: URLSearchParams, latKey: string, lngKey: string): Pa
   return parseWaypointToken(`${lat},${lng}`);
 }
 
+/**
+ * The minimum a caller must supply to serialize a selection. Structurally
+ * satisfied by a real {@link Selection}, so the live selection and a synthesized
+ * one (a share link, a sticker target) go through the SAME writer — there is
+ * exactly one place that knows how to spell a selection as a URL.
+ */
+export interface SerializableSelection {
+  /** Only `coords` is required; the runtime sugar a real SelWaypoint carries
+   *  (id / address / voteEdgeId) is accepted and ignored, so callers can pass a
+   *  live waypoint or a bare coordinate without ceremony. */
+  readonly waypoints: readonly (Partial<SelWaypoint> & { coords: LatLng })[];
+  readonly voteType?: string | null;
+}
+
 /** Serialize a selection to URL params (`w` + optional `vt`). Empty selection →
  *  no `w`. The caller merges these with the camera params. */
-export function selectionToParams(sel: Selection): URLSearchParams {
+export function selectionToParams(sel: SerializableSelection): URLSearchParams {
   const params = new URLSearchParams();
   if (sel.waypoints.length > 0) {
     params.set(
@@ -76,9 +97,20 @@ export function selectionToParams(sel: Selection): URLSearchParams {
   return params;
 }
 
-/** The param names this module owns — for stripping/replacing without touching the
- *  camera params (z/lat/lng). Includes the legacy point params. */
-export const SELECTION_PARAM_KEYS = ["w", "vt", "slat", "slng", "elat", "elng"];
+/** The canonical selection params — the only ones this module ever WRITES. */
+export const SELECTION_PARAM_KEYS = ["w", "vt"] as const;
+
+/** Pre-`w` selection params. Read forever (printed QR posters carry them), never
+ *  written; stripped once the mirror has rewritten them as `w`. */
+export const LEGACY_SELECTION_PARAM_KEYS = ["slat", "slng", "elat", "elng"] as const;
+
+/** Every param the selection consumes — what the URL mirror clears before
+ *  writing the canonical form, so a legacy link normalises instead of doubling
+ *  up. Camera params (z/lat/lng) are NOT here: they belong to mapViewState. */
+export const CONSUMED_SELECTION_PARAM_KEYS = [
+  ...SELECTION_PARAM_KEYS,
+  ...LEGACY_SELECTION_PARAM_KEYS,
+];
 
 export interface ParsedSelection {
   /** Ordered waypoints (start … end), each with an optional forced-corridor id. */

@@ -5,6 +5,7 @@
 // ==========================================================================
 
 import { getMapStyle, type MapStyle } from "./mapStyles";
+import { selectionToParams } from "./selection/serialize";
 
 export type InputMode = "route" | "point" | "both";
 
@@ -194,6 +195,14 @@ function isLocalDevHost(hostname: string): boolean {
 export interface ThemeNavState {
   zoom?: number;
   center?: { lat: number; lng: number };
+  /**
+   * The whole selection, in order: one point selects it, two are start/end, and
+   * three or more make the middle ones waypoints. Prefer this over start/end —
+   * it is the only form that can carry mids.
+   */
+  waypoints?: readonly { lat: number; lng: number }[];
+  /** Shorthand for a one- or two-point selection. Ignored when `waypoints` is
+   *  given (which is the same list, said properly). */
   start?: { lat: number; lng: number } | null;
   end?: { lat: number; lng: number } | null;
   /** Pre-selected vote type — opens the proposal modal on the selected point. */
@@ -201,7 +210,14 @@ export interface ThemeNavState {
 }
 
 
-/** Serialize map view + selected points to a query string (shared by hrefs). */
+/**
+ * Serialize map view + selection to a query string (shared by hrefs).
+ *
+ * Camera (z/lat/lng) and selection (w/vt) are separate concerns and are spelled
+ * by separate owners: the selection half goes through selectionToParams, the one
+ * writer of the canonical `w=` form, so a link built here is byte-identical to
+ * what the app's own URL mirror would produce for the same selection.
+ */
 function navStateToQuery(state?: ThemeNavState): string {
   if (!state) return "";
   const params = new URLSearchParams();
@@ -210,15 +226,16 @@ function navStateToQuery(state?: ThemeNavState): string {
     params.set("lat", state.center.lat.toFixed(5));
     params.set("lng", state.center.lng.toFixed(5));
   }
-  if (state.start) {
-    params.set("slat", state.start.lat.toFixed(5));
-    params.set("slng", state.start.lng.toFixed(5));
+
+  const points =
+    state.waypoints ??
+    [state.start, state.end].filter((p): p is { lat: number; lng: number } => !!p);
+  for (const [k, v] of selectionToParams({
+    waypoints: points.map((coords) => ({ coords })),
+    voteType: state.vt,
+  })) {
+    params.set(k, v);
   }
-  if (state.end) {
-    params.set("elat", state.end.lat.toFixed(5));
-    params.set("elng", state.end.lng.toFixed(5));
-  }
-  if (state.vt) params.set("vt", state.vt);
   return params.toString();
 }
 

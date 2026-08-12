@@ -32,7 +32,8 @@ import {
   fullIndexOf,
 } from "../selection/reducer";
 import { deriveStart, deriveEnd, deriveMids, deriveMidIds } from "../selection/selectors";
-import { selectionToParams, selectionFromParams } from "../selection/serialize";
+import { selectionFromParams } from "../selection/serialize";
+import { canonicalSearch } from "../selection/urlSync";
 import { resolveEffectiveVoteType } from "../selection/voteType";
 import type {
   LatLng,
@@ -1420,14 +1421,16 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // Writes ?w=…&vt=… via replaceState (never pushState — back/forward is the
   // in-app stack), and strips the camera + legacy point params consumed at load.
   // Other params (map, style, …) are preserved.
+  //
+  // This is also the legacy NORMALISER: it runs on mount, so a printed
+  // ?slat/?slng link is rewritten to the canonical ?w= form on first render —
+  // the selection is restored from the legacy params first (the useState seed
+  // above), so nothing is dropped, only respelled.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    for (const k of ["w", "vt", "slat", "slng", "elat", "elng", "z", "lat", "lng"]) {
-      url.searchParams.delete(k);
-    }
-    for (const [k, v] of selectionToParams(selection)) url.searchParams.set(k, v);
-    window.history.replaceState({}, "", url.toString());
+    const qs = canonicalSearch(window.location.search, selection);
+    const url = window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash;
+    window.history.replaceState({}, "", url);
   }, [selection]);
 
   // One-shot: reverse-geocode addresses for any URL-seeded start/end.

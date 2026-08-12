@@ -60,7 +60,14 @@ export function getMapViewState(): MapViewState {
   return { ...current };
 }
 
-const NAV_PARAMS = ["z", "lat", "lng", "slat", "slng", "elat", "elng", "vt"];
+/**
+ * The camera params. They are load-time INPUT, not state: consumed once by
+ * computeInitialMapView and then dropped from the address bar by the selection
+ * mirror, the same way ?src= and ?passcode= are consumed. The live camera is not
+ * mirrored back — panning the map does not rewrite the URL, so the address bar
+ * stays a description of the SELECTION.
+ */
+export const CAMERA_PARAM_KEYS = ["z", "lat", "lng"] as const;
 
 /** Zoom for a single deep-linked point (an intersection fills the screen). */
 const POINT_DEEP_LINK_ZOOM = 17;
@@ -129,37 +136,7 @@ export function getInitialMapView(): { lat: number; lng: number; zoom: number } 
   return computeInitialMapView(new URLSearchParams(window.location.search));
 }
 
-export function getInitialPoints(): {
-  start: { lat: number; lng: number } | null;
-  end: { lat: number; lng: number } | null;
-  vt: string | null;
-} {
-  if (typeof window === "undefined") return { start: null, end: null, vt: null };
-  const params = new URLSearchParams(window.location.search);
-  const slat = params.get("slat");
-  const slng = params.get("slng");
-  const elat = params.get("elat");
-  const elng = params.get("elng");
-  const vt = params.get("vt");
-
-  return {
-    start: slat && slng ? { lat: parseFloat(slat), lng: parseFloat(slng) } : null,
-    end: elat && elng ? { lat: parseFloat(elat), lng: parseFloat(elng) } : null,
-    vt: vt || null,
-  };
-}
-
-export function cleanNavParams() {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  let changed = false;
-  for (const key of NAV_PARAMS) {
-    if (url.searchParams.has(key)) {
-      url.searchParams.delete(key);
-      changed = true;
-    }
-  }
-  if (changed) {
-    window.history.replaceState({}, "", url.toString());
-  }
-}
+// getInitialPoints() / cleanNavParams() lived here and read the legacy
+// slat/slng/elat/elng params directly. Both were unreferenced once the canonical
+// selection landed: selectionFromParams is the one legacy reader now, and the
+// URL mirror in RouteContext is the one place that strips consumed params.

@@ -40,7 +40,7 @@ function AsciiSpinner() {
 
 export const ModeSwitcher = memo(function ModeSwitcher() {
   const current = useTheme();
-  const { start, end } = useRoute();
+  const { start, end, ghostWaypoints } = useRoute();
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [maps, setMaps] = useState<MapItem[]>([]);
@@ -86,14 +86,17 @@ export const ModeSwitcher = memo(function ModeSwitcher() {
     if (m.cityId !== currentCityId) return mapHref(m.slug);
 
     const { zoom, center } = getMapViewState();
+    // The whole ordered chain, not just the endpoints — a dragged route's mids
+    // are part of the selection and used to be dropped on the hop.
     const navState: ThemeNavState = {
       zoom,
       center,
-      start: start.coords ? { lat: start.coords.lat, lng: start.coords.lng } : null,
-      end: end.coords ? { lat: end.coords.lat, lng: end.coords.lng } : null,
+      waypoints: [start.coords, ...ghostWaypoints, end.coords].filter(
+        (c): c is { lat: number; lng: number } => !!c
+      ),
     };
     return mapHref(m.slug, navState);
-  }, [currentCityId, start.coords, end.coords]);
+  }, [currentCityId, start.coords, end.coords, ghostWaypoints]);
 
   const q = query.trim().toLowerCase();
   const visible = useMemo(() => {

@@ -16,13 +16,77 @@ that table whenever you add one.
 | Slug query | `cityedit.org/?map=ny-bike-test` | Equivalent fallback (used for API/WS calls via `withMap`) |
 | Subdomain | `bikepaths.cityedit.org` | A vanity host mapped to a map's slug in the DB |
 | Apex | `cityedit.org` | Landing page (map picker) |
-| Deep link | `/m/<slug>?z=&lat=&lng=&slat=&slng=&elat=&elng=&vt=` | A map plus camera + a pre-selected point/route + vote type |
+| Deep link | `/m/<slug>?w=lat,lng;lat,lng&vt=` | A map plus a pre-selected point/route + vote type |
 | Sticker scan | `cityedit.org/s/<code>` | A printed QR sticker; resolves to a deep link — see [Sticker codes](#sticker-codes-s-code) |
 
 The slug is the single source of truth. Subdomains are an optional alias that
 resolve **to** a slug; the camera/selection params ride along on either form.
 A *retired* slug (a renamed map's old name) is not a map but still resolves —
 see [Slug redirects](#slug-redirects-renamed-maps).
+
+### Query param inventory
+
+Every param the app understands, and — more usefully — which of the three
+lifecycles it has. Adding a param means picking one of these three, not inventing
+a fourth.
+
+| Param | Lifecycle | Meaning |
+|-------|-----------|---------|
+| `w` | **state** | The selection: `lat,lng[,f<proposalId>]` pairs joined by `;`, in order |
+| `vt` | **state** | The *requested* vote-type label |
+| `z`, `lat`, `lng` | **input** | Opening camera. Read once, then dropped |
+| `slat`, `slng`, `elat`, `elng` | **input (legacy)** | Pre-`w` start/end. Parsed forever, respelled as `w` |
+| `src` | **input** | Campaign tag → the MAPLOAD metric label |
+| `stk` | **input** | Sticker code awaiting a location |
+| `passcode` | **input** | One-shot unlock for a gated map |
+| `map`, `style`, `tab` | **config** | Which map, which style override, debug tab name |
+
+**State** params are *mirrored*: `RouteContext`'s URL effect rewrites them
+(`replaceState`, never `pushState` — back/forward is the in-app selection stack)
+on every selection change. **Input** params are *consumed*: read once at boot and
+stripped, so a re-shared link doesn't carry someone else's camera, campaign
+attribution, or unlock. **Config** params are passed through untouched.
+
+`canonicalSearch()` (`selection/urlSync.ts`) is the single function that applies
+this table; `selection/urlSync.test.ts` is its contract.
+
+#### The selection is an ordered list, and arity is the meaning
+
+`w` carries nothing but coordinates, in order. How many there are is what the
+selection *is* — there is no "kind" flag to disagree with the list:
+
+| Pairs | Selection |
+|-------|-----------|
+| 1 | A single point |
+| 2 | Start and end |
+| 3+ | Start, end, and the middle ones as waypoints |
+
+Everything else the UI shows — `start`/`end`/`mids`, the point-vs-route phase,
+whether a waypoint sits on a top proposal, the *effective* vote type — is derived
+from that list plus live vote data (`selection/types.ts`, `selection/selectors.ts`).
+So a link stays correct as votes change, and there is no second source of truth to
+drift.
+
+A pair may carry a third field, `f<proposalId>`: the segment *leaving* that
+waypoint is forcibly routed through a route proposal's corridor. This is
+navigable state (it changes the geometry), not display state, so it is the one
+non-coordinate thing `w` carries — and only the deterministic id, never the edge
+snapshot. A restored link re-resolves the live proposal and falls back to normal
+routing when it no longer exists.
+
+`vt` is written **only once the user actually picks a type** (commit `91ebb58`).
+Seeding the map's default into the selection made every plain map load grow a
+`vt=` the user never chose; the empty request is what lets
+`resolveEffectiveVoteType` fall back (top-voted type on the current path, else the
+map default). Do not reintroduce a default-stamping writer.
+
+#### Legacy links are physical
+
+`?slat/?slng/?elat/?elng` links are printed on QR posters that are already on
+walls. They cannot be reissued, so `selectionFromParams` parses them forever.
+Nothing emits them any more: the mirror's first pass rewrites the restored
+selection as `w=`, so the *printed* link keeps working while the *address bar*
+becomes canonical. `w` wins when both are present.
 
 ### Visit-source tracking (`?src=`)
 
@@ -86,8 +150,10 @@ If the resolved map has a `subdomain` and we're **not already on it** (and not o
 localhost), `subdomainRedirectUrl()` sends the visitor there — e.g. opening
 `cityedit.org/m/nyc-bikes` bounces to `bikepaths.cityedit.org`. The **query
 string is preserved**, so a shared deep link
-(`/m/nyc-bikes?slat=…&slng=…&vt=Add%20bike%20lane`) survives the hop and the
-selection is restored on the subdomain. No redirect loop: on the canonical host
+(`/m/nyc-bikes?w=…&vt=Add%20bike%20lane`, or a legacy `?slat=…&slng=…` one)
+survives the hop and the selection is restored on the subdomain — the redirect is
+a full page load on another host, so normalisation happens *there*, on the URL
+the visitor keeps. No redirect loop: on the canonical host
 `detectSubdomain()` already equals the map's subdomain, so the helper returns
 `null`.
 
@@ -124,9 +190,12 @@ could be loaded. The map's `style` column drives the basemap/accent/heat ramp.
 ## Link building (sharing)
 
 - `mapHref(slug, navState)` (`themes.ts`) → `/m/<slug>?…`. Used by `ModeSwitcher`
-  and `Landing`.
+  and `Landing`. Its selection half goes through `selectionToParams`, the same
+  writer the app's URL mirror uses, so a built link is byte-identical to what the
+  app would produce for that selection. Pass `waypoints` (the whole ordered
+  chain) rather than `start`/`end` when the selection may have mids.
 - `buildSelectionUrl(point, voteType)` (`utils/shareLink.ts`) → absolute
-  `/m/<slug>?z&lat&lng&slat&slng&vt` against `window.location.origin`. Because it
+  `/m/<slug>?z&lat&lng&w&vt` against `window.location.origin`. Because it
   uses the current origin, a link shared from `bikepaths.cityedit.org` stays on
   that host (no redirect), and a link shared from a slug URL redirects once to the
   canonical subdomain with params intact. **Proposal/selection sharing is slug +

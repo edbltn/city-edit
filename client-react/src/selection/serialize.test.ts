@@ -60,6 +60,58 @@ describe("selectionToParams", () => {
   });
 });
 
+// The whole point of the `w` list: arity IS the meaning. One pair is a point,
+// two are start/end, three or more make the middle ones waypoints. Nothing in
+// the URL says which — the reader derives it from the length.
+describe("selection arity round-trips", () => {
+  const cases: [string, number][] = [
+    ["a single point", 1],
+    ["a start/end route", 2],
+    ["a route with one mid", 3],
+    ["a route with several mids", 6],
+  ];
+
+  for (const [name, n] of cases) {
+    it(`round-trips ${name} (${n} pair${n === 1 ? "" : "s"})`, () => {
+      const sel: Selection = {
+        waypoints: Array.from({ length: n }, (_, i) =>
+          wp(40.7 + i / 1000, -74 + i / 1000, `w${i}`)
+        ),
+        voteType: "",
+      };
+      const parsed = selectionFromParams(selectionToParams(sel))!;
+      expect(parsed.waypoints).toHaveLength(n);
+      parsed.waypoints.forEach((c, i) => {
+        expect(c.coords.lat).toBeCloseTo(sel.waypoints[i].coords.lat, 6);
+        expect(c.coords.lng).toBeCloseTo(sel.waypoints[i].coords.lng, 6);
+      });
+      // Order is the encoding — reversing the list must not round-trip equal.
+      const reversed = selectionToParams({ waypoints: [...sel.waypoints].reverse() });
+      if (n > 1) expect(reversed.get("w")).not.toBe(selectionToParams(sel).get("w"));
+    });
+  }
+
+  it("keeps mids distinguishable from endpoints only by position", () => {
+    const p = new URLSearchParams("w=40.70,-74.00;40.71,-73.99;40.72,-73.98");
+    const parsed = selectionFromParams(p)!;
+    expect(parsed.waypoints[0].coords).toEqual({ lat: 40.7, lng: -74.0 });
+    expect(parsed.waypoints[parsed.waypoints.length - 1].coords).toEqual({
+      lat: 40.72,
+      lng: -73.98,
+    });
+    expect(parsed.waypoints.slice(1, -1)).toHaveLength(1);
+  });
+
+  it("carries a forced corridor on any mid, not just the first waypoint", () => {
+    const p = new URLSearchParams("w=40.7,-74;40.71,-73.99,fabc123;40.72,-73.98");
+    expect(selectionFromParams(p)!.waypoints).toEqual([
+      pw(40.7, -74),
+      pw(40.71, -73.99, "abc123"),
+      pw(40.72, -73.98),
+    ]);
+  });
+});
+
 describe("selectionFromParams", () => {
   it("returns null when there is nothing to restore", () => {
     expect(selectionFromParams(new URLSearchParams(""))).toBeNull();

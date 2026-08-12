@@ -82,18 +82,40 @@ describe("mapHref", () => {
     expect(href).toContain("lng=-74.00600");
   });
 
-  it("includes start point when provided", () => {
+  it("encodes a start point as a one-item w list", () => {
     const state: ThemeNavState = { start: { lat: 40.7000, lng: -74.0100 } };
-    const href = mapHref("nyc-bikepaths", state);
-    expect(href).toContain("slat=40.70000");
-    expect(href).toContain("slng=-74.01000");
+    const w = new URL(mapHref("nyc-bikepaths", state), "https://x").searchParams.get("w");
+    expect(w).toBe("40.700000,-74.010000");
   });
 
-  it("includes end point when provided", () => {
-    const state: ThemeNavState = { end: { lat: 40.7300, lng: -73.9900 } };
+  it("encodes start+end as an ordered two-item w list", () => {
+    const state: ThemeNavState = {
+      start: { lat: 40.7000, lng: -74.0100 },
+      end: { lat: 40.7300, lng: -73.9900 },
+    };
+    const w = new URL(mapHref("nyc-bikepaths", state), "https://x").searchParams.get("w");
+    expect(w).toBe("40.700000,-74.010000;40.730000,-73.990000");
+  });
+
+  it("encodes an explicit waypoint chain, mids and all", () => {
+    const state: ThemeNavState = {
+      waypoints: [
+        { lat: 40.70, lng: -74.01 },
+        { lat: 40.71, lng: -74.00 },
+        { lat: 40.73, lng: -73.99 },
+      ],
+    };
+    const w = new URL(mapHref("nyc-bikepaths", state), "https://x").searchParams.get("w");
+    expect(w).toBe("40.700000,-74.010000;40.710000,-74.000000;40.730000,-73.990000");
+  });
+
+  it("never emits the legacy point params", () => {
+    const state: ThemeNavState = {
+      start: { lat: 40.7, lng: -74.01 },
+      end: { lat: 40.73, lng: -73.99 },
+    };
     const href = mapHref("nyc-bikepaths", state);
-    expect(href).toContain("elat=40.73000");
-    expect(href).toContain("elng=-73.99000");
+    for (const k of ["slat", "slng", "elat", "elng"]) expect(href).not.toContain(k);
   });
 
   it("includes vote type when provided", () => {
@@ -102,7 +124,7 @@ describe("mapHref", () => {
     expect(href).toContain("vt=tree-planting");
   });
 
-  it("combines multiple state properties in the query string", () => {
+  it("combines camera and selection in the query string", () => {
     const state: ThemeNavState = {
       zoom: 14,
       center: { lat: 40.7000, lng: -74.0000 },
@@ -110,15 +132,14 @@ describe("mapHref", () => {
       end: { lat: 40.7100, lng: -73.9900 },
       vt: "bike-lane",
     };
-    const href = mapHref("nyc-bikepaths", state);
-    expect(href).toContain("z=14");
-    expect(href).toContain("lat=40.70000");
-    expect(href).toContain("lng=-74.00000");
-    expect(href).toContain("slat=40.69000");
-    expect(href).toContain("slng=-74.01000");
-    expect(href).toContain("elat=40.71000");
-    expect(href).toContain("elng=-73.99000");
-    expect(href).toContain("vt=bike-lane");
+    const params = new URL(mapHref("nyc-bikepaths", state), "https://x").searchParams;
+    expect(params.get("z")).toBe("14");
+    expect(params.get("lat")).toBe("40.70000");
+    expect(params.get("lng")).toBe("-74.00000");
+    expect(params.get("w")).toBe("40.690000,-74.010000;40.710000,-73.990000");
+    expect(params.get("vt")).toBe("bike-lane");
+    // Camera and selection are the whole vocabulary — nothing else rides along.
+    expect([...params.keys()].sort()).toEqual(["lat", "lng", "vt", "w", "z"]);
   });
 
   it("handles null state gracefully (no query string)", () => {
