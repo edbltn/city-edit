@@ -327,6 +327,100 @@ export const POI_COLORS: Record<Basemap, Record<string, string>> =
     ]),
   ) as Record<Basemap, Record<string, string>>;
 
+/** sRGB relative luminance (WCAG), for the contrast floor below. */
+function luminance([r, g, b]: [number, number, number]): number {
+  const lin = (v: number) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+/** WCAG contrast ratio between two colors. */
+function contrastRatio(a: [number, number, number], b: [number, number, number]): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * How much louder a proposal label must read than the loudest place label.
+ *
+ * This is the OTHER SIDE of POI_MUTE, and the two numbers only make sense read
+ * together. Place labels are pulled 58% toward grey so the top proposals can be
+ * the loudest thing on the map; until now the whole of that headroom was spent
+ * on the PINS. A pin says something is wanted somewhere — it cannot say what.
+ * Words can, so the words get the headroom.
+ *
+ * Expressed as a RATIO over the place labels rather than as an absolute target,
+ * because the thing being guaranteed is the hierarchy, not a number: whatever
+ * the POI tier is painted at, a proposal clears it. Raise it and the proposals
+ * shout louder; drop it to 1 and the two tiers merge.
+ */
+const PROPOSAL_CONTRAST_OVER_POI = 1.15;
+
+/** Ceiling on how far an accent may be dragged toward the ink to reach that
+ *  floor. Past this a color stops being the map's accent and starts being a
+ *  tint of the selection color — better a slightly quiet label that still wears
+ *  the theme than a legible one that belongs to no map in particular. */
+const PROPOSAL_CONTRAST_MAX_MIX = 0.55;
+
+/** How far the vote-count line recedes toward the paper, away from the claim it
+ *  belongs to. It is the supporting number, not the demand — subordinate on
+ *  both basemaps, since mixing toward `base` darkens on dark and lightens on
+ *  light. */
+const PROPOSAL_COUNT_FADE = 0.30;
+
+/** Text colors for the top-proposal label layer: the claim, its vote count,
+ *  and the halo that carries both over saturated heat. */
+export interface ProposalLabelColors {
+  label: string;
+  count: string;
+  halo: string;
+}
+
+/**
+ * The proposal-label palette for a style.
+ *
+ * The accent is used at FULL CHROMA wherever it can be — it is the color the
+ * heat wears, so a label in it reads as belonging to the heat it names, and
+ * these are the one text tier on the map allowed to be vivid. It is corrected
+ * only when it cannot carry the type on its own, and then only as far as
+ * needed: mixed toward the theme's `selection` ink until it clears the place
+ * labels by PROPOSAL_CONTRAST_OVER_POI.
+ *
+ * That one rule covers both basemaps in opposite directions, because
+ * `selection` is white on the dark themes and near-black on the light ones. It
+ * LIFTS the accents that are too dim on near-black (transit's #3B8EE0 sits at
+ * 5.7:1, under the place labels' own 7–8:1) and DEEPENS the ones too pale on
+ * paper (trees' #5FA052 manages 5.0:1 against 5.5:1). Accents that already
+ * clear the bar — the bike green at 11:1 — are left exactly as authored.
+ */
+export function proposalLabelColors(style: MapStyle): ProposalLabelColors {
+  const paper = parseColor(style.base);
+  const ink = parseColor(style.selection);
+  const loudestPoi = Math.max(
+    ...Object.values(POI_COLORS[style.basemap])
+      .map((c) => contrastRatio(parseColor(c), paper)),
+  );
+  const target = loudestPoi * PROPOSAL_CONTRAST_OVER_POI;
+
+  const accent = parseColor(style.accent);
+  let label = accent;
+  // Walk toward the ink in small steps and stop at the first mix that clears
+  // the floor. Coarser than a solve, but the search space is one dimension over
+  // eight authored accents, and stepping keeps the result stable under edits.
+  for (let mix = 0; contrastRatio(label, paper) < target && mix < PROPOSAL_CONTRAST_MAX_MIX;) {
+    mix = Math.min(mix + 0.05, PROPOSAL_CONTRAST_MAX_MIX);
+    label = mixRgb(accent, ink, mix);
+  }
+
+  return {
+    label: rgbToCss(label),
+    count: rgbToCss(mixRgb(label, paper, PROPOSAL_COUNT_FADE)),
+    halo: style.base,
+  };
+}
+
 /** Resolve a style id to its MapStyle, falling back to the default. */
 export function getMapStyle(id: string): MapStyle {
   return MAP_STYLES[id] ?? DEFAULT_MAP_STYLE;

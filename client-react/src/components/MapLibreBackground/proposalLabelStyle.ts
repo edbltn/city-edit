@@ -1,0 +1,195 @@
+/**
+ * Style expressions and text formatting for the TOP-PROPOSAL label layer — the
+ * words drawn on the map beside each proposal pin.
+ *
+ * Sibling of placeLabelStyle.ts, and bound by the same silent-failure rule: an
+ * expression may contain only ONE zoom-based `interpolate`/`step`, and breaking
+ * it makes MapLibre reject the whole layer as a *non-fatal* style error, so
+ * every proposal label simply stops rendering with nothing in the console but a
+ * warning. Both expressions below are guarded by `countZoomCurves` in the tests.
+ *
+ * Everything here is pure so the reveal schedule, the wrap, and the count
+ * formatting can be tested without a GL context.
+ */
+import type maplibregl from "maplibre-gl";
+
+/** The font stack baked by `npm run build:glyphs` — the ONLY SDF stack we
+ *  serve. There is no bold cut, so every step of the type hierarchy here is
+ *  made of size, color and halo. */
+export const PROPOSAL_LABEL_FONT = "Red Hat Mono Regular";
+
+// ── The pin footprint ───────────────────────────────────────────────────────
+// The proposal pin is a Leaflet divIcon, drawn in the OTHER renderer, on top of
+// the GL canvas. MapLibre cannot see it, so it would happily place a POI name
+// straight through one. These are voteTypeIcon.ts's SVG_W / SVG_H / TIP: a
+// 34×42 pin whose tail tip — the anchor, the point that sits on the location —
+// is at (17, 36). Relative to that anchor the pin body occupies y ∈ [−36, +6].
+// A transparent image of this size registered on the symbol keeps the pin's
+// footprint in MapLibre's collision index; see PROPOSAL_PUCK_OFFSET.
+export const PIN_W = 34;
+export const PIN_H = 42;
+const PIN_TIP_Y = 36;
+
+/** Bottom-anchored, the puck covers y ∈ [−42, 0]; the pin covers [−36, +6].
+ *  Shift it down by the difference so the two coincide exactly. */
+export const PROPOSAL_PUCK_OFFSET: [number, number] = [0, PIN_H - PIN_TIP_Y];
+
+/** Name of the transparent collision image registered via `addImage`. */
+export const PROPOSAL_PUCK_IMAGE = "proposal-pin-puck";
+
+/**
+ * Puck scale by zoom — a mirror of the `--indicator-scale` CSS variable that
+ * GraphLayer sets on the Leaflet container (pins ease smaller at BOTH zoom
+ * extremes, full size only around the middle). If these two drift apart the
+ * reserved footprint stops matching the pin actually drawn, and labels start
+ * either colliding with pins or standing off them by a visible margin.
+ *
+ * Stops are MAPLIBRE zooms — one below their Leaflet counterparts (ml 10 = the
+ * Leaflet 11 end of GraphLayer's ramp, ml 13/14 = Leaflet 14/15's full size,
+ * ml 19 = Leaflet 20's 0.5 floor).
+ */
+export const PROPOSAL_PUCK_SIZE = [
+  "interpolate", ["linear"], ["zoom"],
+  10, 0.7,
+  13, 1,
+  14, 1,
+  19, 0.5,
+] as unknown as maplibregl.ExpressionSpecification;
+
+/**
+ * Label type size, in px, ramped by zoom.
+ *
+ * Deliberately a clear step ABOVE the place labels (which run 8.6–10.5px): the
+ * two tiers sit side by side on the same map, and if a proposal read at the
+ * same size as a nail salon the hierarchy would rest on color alone. It stays
+ * modest in absolute terms because mono is wide and these strings are whole
+ * sentences, not names.
+ *
+ * The count line is not sized here — it rides this ramp scaled down by
+ * PROPOSAL_COUNT_SCALE inside the `format` expression, which keeps the whole
+ * label to ONE zoom curve.
+ */
+export const PROPOSAL_LABEL_TEXT_SIZE = [
+  "interpolate", ["linear"], ["zoom"],
+  11, 10.5,
+  15, 11.5,
+  18, 12.5,
+] as unknown as maplibregl.ExpressionSpecification;
+
+/** The count line's size relative to the label's. */
+export const PROPOSAL_COUNT_SCALE = 0.82;
+
+/**
+ * Wrap width, in characters (mono, so characters are uniformly wide).
+ *
+ * 14 is the widest setting that still keeps "Add protected bike lane" — about
+ * the longest label anyone actually writes — to two lines. Wider starts winning
+ * the wrap but losing the collision, because a long single-line block sweeps
+ * horizontally across neighbouring labels; narrower turns ordinary three-word
+ * demands into three-line paragraphs.
+ */
+export const PROPOSAL_TEXT_MAX_WIDTH = 14;
+
+// ── Reveal schedule ─────────────────────────────────────────────────────────
+
+/** Leaflet zoom at which the strongest proposals are allowed to speak. */
+const REVEAL_BASE_Z = 12;
+/** Reveal zoom of each successive rank band, as offsets from REVEAL_BASE_Z.
+ *  Index = band, value = how many proposals that band and all before it hold. */
+const REVEAL_BANDS = [2, 5, 10];
+
+/**
+ * The Leaflet zoom at which the proposal ranked `rank` (0 = strongest) may show
+ * its label.
+ *
+ * Collision alone would already thin these — and it does the fine work — but it
+ * thins by geometry, not by importance, so at a city-wide view it would scatter
+ * whichever dozen labels happened not to touch. A rank schedule makes the
+ * coarse decision on purpose: two headline proposals at z12, five by z13, ten by
+ * z14, everything from z15. Zooming in is then a steady reveal rather than a
+ * wall of type that appears all at once.
+ */
+export function proposalRevealZoom(rank: number): number {
+  for (let band = 0; band < REVEAL_BANDS.length; band++) {
+    if (rank < REVEAL_BANDS[band]) return REVEAL_BASE_Z + band;
+  }
+  return REVEAL_BASE_Z + REVEAL_BANDS.length;
+}
+
+/** Earliest Leaflet zoom any proposal label can appear at — the layer's own
+ *  `minzoom` is derived from this so MapLibre skips the layer entirely below it
+ *  instead of placing symbols the filter then throws away. */
+export const PROPOSAL_MIN_LEAFLET_ZOOM = REVEAL_BASE_Z;
+
+/**
+ * `minz` is a LEAFLET zoom — the units used by CONFIG.maxZoom, map URLs, the
+ * place-label builder and proposalRevealZoom above. MapLibre drives its camera
+ * one level lower (256px vs 512px tiles), hence the +1. Same idiom as
+ * `place-labels`; getting it wrong is a silent one-zoom-level offset.
+ */
+export const PROPOSAL_LABEL_FILTER = [
+  "<=", ["get", "minz"], ["+", ["zoom"], 1],
+] as unknown as maplibregl.FilterSpecification;
+
+// ── Text ────────────────────────────────────────────────────────────────────
+
+/**
+ * The claim, as drawn: the vote type's own label, uppercased.
+ *
+ * Uppercase is the tier marker. CARTO's street names and our place labels are
+ * both mixed case, so caps read instantly as "this is a different kind of
+ * thing" without needing a weight we do not have a glyph set for. The label is
+ * NOT abbreviated: every one of these strings starts with a verb ("Add" /
+ * "Improve" / "Widen" / "Fix"), and the verb is the entire difference between
+ * "Add bike lane" and "Improve bike lane".
+ */
+export function proposalLabelText(label: string): string {
+  return label.toLocaleUpperCase();
+}
+
+/**
+ * The vote count, as drawn.
+ *
+ * Signed, because the number IS a differential (up − down) and "+412" says that
+ * where "412" only implies it. Thousands are compacted: "+12.4k" holds the
+ * magnitude in a third of the width, and at this size an exact five-digit count
+ * is neither readable nor interesting. ASCII only — the SDF glyph ranges we
+ * bake stop at General Punctuation, so there is no "−" (U+2212) and no arrows.
+ */
+export function formatProposalCount(net: number): string {
+  const sign = net < 0 ? "-" : "+";
+  const n = Math.abs(Math.round(net));
+  if (n < 1000) return `${sign}${n}`;
+  const k = n / 1000;
+  // 10k and up loses the decimal: "+12.4k" and "+12k" read the same at a glance
+  // and the shorter one costs less width in a wrap budget of 14 characters.
+  return `${sign}${k < 10 ? k.toFixed(1).replace(/\.0$/, "") : Math.round(k)}k`;
+}
+
+/**
+ * The `text-field`: the claim, then the vote count under it.
+ *
+ * The claim goes FIRST — nearest the pin, where the eye lands after the pin
+ * itself, and where the tail tip visually points. Tried the other way round
+ * (count as an eyebrow, mirroring the ProposalCard's eyebrow-above-title), and
+ * on the map it is worse in two ways: it puts the smallest, faintest text in
+ * the tightest slot, the few pixels directly under the pin's tail where
+ * neighbouring labels crowd hardest; and it makes you read a number before you
+ * know what the number is about. Below the claim, the count reads as what it
+ * is — the evidence, after the demand.
+ *
+ * One `format` with two sections, not two layers: a single symbol means a
+ * single collision box, so the count can never place without its claim or drift
+ * away from it. The section's `text-color` override (MapLibre resolves these
+ * through FormatSectionOverride) is what lets the two carry different colors
+ * inside that one symbol; `countColor` is per-STYLE, not per-feature, so it is
+ * baked into the expression rather than shipped on every proposal.
+ */
+export function proposalTextField(countColor: string): maplibregl.ExpressionSpecification {
+  return [
+    "format",
+    ["get", "text"], {},
+    "\n", {},
+    ["get", "count"], { "font-scale": PROPOSAL_COUNT_SCALE, "text-color": countColor },
+  ] as unknown as maplibregl.ExpressionSpecification;
+}
