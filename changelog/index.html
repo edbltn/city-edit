@@ -29,6 +29,27 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-12-vote-type-toggle-latency.html">
+    <div class="date">2026-08-12</div>
+    <h2>The vote-type toggle, measured: one second down to one frame</h2>
+    <p>Hiding a vote type in the legend took about a second to show anything, for a change that
+    alters no votes at all. Measuring first — with a harness that records the click, the
+    synchronous handler, every idle callback, long tasks and the <em>first WebGL draw</em>, which is
+    the only honest signal for &ldquo;the map changed&rdquo; — found two separate stalls, and neither
+    was where the code's own comments predicted. The heat repaint was rewriting all
+    <strong>42,524</strong> lit blocks' feature-state because the filter had nudged one
+    normalization ceiling from 93 to 80; hiding a type that changes <em>fifteen</em> blocks repainted
+    the whole city. And the pins and corridors were being reclustered from scratch behind an idle
+    callback — <strong>~800ms</strong> of work whose result, per vote type, was byte-identical to
+    what was already on screen, because a corridor for one type never depended on whether its
+    neighbours in the legend were shown. Both are now caches keyed on a <strong>vote epoch</strong>
+    (not the server revision — the optimistic cast edits vote state in place without advancing it),
+    the visibility filter moved out of the O(edges) scans and into the cheap selection step that
+    follows them — still before selection, so hiding a type keeps promoting another type's
+    runner-up into the freed slot — and the whole toggle now runs synchronously in the click:
+    <strong>heat 273ms → 29ms, proposals 1,023ms → 12ms</strong>.</p>
+  </a>
+
   <a class="entry" href="./2026-08-11-qr-stickers.html">
     <div class="date">2026-08-11</div>
     <h2>Stickers: a QR code on a pole that learns where it is</h2>

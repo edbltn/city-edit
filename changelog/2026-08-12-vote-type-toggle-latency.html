@@ -1,0 +1,1477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The vote-type toggle, measured: one second down to one frame — 2026-08-12</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>The vote-type toggle, measured: one second down to one frame</h1>
+    <div class="dateline">2026-08-12 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#measure">Where the second actually went</a>
+<a href="#proposals">A hidden type does not change the other types&rsquo; answers</a>
+<a href="#epoch">Why the cache key is not the revision</a>
+<a href="#heat">A filter does not get to move the scale</a>
+<a href="#sync">Nothing left to defer</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Toggling a vote type off in the legend took about a second to show anything, for a change that alters no votes at all. Measuring it first found two separate stalls and neither was where the code&rsquo;s own comments predicted: the heat repaint was rewriting all 42,524 lit blocks&rsquo; feature-state because a filter had nudged one normalization ceiling from 93 to 80, and the pins and corridors were being reclustered from scratch through an idle callback &mdash; ~800ms of work whose result, per vote type, was identical to what was already on screen. Both are now caches keyed on a vote epoch, and the whole toggle runs synchronously in the click: <strong>heat 273ms &rarr; 29ms, proposals 1,023ms &rarr; 12ms</strong>.</p>
+
+  
+    <section class="card" id="measure">
+      <div class="tag">MEASUREMENT</div>
+      <h2>Where the second actually went</h2>
+      <h3>Symptom</h3>
+      <p>Clicking the eye on a vote type in the legend left the map unchanged for roughly a second before its pins, corridors and heat responded.</p>
+      <h3>Root cause</h3>
+      <ul><li>Instrumented the live app (<code>perf/vtoggle.mjs</code>, Playwright): the click handler itself is instant &mdash; the filter subscriber runs <strong>0.2&ndash;1.1ms</strong> after mousedown. Everything after it is the problem.</li>
+<li><strong>Stall 1, the heat (~273ms).</strong> The synchronous work is cheap (10&ndash;14ms), but it issued <strong>42,524 setFeatureState calls</strong>, and the MapLibre render that followed took <strong>244&ndash;268ms</strong> before the first GL draw. The paint layer diffs by a <code>denomKey</code> identity; hiding a type moved the negative arm&rsquo;s observed ceiling from 93 to 80, which changes every lit block&rsquo;s normalized heat, which forces a <code>removeFeatureState</code> + full rewrite.</li>
+<li><strong>Stall 2, the proposals (~700ms more).</strong> The subscriber queued <code>requestProposalsRecompute(true)</code>; the idle callback landed <strong>~340ms</strong> after the click (behind stall 1&rsquo;s render) and then reclustered every visible vote type: <strong>&ldquo;20 corridors in 729.4ms (12 types over 12 slices)&rdquo;</strong>. Total: pins and corridors settled at <strong>1,023ms</strong>.</li>
+<li>The controlled case is the one that gives it away: hiding <em>Add bike signal phase</em> changes <strong>15 blocks</strong> &mdash; and repainted 42,524 of them, then spent 729ms reclustering, to do it.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Two of the three leads held. Feature-state <em>was</em> being over-written, though not by the per-<code>sourcedata</code> storm of the old bug &mdash; that fix is intact; this was the full-vs-diff branch. Route recomputation <em>was</em> on the toggle path, and did account for most of the second.</li>
+<li>The third lead &mdash; that a visibility toggle should be paint-only, not a data rebuild &mdash; is exactly right, and is what the fix implements.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>perf/vtoggle.mjs</li>
+<li>perf/vtoggle-verify.mjs</li></ul>
+    </section>
+    
+
+    <section class="card" id="proposals">
+      <div class="tag">THE BIG ONE</div>
+      <h2>A hidden type does not change the other types&rsquo; answers</h2>
+      <h3>Symptom</h3>
+      <p>Hiding one of thirteen vote types reclustered all twelve survivors, ~800ms, to produce corridors byte-identical to the ones already on screen.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>createRouteProposalJob</code> took <code>isVisible</code> and used it to decide which types to <em>step</em>. Since a filter change meant a fresh job, every visible type was reclustered from zero &mdash; even though <code>job.step(type)</code> reads only that type&rsquo;s nets and the topology. There is no cross-type state in it.</li>
+<li><code>selectTopProposals</code> did the same: its O(edges) candidate scan (3.3M edges on the NYC bike map) applied <code>isVisible</code> inside the per-type loop, so a toggle rescanned the whole edge table to re-pick from a few dozen candidates.</li>
+<li>The filter is applied BEFORE selection on purpose &mdash; hiding a type must free its slot for another type&rsquo;s runner-up, not just delete a row from the finished list. That requirement is what made it look like it had to live inside the expensive part.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Split the scan from the selection.</strong> <code>computeWinnerCandidates</code> (O(edges), filter-independent) and <code>selectTopProposalsFrom</code> (steps 2&ndash;5, a few dozen items) with the visibility filter between them &mdash; still before selection, so the promotion semantics are unchanged.</li>
+<li><strong>Exported <code>rankRouteProposals</code></strong>, the job&rsquo;s assembly tail, so a caller holding cached per-type corridor arrays can re-rank a different SUBSET of them.</li>
+<li><strong>GraphLayer caches both, keyed on a vote epoch.</strong> A toggle re-ranks what it already has: <em>&ldquo;recompute: 20 corridors from cache in 0.1ms&rdquo;</em>.</li>
+<li><strong>Lazily, per type.</strong> Hidden types are never clustered, so a filtered map still recomputes faster, not slower; showing a type that was hidden at page load clusters that one type and nothing else.</li>
+<li>Both equivalences are pinned by tests, in both directions: re-ranking a cached subset equals recomputing with the type hidden, and the full cached set equals the unfiltered recompute.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/topProposals.ts</li>
+<li>client-react/src/components/GraphLayer/routeProposals.ts</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="epoch">
+      <div class="tag">CORRECTNESS</div>
+      <h2>Why the cache key is not the revision</h2>
+      <h3>Symptom</h3>
+      <p>&mdash;</p>
+      <h3>Root cause</h3>
+      <ul><li>The obvious key is <code>lastRevRef</code>, the server vote revision. It is wrong: the optimistic cast path (<code>applyMyVoteChange</code>) edits <code>edge_vote_types</code> in place and does NOT advance the revision &mdash; the server&rsquo;s delta corrects it later. A cache keyed on the revision would serve a derivation of vote data that has already changed under it.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Added <code>voteEpochRef</code>, bumped at every mutation of the in-memory vote state: full fetch, cached load, applied WS delta, and the local optimistic cast. Both proposal caches key on it, so a cast invalidates them the moment it lands.</li>
+<li>An in-flight sliced job cannot poison a newer epoch: a recompute cancels the previous job&rsquo;s token before touching the cache, and a slice checks its token first.</li>
+<li><code>publishVoteTypeSupport</code> is dropped from the toggle path entirely &mdash; the legend&rsquo;s net counts are unmasked by design, so a visibility toggle cannot move them.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="heat">
+      <div class="tag">THE PAINT</div>
+      <h2>A filter does not get to move the scale</h2>
+      <h3>Symptom</h3>
+      <p>Hiding a vote type rewrote every lit block&rsquo;s feature-state &mdash; 42,524 writes, ~250ms of render &mdash; to change as few as fifteen blocks.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>makeHeatNormalization</code> derives one log denominator per arm from the observed ceilings, and the paint layer treats that <code>denomKey</code> as the identity it diffs against. Correctly so: if the scale moves, every lit block&rsquo;s heat moves.</li>
+<li>But the ceilings are computed from the MASKED differentials, so a pure display filter perturbs them. Hiding the type that happened to hold the strongest opposition took the negative ceiling from 93 to 80 &mdash; a ~3% change in normalized heat, bought with a full citywide repaint.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>A <code>source === &quot;filter&quot;</code> broadcast now reuses the normalization already applied instead of building a new one, so the toggle stays on the diff path.</li>
+<li>It also reads better than the rescale did: the surviving proposals are measured against the same ruler as before, so what you are comparing is their support rather than a moving scale.</li>
+<li>Real vote changes still renormalize exactly as before &mdash; this is scoped to the filter broadcast, which the payload already labelled.</li>
+<li>Result on the heaviest toggle: <strong>full/42,524 writes &rarr; diff/6,416 writes</strong>, first GL draw <strong>287ms &rarr; 111ms</strong>. On a typical one, <strong>15 writes</strong> and <strong>29ms</strong>.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="sync">
+      <div class="tag">THE LAST 300ms</div>
+      <h2>Nothing left to defer</h2>
+      <h3>Symptom</h3>
+      <p>Even after the caches, routing the toggle through <code>requestIdleCallback(&hellip;, {timeout: 150})</code> added ~300ms of waiting to ~1ms of work.</p>
+      <h3>Root cause</h3>
+      <ul><li>The idle deferral exists because the recompute used to be an ~800ms scan that must not land mid-gesture. Once it is a re-rank of cached arrays, the queue is pure latency &mdash; and it queued behind the heat render, which is why the first idle callback measured at t=340ms.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The filter subscriber now runs heat, pins and corridors <strong>synchronously</strong>, in the same tick as the click.</li>
+<li>The one genuinely expensive case &mdash; showing a type never clustered this page load &mdash; still slices through idle time inside <code>recomputeRouteProposals</code>, so the sync call stays cheap there too.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Measured before and after on the same machine, same map (<code>nyc-bikes</code>: 3.3M edges, 287,352 blocks, 1.75M votes), same view, with <code>perf/vtoggle.mjs</code> &mdash; which records the mousedown, the synchronous handler, the block-votes broadcast, every idle callback, long tasks, the rAF timeline, and the first WebGL draw after the click (MapLibre only renders when something is dirty, so a draw call IS the repaint).</li>
+<li><strong>Improve bike lane</strong> (the heaviest): first GL draw <strong>287ms &rarr; 111ms</strong> (heat apply full/41,193 writes &rarr; diff/6,416); proposals settled <strong>970ms &rarr; 14ms</strong>.</li>
+<li><strong>Add bike signal phase</strong> (15 blocks change): first GL draw <strong>273ms &rarr; 29ms</strong> (full/42,524 writes &rarr; diff/15); proposals <strong>1,023ms &rarr; 12ms</strong>.</li>
+<li><strong>Add bike counter</strong> (no votes, nothing to repaint): proposals <strong>847ms &rarr; 9ms</strong>, and no GL draw at all &mdash; nothing changed, so nothing repaints.</li>
+<li>Long tasks over the 6s after the click: <strong>7&ndash;8 tasks totalling ~700&ndash;900ms &rarr; at most one, ~85ms</strong> (the MapLibre render of the blocks that genuinely changed).</li>
+<li>Also measured on <code>nyc-proposals</code> (per-map <code>topProposalMinNet=0</code>): 23&ndash;50ms to the repaint, proposals from cache in 0.0&ndash;0.2ms. And on <code>nyc-walkways</code>: 28&ndash;36ms, cache 0.0&ndash;0.1ms.</li>
+<li>Correctness, driven in the browser (<code>perf/vtoggle-verify.mjs</code>), all six checks pass: hiding drops that type&rsquo;s corridors and keeps the list full at 20 (freed slots backfilled &mdash; promotion still works); showing restores the <em>exact</em> baseline list, ids and scores; a cold reload with the type hidden yields the same list as the in-session hidden state; and showing a never-clustered type clusters it back to the exact baseline.</li>
+<li>Unit tests pin the equivalences that the caches rest on, in both families and both directions &mdash; including that hiding a type still promotes another type&rsquo;s runner-up into the freed slot. Full client suite: <strong>464 passed, 1 skipped</strong>. <code>npx tsc -b</code> clean.</li>
+<li>Not committed: the two integration files (<code>GraphLayer.tsx</code>, <code>MapLibreBackground.tsx</code>) hold another session&rsquo;s in-flight work interleaved with this change, so only the self-contained modules and the harnesses were committed &mdash; see the note at the end of the response.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-bikes</code>, open the Proposal dropdown, and click the eye next to <strong>Improve bike lane</strong> &mdash; the corridors and pins for that type should go in the same beat as the click, not after a pause.</li>
+<li>Toggle it back on and confirm the same corridors return in the same order &mdash; the cached re-rank has to be identical to the recompute, not merely similar.</li>
+<li>Toggle a type with no votes (<strong>Add bike counter</strong>): nothing at all should visibly change, and it should cost nothing.</li>
+<li>Watch the heat while toggling the busiest type: the rest of the map should keep its brightness rather than re-shading &mdash; that is the scale-pinning change, and it is the one visible behaviour difference.</li>
+<li>Cast a vote, then immediately toggle a type &mdash; the corridors should reflect the new vote, not a pre-cast cache. (This is what the vote epoch is for; the optimistic cast does not advance the server revision.)</li>
+<li>Reload with a type hidden, then show it: that one type is clustered on demand, so expect a short pause there specifically. Everything else stays instant.</li>
+<li>In a debug tab (<code>?tab=vt</code>), watch the console for <code>[proposals] recompute: N corridors from cache in 0.1ms</code> on each toggle and <code>[blocks] heat apply (diff): &hellip;</code> &mdash; a line reading <code>(full)</code> after a toggle means the scale pinning is not holding.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+            <span class="stat"><span class="d-add">+53</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeProposals.test.ts b/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+<span class="d-meta">index e185241..f82280b 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeProposals.test.ts</span>
+<span class="d-hunk">@@ -10,6 +10,8 @@ import {</span>
+<span class="d-ctx">   chooseAnchorOrder,</span>
+<span class="d-ctx">   chooseAnchorOrderBefore,</span>
+<span class="d-ctx">   computeRouteProposals,</span>
+<span class="d-add">+  createRouteProposalJob,</span>
+<span class="d-add">+  rankRouteProposals,</span>
+<span class="d-ctx">   corridorCoordinates,</span>
+<span class="d-ctx">   corridorFromEdgeIds,</span>
+<span class="d-ctx">   corridorSliceBetween,</span>
+<span class="d-hunk">@@ -1174,3 +1176,54 @@ describe(&quot;corridorSliceBetween (per-segment corridor resolution)&quot;, () =&gt; {</span>
+<span class="d-ctx">     expect(corridorSliceBetween(topo, stale, nodeLL(0), nodeLL(2))).toBeNull();</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;rankRouteProposals — the legend-toggle contract&quot;, () =&gt; {</span>
+<span class="d-add">+  // The whole visibility fast path rests on one property: a type&#x27;s corridors</span>
+<span class="d-add">+  // don&#x27;t depend on which OTHER types are shown. If that ever stops holding,</span>
+<span class="d-add">+  // GraphLayer&#x27;s route cache starts serving a stale map after a toggle.</span>
+<span class="d-add">+  const edges: [number, number][] = [</span>
+<span class="d-add">+    [0, 1], [1, 2], [2, 3],   // bike corridor</span>
+<span class="d-add">+    [4, 5], [5, 6], [6, 7],   // tree corridor</span>
+<span class="d-add">+  ];</span>
+<span class="d-add">+  const votes = evt(</span>
+<span class="d-add">+    [[BIKE, 20, 0]], [[BIKE, 20, 0]], [[BIKE, 20, 0]],</span>
+<span class="d-add">+    [[TREE, 9, 0]], [[TREE, 9, 0]], [[TREE, 9, 0]],</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+</span>
+<span class="d-add">+  function jobFor() {</span>
+<span class="d-add">+    const topo = makeTopo(edges);</span>
+<span class="d-add">+    return createRouteProposalJob(topo, buildNodeAdj(topo), {</span>
+<span class="d-add">+      edge_vote_types: votes, vote_type_legend: LEGEND,</span>
+<span class="d-add">+    }, { minRouteBlocks: 1 });</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;steps a type identically whether or not the other type is hidden&quot;, () =&gt; {</span>
+<span class="d-add">+    const all = jobFor();</span>
+<span class="d-add">+    const filtered = createRouteProposalJob(</span>
+<span class="d-add">+      makeTopo(edges), buildNodeAdj(makeTopo(edges)),</span>
+<span class="d-add">+      { edge_vote_types: votes, vote_type_legend: LEGEND },</span>
+<span class="d-add">+      { minRouteBlocks: 1, isVisible: (l) =&gt; l === &quot;Bike lane&quot; },</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+    expect(filtered.types).toEqual([BIKE]);</span>
+<span class="d-add">+    expect(all.step(BIKE)).toEqual(filtered.step(BIKE));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;re-ranking a cached subset equals recomputing with the type hidden&quot;, () =&gt; {</span>
+<span class="d-add">+    const job = jobFor();</span>
+<span class="d-add">+    const cached = new Map(job.types.map((li) =&gt; [li, job.step(li)]));</span>
+<span class="d-add">+</span>
+<span class="d-add">+    const fromCache = rankRouteProposals(</span>
+<span class="d-add">+      job.types.filter((li) =&gt; LEGEND[li] !== &quot;Tree&quot;).map((li) =&gt; cached.get(li)!),</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+    const fromScratch = compute(edges, votes, { isVisible: (l) =&gt; l !== &quot;Tree&quot; });</span>
+<span class="d-add">+</span>
+<span class="d-add">+    expect(fromCache.map((p) =&gt; p.id)).toEqual(fromScratch.map((p) =&gt; p.id));</span>
+<span class="d-add">+    expect(fromCache.map((p) =&gt; p.score)).toEqual(fromScratch.map((p) =&gt; p.score));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;re-ranking the full cached set equals the unfiltered recompute&quot;, () =&gt; {</span>
+<span class="d-add">+    const job = jobFor();</span>
+<span class="d-add">+    expect(rankRouteProposals(job.types.map(job.step)))</span>
+<span class="d-add">+      .toEqual(compute(edges, votes));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/routeProposals.ts</span>
+            <span class="stat"><span class="d-add">+42</span> / <span class="d-del">-29</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · proposals (RBTP)</span>
+        <span class="ctx-sum">Route-based top proposals: growing each vote type&#x27;s hot corridors out of the vote graph, then ranking them across types</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">routeProposals.ts</span>
+        <span class="ctx-sum">~1,440 LOC — corridor growth, peeling, dedupe, and the resumable per-type job</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">growCorridor / peelCorridors / groupBlocks</span><span class="ol-sum">unchanged — the clustering itself</span></li><li class="dim"><span class="ol-label">dedupeRoutes</span><span class="ol-sum">unchanged — same-type Jaccard suppression</span></li><li class="dim"><span class="ol-label">createRouteProposalJob: types / step</span><span class="ol-sum">unchanged — step(type) reads only that type&#x27;s nets</span></li><li class="changed"><span class="ol-label">createRouteProposalJob: finish</span><span class="ol-sum">now delegates to rankRouteProposals</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">rankRouteProposals (new, exported)</span><span class="ol-sum">the assembly tail, callable on any per-type subset</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">computeRouteProposals</span><span class="ol-sum">unchanged — the one-shot reference entry point</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>finish depended only on (perType, maxPerType, limit) — never on the job&#x27;s own state — which is what makes it liftable, and what makes cached per-type arrays re-rankable</li><li>The diversity pass and its backfill move out verbatim, so the ranking a toggle produces is the same one a recompute would</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/routeProposals.ts b/client-react/src/components/GraphLayer/routeProposals.ts</span>
+<span class="d-meta">index 8b61f46..30d52bf 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/routeProposals.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/routeProposals.ts</span>
+<span class="d-hunk">@@ -1374,36 +1374,49 @@ export function createRouteProposalJob(</span>
+<span class="d-ctx">     return dedupeRoutes(typeProposals, jaccardThreshold);</span>
+<span class="d-ctx">   };</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  const finish = (perType: RouteProposal[][]): RouteProposal[] =&gt; {</span>
+<span class="d-del">-    const byScore = (a: RouteProposal, b: RouteProposal) =&gt;</span>
+<span class="d-del">-      b.score - a.score || (a.id &lt; b.id ? -1 : a.id &gt; b.id ? 1 : 0);</span>
+<span class="d-del">-    const all = perType.flat();</span>
+<span class="d-del">-    all.sort(byScore);</span>
+<span class="d-del">-    // Diversity pass: walk by score, admitting at most `maxPerType` per vote</span>
+<span class="d-del">-    // type; leftover slots backfill from the skipped (5th-and-up of their type)</span>
+<span class="d-del">-    // by score. Final list re-sorted so callers still see pure score order.</span>
+<span class="d-del">-    const taken: RouteProposal[] = [];</span>
+<span class="d-del">-    const skipped: RouteProposal[] = [];</span>
+<span class="d-del">-    const perTypeCount = new Map&lt;number, number&gt;();</span>
+<span class="d-del">-    for (const p of all) {</span>
+<span class="d-del">-      const c = perTypeCount.get(p.legendIdx) ?? 0;</span>
+<span class="d-del">-      if (c &lt; maxPerType) {</span>
+<span class="d-del">-        perTypeCount.set(p.legendIdx, c + 1);</span>
+<span class="d-del">-        taken.push(p);</span>
+<span class="d-del">-      } else {</span>
+<span class="d-del">-        skipped.push(p);</span>
+<span class="d-del">-      }</span>
+<span class="d-del">-    }</span>
+<span class="d-del">-    const ranked = taken.slice(0, limit);</span>
+<span class="d-del">-    for (const p of skipped) {</span>
+<span class="d-del">-      if (ranked.length &gt;= limit) break;</span>
+<span class="d-del">-      ranked.push(p);</span>
+<span class="d-del">-    }</span>
+<span class="d-del">-    ranked.sort(byScore);</span>
+<span class="d-del">-    return ranked;</span>
+<span class="d-del">-  };</span>
+<span class="d-add">+  return { types, step, finish: (perType) =&gt; rankRouteProposals(perType, { maxPerType, limit }) };</span>
+<span class="d-add">+}</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  return { types, step, finish };</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * The assembly tail of the job: rank every type&#x27;s corridors into one capped,</span>
+<span class="d-add">+ * diversity-balanced list. Depends ONLY on the per-type results, never on how</span>
+<span class="d-add">+ * they were produced — so a caller holding cached per-type arrays (GraphLayer&#x27;s</span>
+<span class="d-add">+ * route cache) can re-rank a different SUBSET of them, which is exactly what a</span>
+<span class="d-add">+ * legend visibility toggle needs: drop the hidden types&#x27; arrays and re-rank.</span>
+<span class="d-add">+ * No clustering, no edge walk, microseconds.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function rankRouteProposals(</span>
+<span class="d-add">+  perType: RouteProposal[][],</span>
+<span class="d-add">+  opts: { maxPerType?: number; limit?: number } = {},</span>
+<span class="d-add">+): RouteProposal[] {</span>
+<span class="d-add">+  const maxPerType = opts.maxPerType ?? MAX_PER_TYPE;</span>
+<span class="d-add">+  const limit = opts.limit ?? DEFAULT_LIMIT;</span>
+<span class="d-add">+  const byScore = (a: RouteProposal, b: RouteProposal) =&gt;</span>
+<span class="d-add">+    b.score - a.score || (a.id &lt; b.id ? -1 : a.id &gt; b.id ? 1 : 0);</span>
+<span class="d-add">+  const all = perType.flat();</span>
+<span class="d-add">+  all.sort(byScore);</span>
+<span class="d-add">+  // Diversity pass: walk by score, admitting at most `maxPerType` per vote</span>
+<span class="d-add">+  // type; leftover slots backfill from the skipped (5th-and-up of their type)</span>
+<span class="d-add">+  // by score. Final list re-sorted so callers still see pure score order.</span>
+<span class="d-add">+  const taken: RouteProposal[] = [];</span>
+<span class="d-add">+  const skipped: RouteProposal[] = [];</span>
+<span class="d-add">+  const perTypeCount = new Map&lt;number, number&gt;();</span>
+<span class="d-add">+  for (const p of all) {</span>
+<span class="d-add">+    const c = perTypeCount.get(p.legendIdx) ?? 0;</span>
+<span class="d-add">+    if (c &lt; maxPerType) {</span>
+<span class="d-add">+      perTypeCount.set(p.legendIdx, c + 1);</span>
+<span class="d-add">+      taken.push(p);</span>
+<span class="d-add">+    } else {</span>
+<span class="d-add">+      skipped.push(p);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  const ranked = taken.slice(0, limit);</span>
+<span class="d-add">+  for (const p of skipped) {</span>
+<span class="d-add">+    if (ranked.length &gt;= limit) break;</span>
+<span class="d-add">+    ranked.push(p);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  ranked.sort(byScore);</span>
+<span class="d-add">+  return ranked;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /**</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/topProposals.test.ts</span>
+            <span class="stat"><span class="d-add">+44</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/topProposals.test.ts b/client-react/src/components/GraphLayer/topProposals.test.ts</span>
+<span class="d-meta">index a445d20..92d4634 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/topProposals.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/topProposals.test.ts</span>
+<span class="d-hunk">@@ -8,6 +8,8 @@ import {</span>
+<span class="d-ctx">   edgeMidpointResolver,</span>
+<span class="d-ctx">   applyTopProposalLimit,</span>
+<span class="d-ctx">   selectTopProposals,</span>
+<span class="d-add">+  selectTopProposalsFrom,</span>
+<span class="d-add">+  computeWinnerCandidates,</span>
+<span class="d-ctx">   topLabelForEdges,</span>
+<span class="d-ctx">   type EdgePosition,</span>
+<span class="d-ctx">   type VoteTypeWinner,</span>
+<span class="d-hunk">@@ -430,3 +432,45 @@ describe(&quot;selectTopProposals — block uniqueness + kind filter (full path)&quot;, ()</span>
+<span class="d-ctx">     expect(out.map((w) =&gt; w.label)).toEqual([&quot;Add bike parking&quot;]);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;selectTopProposalsFrom — the legend-toggle contract&quot;, () =&gt; {</span>
+<span class="d-add">+  // GraphLayer caches the candidate scan for a vote epoch and re-selects from</span>
+<span class="d-add">+  // it whenever the legend toggles. That is only sound while re-selecting from</span>
+<span class="d-add">+  // cached candidates gives exactly what a fresh filtered scan would.</span>
+<span class="d-add">+  const legend = [&quot;Bike&quot;, &quot;Tree&quot;, &quot;Bench&quot;];</span>
+<span class="d-add">+  const evt: [number, number, number][][] = [</span>
+<span class="d-add">+    [[0, 9, 0]],</span>
+<span class="d-add">+    [[1, 8, 0]],</span>
+<span class="d-add">+    [[2, 7, 0]],</span>
+<span class="d-add">+    [[0, 3, 0], [1, 2, 0]],</span>
+<span class="d-add">+  ];</span>
+<span class="d-add">+  const nodes: [number, number][] = [</span>
+<span class="d-add">+    [40.700, -74.00], [40.700, -74.00],</span>
+<span class="d-add">+    [40.710, -74.00], [40.710, -74.00],</span>
+<span class="d-add">+    [40.720, -74.00], [40.720, -74.00],</span>
+<span class="d-add">+    [40.730, -74.00], [40.730, -74.00],</span>
+<span class="d-add">+  ];</span>
+<span class="d-add">+  const edges: [number, number, string][] = [[0, 1, &quot;&quot;], [2, 3, &quot;&quot;], [4, 5, &quot;&quot;], [6, 7, &quot;&quot;]];</span>
+<span class="d-add">+  const data = { vote_type_legend: legend, edge_vote_types: evt, ...topo(nodes, edges) };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const hideTree = (l: string) =&gt; l !== &quot;Tree&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;re-selecting from cached candidates equals a fresh filtered scan&quot;, () =&gt; {</span>
+<span class="d-add">+    const candidates = computeWinnerCandidates(legend, evt, 6, undefined, 0);</span>
+<span class="d-add">+    expect(selectTopProposalsFrom(data, candidates, SALT, 10, 600, hideTree))</span>
+<span class="d-add">+      .toEqual(selectTopProposals(data, SALT, 10, 600, undefined, 0, hideTree));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;hiding a type frees its slot for another type&#x27;s runner-up&quot;, () =&gt; {</span>
+<span class="d-add">+    const candidates = computeWinnerCandidates(legend, evt, 6, undefined, 0);</span>
+<span class="d-add">+    const all = selectTopProposalsFrom(data, candidates, SALT, 2, 600);</span>
+<span class="d-add">+    const filtered = selectTopProposalsFrom(data, candidates, SALT, 2, 600, hideTree);</span>
+<span class="d-add">+    expect(all.map((w) =&gt; w.label)).toEqual([&quot;Bike&quot;, &quot;Tree&quot;]);</span>
+<span class="d-add">+    expect(filtered.map((w) =&gt; w.label)).toEqual([&quot;Bike&quot;, &quot;Bench&quot;]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;the candidate scan itself ignores visibility&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(computeWinnerCandidates(legend, evt, 6, undefined, 0).map((w) =&gt; w.label))</span>
+<span class="d-add">+      .toContain(&quot;Tree&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/topProposals.ts</span>
+            <span class="stat"><span class="d-add">+59</span> / <span class="d-del">-8</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · proposals (PBTP)</span>
+        <span class="ctx-sum">Point-based top proposals: which single hot edge per vote type earns a square pin, and how those pins are deduped and spaced</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">topProposals.ts</span>
+        <span class="ctx-sum">~430 LOC — the five selection steps, from an O(edges) scan down to a capped list</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">shuffleKey / compareWinners</span><span class="ol-sum">unchanged — deterministic per-session tiebreak</span></li><li class="changed"><span class="ol-label">computeVoteTypeWinners (step 1)</span><span class="ol-sum">now a thin wrapper: candidates + visibility filter</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">computeWinnerCandidates (new)</span><span class="ol-sum">the O(edges) scan, WITHOUT the visibility filter — the cacheable half</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">filterWinnersByVisibility (new)</span><span class="ol-sum">the filter, as its own step between scan and selection</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">topLabelForEdges</span><span class="ol-sum">unchanged — default vote type for a deep link</span></li><li class="dim"><span class="ol-label">dedupeWinnersByEdge / ByBlock (steps 2–3)</span><span class="ol-sum">unchanged — one pin per edge, one per block</span></li><li class="dim"><span class="ol-label">spaceOutWinners / applyTopProposalLimit (steps 4–5)</span><span class="ol-sum">unchanged — same-type NMS, then the cap</span></li><li class="changed"><span class="ol-label">selectTopProposals</span><span class="ol-sum">delegates to selectTopProposalsFrom over a fresh scan</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">selectTopProposalsFrom (new)</span><span class="ol-sum">steps 2–5 over a candidate set the caller supplies</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The split point is chosen so the filter still runs BEFORE selection — hiding a type has to free its slot for another type&#x27;s runner-up, which is why it could not simply be applied to the finished list</li><li>computeVoteTypeWinners keeps its signature (and its tests) and is now candidates + filter, so nothing outside had to change</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/topProposals.ts b/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-meta">index ca027e8..5ebc325 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-hunk">@@ -110,6 +110,30 @@ export function computeVoteTypeWinners(</span>
+<span class="d-ctx">   kindOf?: VoteTypeKindResolver,</span>
+<span class="d-ctx">   minNet = 0,</span>
+<span class="d-ctx">   isVisible?: VoteTypeVisibility</span>
+<span class="d-add">+): VoteTypeWinner[] {</span>
+<span class="d-add">+  const candidates = computeWinnerCandidates(legend, edgeVoteTypes, perTypeLimit, kindOf, minNet);</span>
+<span class="d-add">+  return isVisible ? candidates.filter((w) =&gt; isVisible(w.label)) : candidates;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Step 1 WITHOUT the legend-visibility filter — the part that costs an O(edges)</span>
+<span class="d-add">+ * scan, and the part that does not depend on which types are toggled on.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Visibility is a display gesture, not a vote-state change: which edge wins for</span>
+<span class="d-add">+ * a given type is identical whether its neighbours in the legend are shown or</span>
+<span class="d-add">+ * hidden. Keeping the scan separate lets the caller cache it for a vote state</span>
+<span class="d-add">+ * and re-select in microseconds when the legend toggles (GraphLayer&#x27;s PBTP</span>
+<span class="d-add">+ * candidate cache) instead of rescanning three million edges to redraw the same</span>
+<span class="d-add">+ * pins. Filter the result with `filterWinnersByVisibility` before steps 2–5 —</span>
+<span class="d-add">+ * pruning here rather than from the finished list is what lets a hidden type&#x27;s</span>
+<span class="d-add">+ * slot be taken by someone else&#x27;s runner-up.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function computeWinnerCandidates(</span>
+<span class="d-add">+  legend: string[],</span>
+<span class="d-add">+  edgeVoteTypes: [number, number, number][][],</span>
+<span class="d-add">+  perTypeLimit = 1,</span>
+<span class="d-add">+  kindOf?: VoteTypeKindResolver,</span>
+<span class="d-add">+  minNet = 0</span>
+<span class="d-ctx"> ): VoteTypeWinner[] {</span>
+<span class="d-ctx">   if (!legend.length || !edgeVoteTypes.length) return [];</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -132,7 +156,6 @@ export function computeVoteTypeWinners(</span>
+<span class="d-ctx">     const label = legend[legendIdx];</span>
+<span class="d-ctx">     if (!label) continue;</span>
+<span class="d-ctx">     if (kindOf &amp;&amp; kindOf(label) === &quot;route&quot;) continue;</span>
+<span class="d-del">-    if (isVisible &amp;&amp; !isVisible(label)) continue;</span>
+<span class="d-ctx">     edges.sort((a, b) =&gt; b.count - a.count);</span>
+<span class="d-ctx">     for (const { edgeIdx, count } of edges.slice(0, perTypeLimit)) {</span>
+<span class="d-ctx">       winners.push({ legendIdx, label, edgeIdx, count });</span>
+<span class="d-hunk">@@ -141,6 +164,14 @@ export function computeVoteTypeWinners(</span>
+<span class="d-ctx">   return winners;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/** Drop candidates whose vote type is toggled off in the legend. */</span>
+<span class="d-add">+export function filterWinnersByVisibility(</span>
+<span class="d-add">+  candidates: VoteTypeWinner[],</span>
+<span class="d-add">+  isVisible?: VoteTypeVisibility</span>
+<span class="d-add">+): VoteTypeWinner[] {</span>
+<span class="d-add">+  return isVisible ? candidates.filter((w) =&gt; isVisible(w.label)) : candidates;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /**</span>
+<span class="d-ctx">  * The single highest net-voted (up − down) vote-type label among a set of edges</span>
+<span class="d-ctx">  * (a path), or null when none has positive net support. Used to pick a sensible</span>
+<span class="d-hunk">@@ -357,14 +388,34 @@ export function selectTopProposals(</span>
+<span class="d-ctx">   isVisible?: VoteTypeVisibility</span>
+<span class="d-ctx"> ): VoteTypeWinner[] {</span>
+<span class="d-ctx">   if (!data) return [];</span>
+<span class="d-del">-  const perType = computeVoteTypeWinners(</span>
+<span class="d-del">-    data.vote_type_legend ?? [],</span>
+<span class="d-del">-    data.edge_vote_types ?? [],</span>
+<span class="d-del">-    TOP_PROPOSALS_PER_TYPE,</span>
+<span class="d-del">-    kindOf,</span>
+<span class="d-del">-    minNet,</span>
+<span class="d-del">-    isVisible</span>
+<span class="d-add">+  return selectTopProposalsFrom(</span>
+<span class="d-add">+    data,</span>
+<span class="d-add">+    computeWinnerCandidates(</span>
+<span class="d-add">+      data.vote_type_legend ?? [],</span>
+<span class="d-add">+      data.edge_vote_types ?? [],</span>
+<span class="d-add">+      TOP_PROPOSALS_PER_TYPE,</span>
+<span class="d-add">+      kindOf,</span>
+<span class="d-add">+      minNet</span>
+<span class="d-add">+    ),</span>
+<span class="d-add">+    salt, limit, minSpacingMeters, isVisible</span>
+<span class="d-ctx">   );</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Steps 2–5 over an already-scanned candidate set (`computeWinnerCandidates`).</span>
+<span class="d-add">+ * Everything here operates on a few dozen survivors, so re-running it when the</span>
+<span class="d-add">+ * legend&#x27;s visibility toggles is effectively free — that&#x27;s the whole point of</span>
+<span class="d-add">+ * splitting it out from the edge scan.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function selectTopProposalsFrom(</span>
+<span class="d-add">+  data: Pick&lt;GraphData, &quot;vote_type_legend&quot; | &quot;edge_vote_types&quot;&gt; &amp; GraphTopology,</span>
+<span class="d-add">+  candidates: VoteTypeWinner[],</span>
+<span class="d-add">+  salt: number,</span>
+<span class="d-add">+  limit: number,</span>
+<span class="d-add">+  minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M,</span>
+<span class="d-add">+  isVisible?: VoteTypeVisibility</span>
+<span class="d-add">+): VoteTypeWinner[] {</span>
+<span class="d-add">+  const perType = filterWinnersByVisibility(candidates, isVisible);</span>
+<span class="d-ctx">   const perEdge = dedupeWinnersByEdge(perType, salt);</span>
+<span class="d-ctx">   const perBlock = dedupeWinnersByBlock(</span>
+<span class="d-ctx">     perEdge, salt, (edgeIdx) =&gt; blockKeyOf(data, edgeIdx)</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">perf/vtoggle-verify.mjs</span>
+            <span class="stat"><span class="d-add">+119</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Perf harness</span>
+        <span class="ctx-sum">Playwright harnesses that drive the real dev app — this one checks correctness rather than speed</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">vtoggle-verify.mjs</span>
+        <span class="ctx-sum">~120 LOC — new: does the cached toggle equal the recompute?</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">boot</span><span class="ol-sum">load the map, wait for proposals, open the legend panel</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">hide / show / restore</span><span class="ol-sum">compare the published corridor lists by id and score</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">cold-cache reload</span><span class="ol-sum">reload with the type hidden, then show it</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The cold-cache case is the one a unit test cannot reach: it is the difference between &#x27;cached from this page load&#x27; and &#x27;never clustered&#x27;, and it is where a lazy per-type cache would go wrong if it went wrong</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/perf/vtoggle-verify.mjs b/perf/vtoggle-verify.mjs</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..4de5cc5</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/perf/vtoggle-verify.mjs</span>
+<span class="d-hunk">@@ -0,0 +1,119 @@</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Correctness companion to vtoggle.mjs: does a legend toggle still produce the</span>
+<span class="d-add">+ * SAME proposal list the old full-recompute path produced, and does the cache</span>
+<span class="d-add">+ * invalidate when votes actually change?</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Checks, on the live dev app:</span>
+<span class="d-add">+ *   1. hide a type      → its corridors/pins vanish, others survive</span>
+<span class="d-add">+ *   2. show it again    → the list returns to exactly the pre-hide list</span>
+<span class="d-add">+ *   3. reload with it hidden, then show → it is clustered on demand (cold cache)</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Usage: node vtoggle-verify.mjs --map nyc-bikes --label &quot;Improve bike lane&quot;</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+import { chromium } from &quot;playwright&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const args = Object.fromEntries(</span>
+<span class="d-add">+  process.argv.slice(2).reduce((acc, a, i, arr) =&gt; {</span>
+<span class="d-add">+    if (a.startsWith(&quot;--&quot;)) acc.push([a.slice(2), arr[i + 1] ?? &quot;true&quot;]);</span>
+<span class="d-add">+    return acc;</span>
+<span class="d-add">+  }, [])</span>
+<span class="d-add">+);</span>
+<span class="d-add">+const URL_BASE = args.url ?? &quot;http://localhost:3000&quot;;</span>
+<span class="d-add">+const MAP = args.map ?? &quot;nyc-bikes&quot;;</span>
+<span class="d-add">+const LABEL = args.label ?? &quot;Improve bike lane&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const INIT = () =&gt; {</span>
+<span class="d-add">+  window.__vt = { lines: [] };</span>
+<span class="d-add">+  const origLog = console.log.bind(console);</span>
+<span class="d-add">+  console.log = function (...a) {</span>
+<span class="d-add">+    if (a[0] === &quot;[proposals]&quot; &amp;&amp; typeof a[1] === &quot;string&quot; &amp;&amp; a[1].startsWith(&quot;recompute:&quot;)) {</span>
+<span class="d-add">+      window.__vt.lines.push({ t: +performance.now().toFixed(0), head: a[1], list: a[2] });</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    return origLog(...a);</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+};</span>
+<span class="d-add">+</span>
+<span class="d-add">+async function boot(page, url) {</span>
+<span class="d-add">+  await page.goto(url, { waitUntil: &quot;domcontentloaded&quot; });</span>
+<span class="d-add">+  await page.waitForFunction(</span>
+<span class="d-add">+    () =&gt; window.cityedit &amp;&amp; window.cityedit.dumpState().routeProposals !== undefined,</span>
+<span class="d-add">+    null, { timeout: 90000 }</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+  await page.waitForTimeout(5000);</span>
+<span class="d-add">+  // Open the legend panel.</span>
+<span class="d-add">+  await page.evaluate(() =&gt; {</span>
+<span class="d-add">+    const combo = document.querySelector(&quot;.vote-type-selector input, .vote-type-selector [role=combobox]&quot;)</span>
+<span class="d-add">+      || [...document.querySelectorAll(&quot;input&quot;)].find((i) =&gt; /Type to search|proposal/i.test(i.placeholder || &quot;&quot;));</span>
+<span class="d-add">+    if (combo) {</span>
+<span class="d-add">+      combo.dispatchEvent(new MouseEvent(&quot;mousedown&quot;, { bubbles: true, cancelable: true, view: window, button: 0 }));</span>
+<span class="d-add">+      combo.focus();</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+  await page.waitForTimeout(900);</span>
+<span class="d-add">+  const opened = await page.evaluate(() =&gt; document.querySelectorAll(&quot;button.vt-vis&quot;).length);</span>
+<span class="d-add">+  if (!opened) throw new Error(&quot;legend panel did not open&quot;);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+const toggle = (page, label) =&gt; page.evaluate((lbl) =&gt; {</span>
+<span class="d-add">+  const btn = [...document.querySelectorAll(&quot;button.vt-vis&quot;)]</span>
+<span class="d-add">+    .find((b) =&gt; (b.getAttribute(&quot;aria-label&quot;) || &quot;&quot;).includes(lbl));</span>
+<span class="d-add">+  if (!btn) return &quot;not found&quot;;</span>
+<span class="d-add">+  btn.dispatchEvent(new MouseEvent(&quot;mousedown&quot;, { bubbles: true, cancelable: true, view: window, button: 0 }));</span>
+<span class="d-add">+  return &quot;ok&quot;;</span>
+<span class="d-add">+}, label);</span>
+<span class="d-add">+</span>
+<span class="d-add">+const lastList = (page) =&gt; page.evaluate(() =&gt; {</span>
+<span class="d-add">+  const l = window.__vt.lines[window.__vt.lines.length - 1];</span>
+<span class="d-add">+  return l ? l.list : null;</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+const browser = await chromium.launch({ headless: true });</span>
+<span class="d-add">+const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });</span>
+<span class="d-add">+await page.addInitScript(INIT);</span>
+<span class="d-add">+</span>
+<span class="d-add">+await boot(page, `${URL_BASE}/m/${MAP}?tab=vtverify`);</span>
+<span class="d-add">+const baseline = await lastList(page);</span>
+<span class="d-add">+</span>
+<span class="d-add">+const r1 = await toggle(page, LABEL);</span>
+<span class="d-add">+if (r1 !== &quot;ok&quot;) throw new Error(&quot;toggle failed: &quot; + r1);</span>
+<span class="d-add">+await page.waitForTimeout(2500);</span>
+<span class="d-add">+const hidden = await lastList(page);</span>
+<span class="d-add">+</span>
+<span class="d-add">+await toggle(page, LABEL);</span>
+<span class="d-add">+await page.waitForTimeout(2500);</span>
+<span class="d-add">+const restored = await lastList(page);</span>
+<span class="d-add">+</span>
+<span class="d-add">+// Cold cache: reload with the type hidden (sessionStorage survives reload in</span>
+<span class="d-add">+// the same tab), then show it — it was never clustered this page load.</span>
+<span class="d-add">+await toggle(page, LABEL);</span>
+<span class="d-add">+await page.waitForTimeout(1500);</span>
+<span class="d-add">+await boot(page, `${URL_BASE}/m/${MAP}?tab=vtverify`);</span>
+<span class="d-add">+const coldHidden = await lastList(page);</span>
+<span class="d-add">+const t0 = Date.now();</span>
+<span class="d-add">+await toggle(page, LABEL);</span>
+<span class="d-add">+await page.waitForTimeout(4000);</span>
+<span class="d-add">+const coldShown = await lastList(page);</span>
+<span class="d-add">+const coldMs = Date.now() - t0;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const has = (list, label) =&gt; (list ?? []).some((s) =&gt; s.startsWith(label + &quot;#&quot;));</span>
+<span class="d-add">+</span>
+<span class="d-add">+console.log(JSON.stringify({</span>
+<span class="d-add">+  label: LABEL,</span>
+<span class="d-add">+  baseline,</span>
+<span class="d-add">+  hidden,</span>
+<span class="d-add">+  restored,</span>
+<span class="d-add">+  coldHidden,</span>
+<span class="d-add">+  coldShown,</span>
+<span class="d-add">+  checks: {</span>
+<span class="d-add">+    &quot;hidden list drops the type&quot;: !has(hidden, LABEL),</span>
+<span class="d-add">+    &quot;hidden list keeps other types&quot;: (hidden ?? []).length &gt; 0,</span>
+<span class="d-add">+    &quot;showing restores the exact baseline&quot;: JSON.stringify(restored) === JSON.stringify(baseline),</span>
+<span class="d-add">+    &quot;cold-load hidden list matches the in-session hidden list&quot;:</span>
+<span class="d-add">+      JSON.stringify(coldHidden) === JSON.stringify(hidden),</span>
+<span class="d-add">+    &quot;cold show clusters the type back in&quot;: has(coldShown, LABEL),</span>
+<span class="d-add">+    &quot;cold show restores the exact baseline&quot;: JSON.stringify(coldShown) === JSON.stringify(baseline),</span>
+<span class="d-add">+  },</span>
+<span class="d-add">+  coldShowMs: coldMs,</span>
+<span class="d-add">+  firstToggle: r1,</span>
+<span class="d-add">+}, null, 1));</span>
+<span class="d-add">+await browser.close();</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">perf/vtoggle.mjs</span>
+            <span class="stat"><span class="d-add">+215</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Perf harness</span>
+        <span class="ctx-sum">Playwright harnesses that drive the real dev app and report timings — alongside the existing measure.mjs pan/zoom harness</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">vtoggle.mjs</span>
+        <span class="ctx-sum">~190 LOC — new: click-to-pixels latency for a legend toggle</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">INIT (addInitScript)</span><span class="ol-sum">frame timeline, long tasks, idle callbacks, WebGL draws, dlog capture</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">summarize</span><span class="ol-sum">handler / sync / heat apply / first GL draw / settle / proposals</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">driver loop</span><span class="ol-sum">hide then show each label, one measurement window each</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The first GL draw is the ground truth for &#x27;the map changed&#x27;: MapLibre renders only when dirty, and feature-state is not introspectable from outside</li><li>Runs headless on purpose — an occluded Chrome window freezes rAF, which silently zeroes every frame-based measurement</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/perf/vtoggle.mjs b/perf/vtoggle.mjs</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..a7d8d7b</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/perf/vtoggle.mjs</span>
+<span class="d-hunk">@@ -0,0 +1,215 @@</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Vote-type visibility toggle latency harness.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Answers one question: when you click the legend&#x27;s eye on a vote type, how</span>
+<span class="d-add">+ * long until the map actually changes — and where does that time go?</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Reports per toggle:</span>
+<span class="d-add">+ *   handlerMs      : mousedown → the filter subscriber running (React + store)</span>
+<span class="d-add">+ *   syncMs         : the whole synchronous mousedown handler (heat re-derive +</span>
+<span class="d-add">+ *                    feature-state writes happen inside it)</span>
+<span class="d-add">+ *   heatApplyMs    : the block-votes dispatch (topProposalDiffs → MapLibre</span>
+<span class="d-add">+ *                    setFeatureState), plus full-vs-diff and the write count</span>
+<span class="d-add">+ *   firstPaintMs   : mousedown → the first rAF that lands after the writes</span>
+<span class="d-add">+ *   settleMs       : mousedown → frames back under 20ms for 5 straight frames</span>
+<span class="d-add">+ *   longFrames     : every frame gap &gt; 40ms in the 6s after the click</span>
+<span class="d-add">+ *   proposalsMs    : mousedown → &quot;[proposals] recompute: … corridors&quot; console line</span>
+<span class="d-add">+ *   longTasks      : main-thread tasks &gt; 50ms in the window</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Usage:</span>
+<span class="d-add">+ *   node vtoggle.mjs --map nyc-bikes --label &quot;Improve bike lane&quot; [--headed]</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+import { chromium } from &quot;playwright&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const args = Object.fromEntries(</span>
+<span class="d-add">+  process.argv.slice(2).reduce((acc, a, i, arr) =&gt; {</span>
+<span class="d-add">+    if (a.startsWith(&quot;--&quot;)) acc.push([a.slice(2), arr[i + 1] ?? &quot;true&quot;]);</span>
+<span class="d-add">+    return acc;</span>
+<span class="d-add">+  }, [])</span>
+<span class="d-add">+);</span>
+<span class="d-add">+const URL_BASE = args.url ?? &quot;http://localhost:3000&quot;;</span>
+<span class="d-add">+const MAP = args.map ?? &quot;nyc-bikes&quot;;</span>
+<span class="d-add">+const TARGETS = (args.labels ?? args.label ?? &quot;Improve bike lane&quot;).split(&quot;|&quot;);</span>
+<span class="d-add">+const VIEW = args.view ?? &quot;40.745,-73.985,14&quot;;</span>
+<span class="d-add">+const WINDOW_MS = parseInt(args.window ?? &quot;6000&quot;, 10);</span>
+<span class="d-add">+const [LAT, LNG, Z] = VIEW.split(&quot;,&quot;).map(Number);</span>
+<span class="d-add">+</span>
+<span class="d-add">+const INIT = () =&gt; {</span>
+<span class="d-add">+  const P = {</span>
+<span class="d-add">+    frames: [],       // {t, dt}</span>
+<span class="d-add">+    marks: [],        // {t, label, ms?}</span>
+<span class="d-add">+    tasks: [],        // {t, ms}</span>
+<span class="d-add">+    t0: 0,</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+  window.__vt = P;</span>
+<span class="d-add">+  P.mark = (label, extra) =&gt; P.marks.push({ t: +(performance.now() - P.t0).toFixed(1), label, ...extra });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Frame timeline — one continuous rAF loop for the whole run.</span>
+<span class="d-add">+  let last = performance.now();</span>
+<span class="d-add">+  const tick = () =&gt; {</span>
+<span class="d-add">+    const now = performance.now();</span>
+<span class="d-add">+    P.frames.push({ t: +(now - P.t0).toFixed(1), dt: +(now - last).toFixed(1) });</span>
+<span class="d-add">+    if (P.frames.length &gt; 4000) P.frames.shift();</span>
+<span class="d-add">+    last = now;</span>
+<span class="d-add">+    requestAnimationFrame(tick);</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+  requestAnimationFrame(tick);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  try {</span>
+<span class="d-add">+    new PerformanceObserver((l) =&gt; {</span>
+<span class="d-add">+      for (const e of l.getEntries()) P.tasks.push({ t: +(e.startTime - P.t0).toFixed(1), ms: +e.duration.toFixed(1) });</span>
+<span class="d-add">+    }).observe({ entryTypes: [&quot;longtask&quot;] });</span>
+<span class="d-add">+  } catch { /* unsupported */ }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Time the synchronous block-votes broadcast (heat re-derive + feature-state).</span>
+<span class="d-add">+  const origDispatch = window.dispatchEvent.bind(window);</span>
+<span class="d-add">+  window.dispatchEvent = function (ev) {</span>
+<span class="d-add">+    if (ev &amp;&amp; typeof ev.type === &quot;string&quot; &amp;&amp; ev.type === &quot;city-edit:block-votes&quot;) {</span>
+<span class="d-add">+      const a = performance.now();</span>
+<span class="d-add">+      const r = origDispatch(ev);</span>
+<span class="d-add">+      P.mark(&quot;block-votes dispatch&quot;, { ms: +(performance.now() - a).toFixed(1) });</span>
+<span class="d-add">+      return r;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    return origDispatch(ev);</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Time every idle callback — the proposal recompute and its slices run here.</span>
+<span class="d-add">+  const origRIC = window.requestIdleCallback.bind(window);</span>
+<span class="d-add">+  window.requestIdleCallback = function (cb, opts) {</span>
+<span class="d-add">+    return origRIC(function (dl) {</span>
+<span class="d-add">+      const a = performance.now();</span>
+<span class="d-add">+      cb(dl);</span>
+<span class="d-add">+      const d = performance.now() - a;</span>
+<span class="d-add">+      if (d &gt; 1) P.mark(&quot;idle cb&quot;, { ms: +d.toFixed(1), timeout: opts &amp;&amp; opts.timeout });</span>
+<span class="d-add">+    }, opts);</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // WebGL repaints: MapLibre only renders when something is dirty, so a draw</span>
+<span class="d-add">+  // call after the toggle IS the heat repaint. Record one stamp per GL frame.</span>
+<span class="d-add">+  const origGetContext = HTMLCanvasElement.prototype.getContext;</span>
+<span class="d-add">+  HTMLCanvasElement.prototype.getContext = function (type, ...rest) {</span>
+<span class="d-add">+    const ctx = origGetContext.call(this, type, ...rest);</span>
+<span class="d-add">+    if (ctx &amp;&amp; /webgl/.test(String(type)) &amp;&amp; !ctx.__vtHooked) {</span>
+<span class="d-add">+      ctx.__vtHooked = true;</span>
+<span class="d-add">+      const origClear = ctx.clear.bind(ctx);</span>
+<span class="d-add">+      let lastGl = -1;</span>
+<span class="d-add">+      ctx.clear = function (mask) {</span>
+<span class="d-add">+        const t = performance.now();</span>
+<span class="d-add">+        if (t - lastGl &gt; 4) { lastGl = t; P.mark(&quot;gl draw&quot;); }</span>
+<span class="d-add">+        return origClear(mask);</span>
+<span class="d-add">+      };</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    return ctx;</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // How many blocks&#x27; RAW differential actually changes across a toggle — the</span>
+<span class="d-add">+  // size a diff-applied write would be if the normalization weren&#x27;t rescaling.</span>
+<span class="d-add">+  let prevDiff = null;</span>
+<span class="d-add">+  window.addEventListener(&quot;city-edit:block-votes&quot;, (e) =&gt; {</span>
+<span class="d-add">+    const d = e.detail.blockDiff;</span>
+<span class="d-add">+    if (prevDiff &amp;&amp; prevDiff.length === d.length) {</span>
+<span class="d-add">+      let changed = 0, lit = 0;</span>
+<span class="d-add">+      for (let i = 0; i &lt; d.length; i++) {</span>
+<span class="d-add">+        if (d[i] !== prevDiff[i]) changed++;</span>
+<span class="d-add">+        if (d[i] !== 0) lit++;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+      P.mark(&quot;rawDiffChanged&quot;, { changed, lit, max: e.detail.max, maxNeg: e.detail.maxNeg });</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    prevDiff = d.slice();</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Timestamp the app&#x27;s own dlog lines.</span>
+<span class="d-add">+  const origLog = console.log.bind(console);</span>
+<span class="d-add">+  console.log = function (...a) {</span>
+<span class="d-add">+    if (typeof a[0] === &quot;string&quot; &amp;&amp; /^\[(blocks|proposals)\]/.test(a[0])) {</span>
+<span class="d-add">+      P.mark(&quot;log &quot; + [a[0], a[1]].join(&quot; &quot;).slice(0, 110));</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    return origLog(...a);</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  P.reset = () =&gt; { P.frames.length = 0; P.marks.length = 0; P.tasks.length = 0; P.t0 = performance.now(); };</span>
+<span class="d-add">+};</span>
+<span class="d-add">+</span>
+<span class="d-add">+function summarize(P, windowMs) {</span>
+<span class="d-add">+  const frames = P.frames.filter((f) =&gt; f.t &gt;= 0 &amp;&amp; f.t &lt;= windowMs);</span>
+<span class="d-add">+  const heat = P.marks.find((m) =&gt; m.label.startsWith(&quot;log [blocks] heat apply&quot;));</span>
+<span class="d-add">+  const dispatch = P.marks.find((m) =&gt; m.label === &quot;block-votes dispatch&quot;);</span>
+<span class="d-add">+  const filterLine = P.marks.find((m) =&gt; m.label.includes(&quot;vote-type filter&quot;));</span>
+<span class="d-add">+  const proposals = P.marks.find((m) =&gt; m.label.includes(&quot;[proposals] recompute:&quot;));</span>
+<span class="d-add">+  const syncEnd = P.marks.find((m) =&gt; m.label === &quot;--sync end--&quot;);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // First frame that lands after the synchronous handler returned.</span>
+<span class="d-add">+  const syncT = syncEnd ? syncEnd.t : 0;</span>
+<span class="d-add">+  const firstPaint = frames.find((f) =&gt; f.t &gt; syncT);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Settle: first time we see 5 consecutive frames under 20ms after the click.</span>
+<span class="d-add">+  let settle = null;</span>
+<span class="d-add">+  for (let i = 0; i + 5 &lt;= frames.length; i++) {</span>
+<span class="d-add">+    if (frames.slice(i, i + 5).every((f) =&gt; f.dt &lt; 20)) { settle = frames[i + 4].t; break; }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const glDraws = P.marks.filter((m) =&gt; m.label === &quot;gl draw&quot;).map((m) =&gt; m.t);</span>
+<span class="d-add">+  const idleCbs = P.marks.filter((m) =&gt; m.label === &quot;idle cb&quot;);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  return {</span>
+<span class="d-add">+    rawDiff: P.marks.find((m) =&gt; m.label === &quot;rawDiffChanged&quot;) ?? null,</span>
+<span class="d-add">+    firstGlDrawMs: glDraws.length ? glDraws[0] : null,</span>
+<span class="d-add">+    glDraws: glDraws.slice(0, 20),</span>
+<span class="d-add">+    idleCbs,</span>
+<span class="d-add">+    handlerMs: filterLine ? filterLine.t : null,</span>
+<span class="d-add">+    syncMs: syncEnd ? syncEnd.t : null,</span>
+<span class="d-add">+    heatApply: heat ? heat.label.replace(&quot;log [blocks] &quot;, &quot;&quot;) : null,</span>
+<span class="d-add">+    heatApplyMs: dispatch ? dispatch.ms : null,</span>
+<span class="d-add">+    firstPaintMs: firstPaint ? firstPaint.t : null,</span>
+<span class="d-add">+    settleMs: settle,</span>
+<span class="d-add">+    longFrames: frames.filter((f) =&gt; f.dt &gt; 40).map((f) =&gt; [f.t, f.dt]),</span>
+<span class="d-add">+    longTasks: P.tasks.filter((t) =&gt; t.ms &gt; 50),</span>
+<span class="d-add">+    proposalsMs: proposals ? proposals.t : null,</span>
+<span class="d-add">+    proposalsLine: proposals ? proposals.label.replace(&quot;log [proposals] &quot;, &quot;&quot;) : null,</span>
+<span class="d-add">+    marks: P.marks,</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+const browser = await chromium.launch({ headless: args.headed !== &quot;true&quot; ? true : false, args: [&quot;--use-gl=angle&quot;, &quot;--enable-gpu&quot;] });</span>
+<span class="d-add">+const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });</span>
+<span class="d-add">+await page.addInitScript(INIT);</span>
+<span class="d-add">+await page.goto(`${URL_BASE}/m/${MAP}?tab=vtperf#${Z}/${LAT}/${LNG}`, { waitUntil: &quot;domcontentloaded&quot; });</span>
+<span class="d-add">+</span>
+<span class="d-add">+// Wait for block heat to land.</span>
+<span class="d-add">+await page.waitForFunction(</span>
+<span class="d-add">+  () =&gt; window.cityedit &amp;&amp; window.cityedit.dumpState().blockHeatNonzero &gt; 0,</span>
+<span class="d-add">+  null, { timeout: 90000 }</span>
+<span class="d-add">+);</span>
+<span class="d-add">+await page.waitForTimeout(4000);</span>
+<span class="d-add">+</span>
+<span class="d-add">+// Open the vote-type panel (the legend) so we can click its eyes.</span>
+<span class="d-add">+await page.evaluate(() =&gt; {</span>
+<span class="d-add">+  const combo = document.querySelector(&quot;.vote-type-selector input, .vote-type-selector [role=combobox]&quot;)</span>
+<span class="d-add">+    || [...document.querySelectorAll(&quot;input&quot;)].find((i) =&gt; /Type to search|proposal/i.test(i.placeholder || &quot;&quot;));</span>
+<span class="d-add">+  if (combo) combo.dispatchEvent(new MouseEvent(&quot;mousedown&quot;, { bubbles: true, cancelable: true, view: window, button: 0 }));</span>
+<span class="d-add">+  if (combo) combo.focus();</span>
+<span class="d-add">+});</span>
+<span class="d-add">+await page.waitForTimeout(800);</span>
+<span class="d-add">+</span>
+<span class="d-add">+const results = [];</span>
+<span class="d-add">+for (const label of TARGETS) {</span>
+<span class="d-add">+  for (const phase of [&quot;hide&quot;, &quot;show&quot;]) {</span>
+<span class="d-add">+    const found = await page.evaluate((lbl) =&gt; {</span>
+<span class="d-add">+      const P = window.__vt;</span>
+<span class="d-add">+      const btn = [...document.querySelectorAll(&quot;button.vt-vis&quot;)]</span>
+<span class="d-add">+        .find((b) =&gt; (b.getAttribute(&quot;aria-label&quot;) || &quot;&quot;).includes(lbl));</span>
+<span class="d-add">+      if (!btn) return false;</span>
+<span class="d-add">+      P.reset();</span>
+<span class="d-add">+      btn.dispatchEvent(new MouseEvent(&quot;mousedown&quot;, { bubbles: true, cancelable: true, view: window, button: 0 }));</span>
+<span class="d-add">+      P.mark(&quot;--sync end--&quot;);</span>
+<span class="d-add">+      return true;</span>
+<span class="d-add">+    }, label);</span>
+<span class="d-add">+    if (!found) { results.push({ label, phase, error: &quot;button not found&quot; }); continue; }</span>
+<span class="d-add">+    await page.waitForTimeout(WINDOW_MS);</span>
+<span class="d-add">+    const P = await page.evaluate(() =&gt; ({ frames: window.__vt.frames, marks: window.__vt.marks, tasks: window.__vt.tasks }));</span>
+<span class="d-add">+    results.push({ label, phase, ...summarize(P, WINDOW_MS) });</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+console.log(JSON.stringify({ map: MAP, results }, null, 1));</span>
+<span class="d-add">+await browser.close();</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+138</span> / <span class="d-del">-36</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · map layer</span>
+        <span class="ctx-sum">The Leaflet overlay that owns vote state: topology, votes, heat broadcasts, both proposal families, hover and selection</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~4,000 LOC — the app&#x27;s largest component; this change touches the vote-state and recompute plumbing only</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">refs: topology / votes / blocks</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">voteEpochRef + bumpVoteEpoch (new)</span><span class="ol-sum">the cache key: bumped at every vote-state mutation</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">recomputeTopProposals</span><span class="ol-sum">candidate cache per epoch, then a cheap re-select</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">broadcastBlockVotes</span><span class="ol-sum">unchanged here — masks block ranking by the legend</span></li><li class="changed"><span class="ol-label">routeCacheRef + publishRouteProposals (new)</span><span class="ol-sum">per-type corridors for one epoch, and the publish tail</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">recomputeRouteProposals</span><span class="ol-sum">fast path off the cache; slices only the types it lacks</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">recomputeAllProposals / requestProposalsRecompute</span><span class="ol-sum">unchanged — still the path for votes and loads</span></li><li class="changed"><span class="ol-label">vote-type filter subscriber</span><span class="ol-sum">now synchronous: heat, pins, corridors, no idle callback</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">vote mutation sites (fetch / cache / delta / optimistic)</span><span class="ol-sum">each bumps the epoch</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">hover / selection / redraw / markers</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The route cache is lazy per type, so hiding stays free and showing costs exactly one type — the old code&#x27;s &#x27;a filtered map recomputes faster&#x27; property is kept, not traded away</li><li>cache.eligible is the job&#x27;s FULL type list (built without isVisible) so the fast path can tell &#x27;every visible type is cached&#x27; from &#x27;one was never clustered&#x27;</li><li>The subscriber no longer calls publishVoteTypeSupport: the legend&#x27;s net counts are deliberately unmasked, so a visibility toggle cannot move them</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index bcde150..5cfe3c9 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -358,6 +365,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // Last-seen revision for gap detection</span>
+<span class="d-ctx">   const lastRevRef = useRef(0);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // Monotonic counter bumped by EVERY mutation of the in-memory vote state —</span>
+<span class="d-add">+  // full fetches, cached loads, applied WS deltas, and the local optimistic</span>
+<span class="d-add">+  // cast. The server revision alone can&#x27;t serve as a cache key: the optimistic</span>
+<span class="d-add">+  // cast edits edge_vote_types in place without a rev (the server&#x27;s delta</span>
+<span class="d-add">+  // corrects it later), so anything keyed on rev would happily serve a stale</span>
+<span class="d-add">+  // derivation of vote data that has already changed under it. The proposal</span>
+<span class="d-add">+  // caches below key off this.</span>
+<span class="d-add">+  const voteEpochRef = useRef(0);</span>
+<span class="d-add">+  const bumpVoteEpoch = () =&gt; { voteEpochRef.current++; };</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   // Deltas received before the initial vote fetch completes</span>
+<span class="d-ctx">   const pendingDeltasRef = useRef&lt;import(&quot;../../types&quot;).VoteDelta[]&gt;([]);</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -810,27 +827,50 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   const refreshHeatmapDisplayRef = useRef(refreshHeatmapDisplay);</span>
+<span class="d-ctx">   useEffect(() =&gt; { refreshHeatmapDisplayRef.current = refreshHeatmapDisplay; }, [refreshHeatmapDisplay]);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // PBTP winners recompute — the full edge-table scan. Only called from the</span>
+<span class="d-del">-  // batched recompute path (never per vote).</span>
+<span class="d-add">+  // Per-type PBTP candidates for one vote epoch — the O(edges) half of the</span>
+<span class="d-add">+  // selection, which does NOT depend on the legend&#x27;s visibility toggles (see</span>
+<span class="d-add">+  // topProposals.computeWinnerCandidates). Cached so a toggle re-picks pins</span>
+<span class="d-add">+  // from a few dozen candidates instead of rescanning three million edges.</span>
+<span class="d-add">+  const pbtpCandidatesRef = useRef&lt;{ epoch: number; candidates: VoteTypeWinner[] } | null&gt;(null);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // PBTP winners recompute — the full edge-table scan on a new vote epoch, a</span>
+<span class="d-add">+  // few-dozen-item re-selection when only the legend changed.</span>
+<span class="d-ctx">   const recomputeTopProposals = useCallback(() =&gt; {</span>
+<span class="d-ctx">     const data = graphDataRef.current;</span>
+<span class="d-ctx">     if (!data) return;</span>
+<span class="d-ctx">     const legendLen = data.vote_type_legend?.length ?? 0;</span>
+<span class="d-ctx">     const legendChanged = legendLen !== lastLegendLenRef.current;</span>
+<span class="d-ctx">     lastLegendLenRef.current = legendLen;</span>
+<span class="d-del">-    setStableWinners(selectTopProposals(</span>
+<span class="d-del">-      data, tiebreakSaltRef.current, TOP_PROPOSAL_LIMIT,</span>
+<span class="d-add">+    const epoch = voteEpochRef.current;</span>
+<span class="d-add">+    let cache = pbtpCandidatesRef.current;</span>
+<span class="d-add">+    if (!cache || cache.epoch !== epoch) {</span>
+<span class="d-add">+      cache = {</span>
+<span class="d-add">+        epoch,</span>
+<span class="d-add">+        candidates: computeWinnerCandidates(</span>
+<span class="d-add">+          data.vote_type_legend ?? [],</span>
+<span class="d-add">+          data.edge_vote_types ?? [],</span>
+<span class="d-add">+          TOP_PROPOSALS_PER_TYPE,</span>
+<span class="d-add">+          isStationNetwork ? undefined : voteTypeKindOf,</span>
+<span class="d-add">+          // Station networks don&#x27;t badge winners as &quot;top proposals&quot; (every</span>
+<span class="d-add">+          // station renders its own pin regardless), so the floor stays off.</span>
+<span class="d-add">+          isStationNetwork ? 0 : topProposalMinNet,</span>
+<span class="d-add">+        ),</span>
+<span class="d-add">+      };</span>
+<span class="d-add">+      pbtpCandidatesRef.current = cache;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    setStableWinners(selectTopProposalsFrom(</span>
+<span class="d-add">+      data, cache.candidates, tiebreakSaltRef.current, TOP_PROPOSAL_LIMIT,</span>
+<span class="d-ctx">       TOP_PROPOSAL_MIN_SPACING_M,</span>
+<span class="d-del">-      isStationNetwork ? undefined : voteTypeKindOf,</span>
+<span class="d-del">-      // Station networks don&#x27;t badge winners as &quot;top proposals&quot; (every station</span>
+<span class="d-del">-      // renders its own pin regardless), so the support floor stays off there.</span>
+<span class="d-del">-      isStationNetwork ? 0 : topProposalMinNet,</span>
+<span class="d-ctx">       // Legend toggles. Applied HERE rather than to the finished list so that</span>
+<span class="d-ctx">       // hiding types promotes the survivors&#x27; runners-up into the freed slots.</span>
+<span class="d-ctx">       isVoteTypeVisible,</span>
+<span class="d-ctx">     ), legendChanged);</span>
+<span class="d-ctx">   }, [setStableWinners, isStationNetwork, voteTypeKindOf, topProposalMinNet]);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // The candidate scan bakes in kind/floor, so a change to either invalidates it.</span>
+<span class="d-add">+  useEffect(() =&gt; { pbtpCandidatesRef.current = null; },</span>
+<span class="d-add">+    [isStationNetwork, voteTypeKindOf, topProposalMinNet]);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   const recomputeTopProposalsRef = useRef(recomputeTopProposals);</span>
+<span class="d-ctx">   useEffect(() =&gt; { recomputeTopProposalsRef.current = recomputeTopProposals; }, [recomputeTopProposals]);</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1469,46 +1517,90 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // new recompute cancels any in-flight job (its half-built result would mix</span>
+<span class="d-ctx">   // vote states); a delta landing mid-job just dirties the sweep again.</span>
+<span class="d-ctx">   const routeJobTokenRef = useRef&lt;{ cancelled: boolean } | null&gt;(null);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Clustered corridors per vote type, for one vote epoch. `step(type)` reads</span>
+<span class="d-add">+  // only that type&#x27;s nets and the topology — no cross-type state — so a type&#x27;s</span>
+<span class="d-add">+  // corridors are the same whether its neighbours in the legend are shown or</span>
+<span class="d-add">+  // hidden. Memoizing them turns a visibility toggle from &quot;re-cluster twelve</span>
+<span class="d-add">+  // types&quot; into &quot;re-rank the arrays we already have&quot; (routeProposals.</span>
+<span class="d-add">+  // rankRouteProposals). `eligible` is the job&#x27;s full type list (computed</span>
+<span class="d-add">+  // WITHOUT the visibility filter) so the fast path can tell &quot;every visible</span>
+<span class="d-add">+  // type is cached&quot; from &quot;one was never clustered&quot;.</span>
+<span class="d-add">+  const routeCacheRef = useRef&lt;{</span>
+<span class="d-add">+    epoch: number; eligible: number[] | null; byType: Map&lt;number, RouteProposal[]&gt;;</span>
+<span class="d-add">+  }&gt;({ epoch: -1, eligible: null, byType: new Map() });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const publishRouteProposals = useCallback((next: RouteProposal[], note: string) =&gt; {</span>
+<span class="d-add">+    dlog(&quot;proposals&quot;, `recompute: ${next.length} corridors ${note}`,</span>
+<span class="d-add">+      next.map((p) =&gt; `${p.label}#${p.id}(${p.score})`));</span>
+<span class="d-add">+    debugState(&quot;routeProposals&quot;, next.length);</span>
+<span class="d-add">+    // Clustering is deterministic, so an unchanged vote state yields an</span>
+<span class="d-add">+    // identical list — keep the previous array to avoid remounting diamonds.</span>
+<span class="d-add">+    setRouteProposals((prev) =&gt;</span>
+<span class="d-add">+      prev.length === next.length</span>
+<span class="d-add">+        &amp;&amp; prev.every((p, i2) =&gt; p.id === next[i2].id &amp;&amp; p.score === next[i2].score)</span>
+<span class="d-add">+        ? prev : next);</span>
+<span class="d-add">+  }, []);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   const recomputeRouteProposals = useCallback(() =&gt; {</span>
+<span class="d-ctx">     const topo = topologyRef.current;</span>
+<span class="d-ctx">     const adj = nodeAdjRef.current;</span>
+<span class="d-ctx">     const data = graphDataRef.current;</span>
+<span class="d-ctx">     if (!topo || !adj || !data?.edge_vote_types) return;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    const legend = data.vote_type_legend ?? [];</span>
+<span class="d-add">+    const cache = routeCacheRef.current;</span>
+<span class="d-add">+    if (cache.epoch !== voteEpochRef.current) {</span>
+<span class="d-add">+      cache.epoch = voteEpochRef.current;</span>
+<span class="d-add">+      cache.eligible = null;</span>
+<span class="d-add">+      cache.byType.clear();</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    const visible = (legendIdx: number) =&gt; isVoteTypeVisible(legend[legendIdx] ?? &quot;&quot;);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     if (routeJobTokenRef.current) routeJobTokenRef.current.cancelled = true;</span>
+<span class="d-ctx">     const token = { cancelled: false };</span>
+<span class="d-ctx">     routeJobTokenRef.current = token;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     const t0 = performance.now();</span>
+<span class="d-add">+    const visibleCached = () =&gt;</span>
+<span class="d-add">+      (cache.eligible ?? []).filter(visible).map((li) =&gt; cache.byType.get(li) ?? []);</span>
+<span class="d-add">+</span>
+<span class="d-add">+    // Fast path — every visible type is already clustered for this vote epoch,</span>
+<span class="d-add">+    // so nothing needs walking. This is the legend-toggle path: hiding a type</span>
+<span class="d-add">+    // (and re-showing one clustered earlier in the session) lands in the same</span>
+<span class="d-add">+    // tick as the click, instead of waiting out an idle callback and a dozen</span>
+<span class="d-add">+    // clustering slices.</span>
+<span class="d-add">+    if (cache.eligible &amp;&amp; cache.eligible.filter(visible).every((li) =&gt; cache.byType.has(li))) {</span>
+<span class="d-add">+      publishRouteProposals(rankRouteProposals(visibleCached()),</span>
+<span class="d-add">+        `from cache in ${(performance.now() - t0).toFixed(1)}ms`);</span>
+<span class="d-add">+      return;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     // kindOf keeps POINT-kind vote types out of the corridor family (their</span>
+<span class="d-ctx">     // votes surface as PBTP pins instead) — the mirror of the PBTP filter.</span>
+<span class="d-ctx">     // The prebuilt block index skips the job&#x27;s own O(nEdges) rebuild</span>
+<span class="d-del">-    // (GraphLayer already built one for hover/selection).</span>
+<span class="d-add">+    // (GraphLayer already built one for hover/selection). No `isVisible` here:</span>
+<span class="d-add">+    // the job enumerates every eligible type so the cache knows the full set,</span>
+<span class="d-add">+    // and the hidden ones simply never get stepped (below).</span>
+<span class="d-ctx">     const job = createRouteProposalJob(topo, adj, data, {</span>
+<span class="d-ctx">       kindOf: voteTypeKindOf, blockIndex: blockIndexRef.current,</span>
+<span class="d-del">-      // Legend toggles — a hidden type is skipped before its clustering runs,</span>
+<span class="d-del">-      // so a filtered map recomputes faster, not slower.</span>
+<span class="d-del">-      isVisible: isVoteTypeVisible,</span>
+<span class="d-ctx">       // The top-proposal support floor (&gt;topProposalMinNet net votes),</span>
+<span class="d-ctx">       // expressed as the pipeline&#x27;s minimum path score — same rule the PBTP</span>
+<span class="d-ctx">       // winners apply, so both proposal families share one bar.</span>
+<span class="d-ctx">       minRouteScore: topProposalMinNet + 1,</span>
+<span class="d-ctx">     });</span>
+<span class="d-del">-    const perType: RouteProposal[][] = [];</span>
+<span class="d-add">+    cache.eligible = job.types;</span>
+<span class="d-add">+    // Only VISIBLE types are clustered, and only the ones not already cached:</span>
+<span class="d-add">+    // a filtered map still recomputes faster, not slower, and re-showing a type</span>
+<span class="d-add">+    // costs that one type rather than all of them.</span>
+<span class="d-add">+    const todo = job.types.filter((li) =&gt; visible(li) &amp;&amp; !cache.byType.has(li));</span>
+<span class="d-ctx">     let i = 0;</span>
+<span class="d-ctx">     let slices = 0;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     const finishJob = () =&gt; {</span>
+<span class="d-del">-      const next = job.finish(perType);</span>
+<span class="d-del">-      dlog(&quot;proposals&quot;, `recompute: ${next.length} corridors in ${(performance.now() - t0).toFixed(1)}ms `</span>
+<span class="d-del">-        + `(${job.types.length} types over ${slices} slices)`,</span>
+<span class="d-del">-        next.map((p) =&gt; `${p.label}#${p.id}(${p.score})`));</span>
+<span class="d-del">-      debugState(&quot;routeProposals&quot;, next.length);</span>
+<span class="d-del">-      // Clustering is deterministic, so an unchanged vote state yields an</span>
+<span class="d-del">-      // identical list — keep the previous array to avoid remounting diamonds.</span>
+<span class="d-del">-      setRouteProposals((prev) =&gt;</span>
+<span class="d-del">-        prev.length === next.length</span>
+<span class="d-del">-          &amp;&amp; prev.every((p, i2) =&gt; p.id === next[i2].id &amp;&amp; p.score === next[i2].score)</span>
+<span class="d-del">-          ? prev : next);</span>
+<span class="d-add">+      publishRouteProposals(rankRouteProposals(visibleCached()),</span>
+<span class="d-add">+        `in ${(performance.now() - t0).toFixed(1)}ms `</span>
+<span class="d-add">+        + `(${todo.length}/${job.types.length} types clustered over ${slices} slices)`);</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     const slice = (deadline?: IdleDeadline) =&gt; {</span>
+<span class="d-hunk">@@ -1518,15 +1610,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       // budget holds (small maps finish in one slice, the NYC bike map</span>
+<span class="d-ctx">       // spreads its heavy types across several).</span>
+<span class="d-ctx">       do {</span>
+<span class="d-del">-        if (i &gt;= job.types.length) { finishJob(); return; }</span>
+<span class="d-del">-        perType.push(job.step(job.types[i++]));</span>
+<span class="d-del">-      } while (deadline &amp;&amp; deadline.timeRemaining() &gt; 10 &amp;&amp; i &lt; job.types.length);</span>
+<span class="d-del">-      if (i &gt;= job.types.length) { finishJob(); return; }</span>
+<span class="d-add">+        if (i &gt;= todo.length) { finishJob(); return; }</span>
+<span class="d-add">+        const legendIdx = todo[i++];</span>
+<span class="d-add">+        cache.byType.set(legendIdx, job.step(legendIdx));</span>
+<span class="d-add">+      } while (deadline &amp;&amp; deadline.timeRemaining() &gt; 10 &amp;&amp; i &lt; todo.length);</span>
+<span class="d-add">+      if (i &gt;= todo.length) { finishJob(); return; }</span>
+<span class="d-ctx">       scheduleIdleSlice(slice);</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx">     // The first slice is deferred too, so the caller (often itself an idle</span>
+<span class="d-ctx">     // callback that just ran the PBTP scan) returns before any heavy type runs.</span>
+<span class="d-ctx">     scheduleIdleSlice(slice);</span>
+<span class="d-add">+  }, [voteTypeKindOf, topProposalMinNet, publishRouteProposals]);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // The clustering bakes in kind and the support floor, so a change to either</span>
+<span class="d-add">+  // invalidates every cached type.</span>
+<span class="d-add">+  useEffect(() =&gt; {</span>
+<span class="d-add">+    routeCacheRef.current = { epoch: -1, eligible: null, byType: new Map() };</span>
+<span class="d-ctx">   }, [voteTypeKindOf, topProposalMinNet]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);</span>
+<span class="d-hunk">@@ -1593,17 +1692,30 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   const requestProposalsRecomputeRef = useRef(requestProposalsRecompute);</span>
+<span class="d-ctx">   useEffect(() =&gt; { requestProposalsRecomputeRef.current = requestProposalsRecompute; }, [requestProposalsRecompute]);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // Legend visibility toggles (map/voteTypeFilter). Heat is a cheap re-derive</span>
+<span class="d-del">-  // from vote data we already hold, so it repaints on the spot and the checkbox</span>
+<span class="d-del">-  // feels instant; the proposal pins and corridors need the full edge-table scan</span>
+<span class="d-del">-  // and follow on an URGENT recompute — the user is watching for them, so this</span>
+<span class="d-del">-  // must not wait for the minute-cadence sweep.</span>
+<span class="d-add">+  // Legend visibility toggles (map/voteTypeFilter). A toggle changes nothing</span>
+<span class="d-add">+  // about the vote state — it only changes which of it is drawn — so every</span>
+<span class="d-add">+  // surface re-derives from caches held for the current vote epoch and the</span>
+<span class="d-add">+  // whole thing runs SYNCHRONOUSLY, in the same tick as the click:</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  //   heat  — re-rank each block&#x27;s visible types (broadcastBlockVotes)</span>
+<span class="d-add">+  //   pins  — re-select from cached PBTP candidates (recomputeTopProposals)</span>
+<span class="d-add">+  //   corridors — re-rank cached per-type clusters (recomputeRouteProposals)</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  // Deliberately NOT via requestProposalsRecompute: routing this through an</span>
+<span class="d-add">+  // idle callback used to add ~300ms of waiting to work that now takes about a</span>
+<span class="d-add">+  // millisecond, and the recompute it queued rebuilt everything from scratch</span>
+<span class="d-add">+  // (~800ms of clustering) for a change that touches no votes.</span>
+<span class="d-add">+  // publishVoteTypeSupport is skipped for the same reason — the legend&#x27;s net</span>
+<span class="d-add">+  // counts are unmasked by design, so a visibility toggle cannot move them.</span>
+<span class="d-add">+  // Showing a type never clustered this epoch is the one slow case, and</span>
+<span class="d-add">+  // recomputeRouteProposals still slices that one type through idle time.</span>
+<span class="d-ctx">   useEffect(() =&gt; subscribeVoteTypeFilter(() =&gt; {</span>
+<span class="d-ctx">     dlog(&quot;proposals&quot;, `vote-type filter: ${getHiddenVoteTypes().size} hidden`);</span>
+<span class="d-ctx">     const data = graphDataRef.current;</span>
+<span class="d-del">-    if (data) broadcastBlockVotes(data);</span>
+<span class="d-add">+    if (data) broadcastBlockVotes(data, &quot;filter&quot;);</span>
+<span class="d-ctx">     scheduleRedrawRef.current();</span>
+<span class="d-del">-    requestProposalsRecomputeRef.current(true);</span>
+<span class="d-add">+    recomputeTopProposalsRef.current();</span>
+<span class="d-add">+    recomputeRouteProposalsRef.current();</span>
+<span class="d-ctx">   }), [broadcastBlockVotes]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // The batched sweep: votes (own casts and WS deltas) mark this flag; every</span>
+<span class="d-hunk">@@ -1703,6 +1815,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">       graphDataRef.current = { ...topologyRef.current!, ...voteData };</span>
+<span class="d-ctx">       lastRevRef.current = voteData.rev ?? 0;</span>
+<span class="d-add">+      bumpVoteEpoch();</span>
+<span class="d-ctx">       dlog(&quot;votes&quot;, `loaded rev ${voteData.rev}: `</span>
+<span class="d-ctx">         + `${voteData.block_votes?.length ?? 0} block slots, `</span>
+<span class="d-ctx">         + `legend [${(voteData.vote_type_legend ?? []).join(&quot;, &quot;)}]`);</span>
+<span class="d-hunk">@@ -1769,9 +1882,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">       applyEdgeVoteChange(data, adj, delta.edges, vtLabel, delta.dir ?? 1, delta.reversed ?? false);</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     if (delta.blockCounts &amp;&amp; applyBlockCounts(data, vtLabel, delta.blockCounts)) {</span>
+<span class="d-del">-      broadcastBlockVotes(data);</span>
+<span class="d-add">+      broadcastBlockVotes(data, &quot;delta&quot;);</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     lastRevRef.current = delta.rev;</span>
+<span class="d-add">+    bumpVoteEpoch();</span>
+<span class="d-ctx">   }, [broadcastBlockVotes]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Load topology + votes on mount, preferring persisted caches.</span>
+<span class="d-hunk">@@ -1996,6 +2110,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         if (cachedVotes &amp;&amp; blocksMatch) {</span>
+<span class="d-ctx">           graphDataRef.current = { ...topology, ...cachedVotes };</span>
+<span class="d-ctx">           lastRevRef.current = cachedVotes.rev ?? 0;</span>
+<span class="d-add">+          bumpVoteEpoch();</span>
+<span class="d-ctx">           setVoteTypeMap(cachedVotes.vote_types);</span>
+<span class="d-ctx">           // The edge-array install above still proceeds, but don&#x27;t repaint</span>
+<span class="d-ctx">           // the cached (older-rev) block heat over the authoritative body if</span>
+<span class="d-hunk">@@ -2069,6 +2184,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         graphDataRef.current = { ...topologyRef.current!, ...voteData };</span>
+<span class="d-ctx">         lastRevRef.current = voteData.rev ?? 0;</span>
+<span class="d-add">+        bumpVoteEpoch();</span>
+<span class="d-ctx">         setVoteTypeMap(voteData.vote_types);</span>
+<span class="d-ctx">         // Persist the RAW wire payload: the sparse form is ~50x smaller to</span>
+<span class="d-ctx">         // structured-clone into IndexedDB than the decoded dense arrays, and</span>
+<span class="d-hunk">@@ -2181,6 +2297,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       const legendLenBefore = data.vote_type_legend?.length ?? 0;</span>
+<span class="d-ctx">       applyMyVoteChange(data, adj, detail.edgeIds, detail.label, detail.prevDir, detail.newDir);</span>
+<span class="d-add">+      bumpVoteEpoch();</span>
+<span class="d-ctx">       refreshHeatmapDisplayRef.current();</span>
+<span class="d-ctx">       // Unlike the WS-delta path (which dirty-marks for the minute sweep),</span>
+<span class="d-ctx">       // THIS is the local user&#x27;s own press — the one vote whose effect on the</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+            <span class="stat"><span class="d-add">+39</span> / <span class="d-del">-5</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GL background</span>
+        <span class="ctx-sum">The MapLibre map behind Leaflet: basemap, block polygons, and the block heat written as feature-state</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapLibreBackground.tsx</span>
+        <span class="ctx-sum">~1,100 LOC — style building, camera sync, and the feature-state heat applier</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">buildStyle / block paint expressions</span><span class="ol-sum">unchanged — the ramp itself</span></li><li class="dim"><span class="ol-label">camera sync + zoom ride</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">heat effect: applied.current</span><span class="ol-sum">now also retains the normalization it wrote with</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">heat effect: apply()</span><span class="ol-sum">a filter broadcast reuses that normalization instead of rebuilding it</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">heat effect: full vs diff branch</span><span class="ol-sum">unchanged — but the filter path now reaches the diff branch</span></li><li class="dim"><span class="ol-label">sourcedata retry</span><span class="ol-sum">unchanged — still only until the first successful apply</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The payload already carried why it was broadcast (source: load / delta / filter), so this needed no new plumbing — only that the normalization be kept alongside the heat map it produced</li><li>removeFeatureState + 42k setFeatureState is cheap to ISSUE (~13ms) and expensive to RENDER (~250ms): the cost is MapLibre re-evaluating paint arrays per changed feature per loaded tile, which is why the write count is the number that matters</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index 6cd580d..1e60d6b 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -609,10 +868,29 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">     // the normalization it was computed with. Feature-state lives on the SOURCE</span>
+<span class="d-ctx">     // (tiles pick it up as they load), so once applied it survives every tile</span>
+<span class="d-ctx">     // (re)load — this is what lets apply() diff instead of rewriting the world.</span>
+<span class="d-del">-    const applied = { current: null as { heat: Map&lt;number, number&gt;; denomKey: string } | null };</span>
+<span class="d-add">+    const applied = {</span>
+<span class="d-add">+      current: null as</span>
+<span class="d-add">+        { heat: Map&lt;number, number&gt;; denomKey: string; norm: HeatNormalization } | null,</span>
+<span class="d-add">+    };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     const featureOf = (id: number) =&gt; ({ source: &quot;blocks&quot;, sourceLayer: &quot;blocks&quot;, id });</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+    // The arrival animation. It only ever touches blocks the diff below hands</span>
+<span class="d-add">+    // it, and it writes both of its keys in one setFeatureState per block per</span>
+<span class="d-add">+    // frame — the whole gesture costs (animating blocks × frames), not</span>
+<span class="d-add">+    // (blocks × tiles). `selected` is untouched: setFeatureState merges keys.</span>
+<span class="d-add">+    const arrival = createArrivalAnimator({</span>
+<span class="d-add">+      write: (id, heat, arrive) =&gt; {</span>
+<span class="d-add">+        const ml = mapRef.current;</span>
+<span class="d-add">+        if (ml &amp;&amp; ml.getSource(&quot;blocks&quot;)) ml.setFeatureState(featureOf(id), { heat, arrive });</span>
+<span class="d-add">+      },</span>
+<span class="d-add">+      now: () =&gt; performance.now(),</span>
+<span class="d-add">+      requestFrame: (cb) =&gt; requestAnimationFrame(cb),</span>
+<span class="d-add">+      cancelFrame: (h) =&gt; cancelAnimationFrame(h),</span>
+<span class="d-add">+      suspended: () =&gt; zoomRidingRef.current,</span>
+<span class="d-add">+    });</span>
+<span class="d-add">+    arrivalRef.current = arrival;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     const applySelected = () =&gt; {</span>
+<span class="d-ctx">       const ml = mapRef.current;</span>
+<span class="d-ctx">       if (!ml || !ml.getSource(&quot;blocks&quot;)) return;</span>
+<span class="d-hunk">@@ -630,10 +908,24 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">         return;</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">       const { blockDiff, max, maxNeg } = detail;</span>
+<span class="d-add">+      const prev = applied.current;</span>
+<span class="d-ctx">       // Signed differential → ramp position, one log denominator per arm</span>
+<span class="d-ctx">       // (docs/algorithms/05-heat-coloring.md).</span>
+<span class="d-del">-      const { heatOf: signedHeat, denomKey } = makeHeatNormalization(max, maxNeg);</span>
+<span class="d-del">-      const prev = applied.current;</span>
+<span class="d-add">+      //</span>
+<span class="d-add">+      // A LEGEND TOGGLE KEEPS THE SCALE IT FOUND. Hiding a vote type doesn&#x27;t</span>
+<span class="d-add">+      // change anyone&#x27;s votes, only which of them each block is ranked by, so</span>
+<span class="d-add">+      // the observed ceilings wobble (hiding the type that held the strongest</span>
+<span class="d-add">+      // opposition moved the negative ceiling from 93 to 80 on the NYC bike</span>
+<span class="d-add">+      // map) — and a moved ceiling means every lit block&#x27;s heat moves, i.e. a</span>
+<span class="d-add">+      // full rewrite of ~42k feature-states, ~250ms of render, to change the</span>
+<span class="d-add">+      // handful of blocks the filter actually touched. Pinning the scale keeps</span>
+<span class="d-add">+      // the toggle a diff. It also reads better: the surviving proposals are</span>
+<span class="d-add">+      // measured against the same ruler as before, so what you&#x27;re comparing is</span>
+<span class="d-add">+      // their support, not a rescale.</span>
+<span class="d-add">+      const { heatOf: signedHeat, denomKey } = detail.source === &quot;filter&quot; &amp;&amp; prev</span>
+<span class="d-add">+        ? prev.norm</span>
+<span class="d-add">+        : makeHeatNormalization(max, maxNeg);</span>
+<span class="d-add">+      const norm: HeatNormalization = { heatOf: signedHeat, denomKey };</span>
+<span class="d-ctx">       // Full rewrite only on the first apply and when a normalization</span>
+<span class="d-ctx">       // ceiling moved (every lit block&#x27;s heat changes then — rare). Otherwise</span>
+<span class="d-ctx">       // write just the blocks whose heat actually changed: a vote touches a</span>
+<span class="d-hunk">@@ -685,8 +994,9 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">         (window as unknown as { __perf?: { mark: (l: string) =&gt; void } }).__perf</span>
+<span class="d-ctx">           ?.mark(&quot;first-heat-apply&quot;);</span>
+<span class="d-ctx">       }</span>
+<span class="d-del">-      applied.current = { heat: next, denomKey };</span>
+<span class="d-del">-      dlog(&quot;blocks&quot;, `heat apply (${full ? &quot;full&quot; : &quot;diff&quot;}): ${writes} writes, ${next.size} lit`);</span>
+<span class="d-add">+      applied.current = { heat: next, denomKey, norm };</span>
+<span class="d-add">+      dlog(&quot;blocks&quot;, `heat apply (${full ? &quot;full&quot; : &quot;diff&quot;}): ${writes} writes, ${next.size} lit`</span>
+<span class="d-add">+        + (animate ? `, ${changes.length} arriving (${arrival.size} in flight)` : &quot;&quot;));</span>
+<span class="d-ctx">       debugState(&quot;blockHeatNonzero&quot;, next.size);</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
