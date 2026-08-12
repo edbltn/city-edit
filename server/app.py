@@ -2467,6 +2467,12 @@ def admin_set_vote_sources(slug):
     the existing registry — what the weekly importer needs, since it only knows
     the proposals it just cast.
 
+    An empty `sources` is an error for a wholesale write (use DELETE to clear,
+    so no caller wipes a registry by sending nothing) but a no-op under
+    `merge`. That asymmetry is deliberate: it gives a merging client a probe it
+    can send safely, since a build predating `merge` rejects it and so reveals
+    that a wholesale write is all this server would do.
+
     Requires the X-Admin-Token header to match ADMIN_TOKEN.
     """
     if not _admin_authorized():
@@ -2476,7 +2482,8 @@ def admin_set_vote_sources(slug):
     else:
         body = request.get_json(silent=True) or {}
         sources = body.get("sources")
-        if not isinstance(sources, list) or not sources:
+        merge = bool(body.get("merge"))
+        if not isinstance(sources, list) or (not sources and not merge):
             return jsonify({"error": "sources list is required"}), 400
         resolved = []
         for s in sources:
@@ -2488,8 +2495,7 @@ def admin_set_vote_sources(slug):
                 "url": s.get("url"),
                 "title": s.get("title"),
             })
-        ok, msg = set_vote_sources(slug, resolved,
-                                   replace=not body.get("merge"))
+        ok, msg = set_vote_sources(slug, resolved, replace=not merge)
     return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
 
 

@@ -40,18 +40,8 @@ WINDOW_DAYS = int(os.environ.get("WINDOW_DAYS", "8"))
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
 
-def register_sources(sources: list[dict]) -> None:
-    """Cite this run's proposals, merging them into the map's registry.
-
-    Best-effort: a failure here costs citation links on the week's new votes,
-    which isn't worth failing an otherwise-successful import over.
-    """
-    if not sources:
-        return
-    if not ADMIN_TOKEN:
-        print(f"[WEEKLY] WARNING no ADMIN_TOKEN — {len(sources)} proposals cast "
-              f"without source citations", flush=True)
-        return
+def post_sources(sources: list[dict]) -> str:
+    """POST a merging source registration; returns the server's message."""
     req = urllib.request.Request(
         f"{BASE_URL}/api/admin/maps/{MAP_SLUG}/vote-sources",
         data=json.dumps({"sources": sources, "merge": True}).encode(),
@@ -59,10 +49,37 @@ def register_sources(sources: list[dict]) -> None:
                  "X-Admin-Token": ADMIN_TOKEN},
         method="POST",
     )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return resp.read().decode()
+
+
+def register_sources(sources: list[dict]) -> None:
+    """Cite this run's proposals, merging them into the map's registry.
+
+    Probes with an empty payload first, because a server predating `merge`
+    ignores the flag and replaces the registry wholesale — which would trade
+    every other proposal's citations for this week's one or two. The probe is a
+    no-op where merge exists and an error where it doesn't, so an image
+    deployed ahead of the app degrades to "no citations this week" instead of
+    wiping the registry. Best-effort past that: losing citation links on a
+    week's votes isn't worth failing an otherwise-successful import over.
+    """
+    if not sources:
+        return
+    if not ADMIN_TOKEN:
+        print(f"[WEEKLY] WARNING no ADMIN_TOKEN — {len(sources)} proposals cast "
+              f"without source citations", flush=True)
+        return
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            print(f"[WEEKLY] sources {resp.status} {resp.read().decode()}",
-                  flush=True)
+        if "merged" not in post_sources([]):
+            raise RuntimeError("server did not acknowledge the merge probe")
+    except Exception as e:
+        print(f"[WEEKLY] WARNING no merging source registry ({e}) — "
+              f"{len(sources)} proposals cast without source citations; "
+              f"deploy the app before this job's image", flush=True)
+        return
+    try:
+        print(f"[WEEKLY] sources {post_sources(sources)}", flush=True)
     except Exception as e:
         print(f"[WEEKLY] WARNING source registration failed: {e}", flush=True)
 
