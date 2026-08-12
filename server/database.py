@@ -1195,13 +1195,19 @@ def set_map_subdomain(slug: str, subdomain: Optional[str]) -> tuple[bool, str]:
         return False, str(e)
 
 
-def set_vote_sources(slug: str, sources: list[dict]) -> tuple[bool, str]:
-    """Replace a map's imported-vote source registry.
+def set_vote_sources(
+    slug: str, sources: list[dict], replace: bool = True
+) -> tuple[bool, str]:
+    """Register a map's imported-vote source registry.
 
     Each entry is {"device_id", "url", "title"?} — device_id being the hashed
-    voter id the import's casts carry on their edge_votes rows. The whole
-    registry for the map is replaced atomically (callers send the full desired
-    state); an empty list clears it. Returns (ok, message).
+    voter id the import's casts carry on their edge_votes rows. With
+    `replace` (the default) the whole registry for the map is replaced
+    atomically — callers send the full desired state, and an empty list clears
+    it. With `replace=False` the given entries are merged into what's already
+    there, which is what an incremental importer needs: it only knows the
+    proposals it just cast, and a wholesale write would strand every earlier
+    one. Returns (ok, message).
     """
     if not DATABASE_URL:
         return False, "database unavailable"
@@ -1213,7 +1219,9 @@ def set_vote_sources(slug: str, sources: list[dict]) -> tuple[bool, str]:
         rows.append((slug, str(device_id)[:16], url, s.get("title") or None))
     try:
         with get_cursor() as cursor:
-            cursor.execute("DELETE FROM vote_sources WHERE map_slug = %s", (slug,))
+            if replace:
+                cursor.execute(
+                    "DELETE FROM vote_sources WHERE map_slug = %s", (slug,))
             if rows:
                 execute_values(
                     cursor,
@@ -1222,7 +1230,8 @@ def set_vote_sources(slug: str, sources: list[dict]) -> tuple[bool, str]:
                     "SET url = EXCLUDED.url, title = EXCLUDED.title",
                     rows,
                 )
-        return True, f"registered {len(rows)} sources"
+        return True, (f"registered {len(rows)} sources"
+                      + ("" if replace else " (merged)"))
     except Exception as e:
         logger.error(f"[DB] set_vote_sources failed: {e}")
         return False, str(e)

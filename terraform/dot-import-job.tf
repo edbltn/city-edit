@@ -6,6 +6,7 @@
 #
 #   terraform apply \
 #     -target=google_service_account.dot_import_sa \
+#     -target=google_secret_manager_secret_iam_member.dot_import_admin_token_access \
 #     -target=google_cloud_run_v2_job.dot_import \
 #     -target=google_cloud_run_v2_job_iam_member.dot_import_invoker \
 #     -target=google_cloud_scheduler_job.dot_import
@@ -37,6 +38,18 @@ resource "google_cloud_run_v2_job" "dot_import" {
           value = "nyc-proposals"
         }
 
+        # Gates the admin source-registration call the job makes after casting,
+        # so each imported proposal cites its own nycdotprojects.info page.
+        env {
+          name = "ADMIN_TOKEN"
+          value_source {
+            secret_key_ref {
+              secret  = google_secret_manager_secret.admin_token.secret_id
+              version = "latest"
+            }
+          }
+        }
+
         resources {
           limits = {
             cpu    = "1"
@@ -57,6 +70,12 @@ resource "google_cloud_run_v2_job" "dot_import" {
     google_project_service.cloud_run,
     google_artifact_registry_repository.app,
   ]
+}
+
+resource "google_secret_manager_secret_iam_member" "dot_import_admin_token_access" {
+  secret_id = google_secret_manager_secret.admin_token.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.dot_import_sa.email}"
 }
 
 resource "google_cloud_run_v2_job_iam_member" "dot_import_invoker" {

@@ -2460,9 +2460,12 @@ def admin_set_subdomain(slug):
 def admin_set_vote_sources(slug):
     """Register (POST) or clear (DELETE) where a map's imported votes came from.
 
-    Body: {sources: [{voter_id, url, title?}]} — the SAME voter_id the import
-    cast with, hashed here exactly as /api/vote hashes it, so the registry keys
-    match the stored rows. Replaces the whole registry for the map.
+    Body: {sources: [{voter_id, url, title?}], merge?: bool} — the SAME
+    voter_id the import cast with, hashed here exactly as /api/vote hashes it,
+    so the registry keys match the stored rows. Replaces the whole registry for
+    the map unless `merge` is set, in which case the entries are folded into
+    the existing registry — what the weekly importer needs, since it only knows
+    the proposals it just cast.
 
     Requires the X-Admin-Token header to match ADMIN_TOKEN.
     """
@@ -2471,7 +2474,8 @@ def admin_set_vote_sources(slug):
     if request.method == "DELETE":
         ok, msg = set_vote_sources(slug, [])
     else:
-        sources = (request.get_json(silent=True) or {}).get("sources")
+        body = request.get_json(silent=True) or {}
+        sources = body.get("sources")
         if not isinstance(sources, list) or not sources:
             return jsonify({"error": "sources list is required"}), 400
         resolved = []
@@ -2484,7 +2488,8 @@ def admin_set_vote_sources(slug):
                 "url": s.get("url"),
                 "title": s.get("title"),
             })
-        ok, msg = set_vote_sources(slug, resolved)
+        ok, msg = set_vote_sources(slug, resolved,
+                                   replace=not body.get("merge"))
     return jsonify({"ok": ok, "slug": slug, "message": msg}), (200 if ok else 400)
 
 
