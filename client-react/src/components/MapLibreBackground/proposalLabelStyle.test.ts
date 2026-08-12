@@ -10,6 +10,8 @@ import {
   PROPOSAL_PUCK_OFFSET,
   PROPOSAL_PUCK_SIZE,
   PROPOSAL_TEXT_MAX_WIDTH,
+  PROPOSAL_TEXT_OFFSET_EM,
+  pinTailBelowAnchorPx,
   formatProposalCount,
   proposalLabelText,
   proposalRevealZoom,
@@ -230,6 +232,21 @@ describe("the pin footprint", () => {
     // Bottom-anchored the puck covers y ∈ [−42, 0]; the pin, anchored at its
     // tail tip (17, 36), covers [−36, +6]. The offset is the difference.
     expect(PROPOSAL_PUCK_OFFSET).toEqual([0, 6]);
+  });
+
+  // The label cannot win a z-fight with its own pin: the pins are Leaflet DOM
+  // above the whole GL canvas, so a pin always paints over GL text. Staying out
+  // from under it is the only defence, and the margin is not a constant — the
+  // pin rides --indicator-scale while the type rides its own size ramp, so the
+  // tightest zoom has to be found rather than assumed. (At 0.55em the label was
+  // flush with the tail and a hovered pin covered its first line.)
+  it("keeps the label clear of the pin's tail at every zoom, even hovered", () => {
+    const offsetEm = PROPOSAL_TEXT_OFFSET_EM[1];
+    for (let z = 11; z <= 20; z++) {
+      const textTopPx = offsetEm * rampAt(PROPOSAL_LABEL_TEXT_SIZE, z - 1);
+      const tailPx = pinTailBelowAnchorPx(z);
+      expect(textTopPx).toBeGreaterThan(tailPx + 2);
+    }
   });
 
   // GraphLayer eases the pins smaller at both zoom extremes via

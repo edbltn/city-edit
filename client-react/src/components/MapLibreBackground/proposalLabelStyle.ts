@@ -34,6 +34,40 @@ const PIN_TIP_Y = 36;
  *  Shift it down by the difference so the two coincide exactly. */
 export const PROPOSAL_PUCK_OFFSET: [number, number] = [0, PIN_H - PIN_TIP_Y];
 
+/** How far the pin's tail hangs BELOW its anchor, before scaling. */
+const PIN_TAIL_BELOW_ANCHOR = PIN_H - PIN_TIP_Y;
+/** The 1.1x the pin grows on hover and when selected. It pivots on the tail tip
+ *  (`transform-origin: 17px 36px`), so the tail grows DOWN, into the label. */
+const PIN_HOVER_SCALE = 1.1;
+
+/**
+ * Clearance between the pin's tail and the top of the label, in ems of the text
+ * size (`text-offset`, paired with `text-anchor: "top"`).
+ *
+ * This is the ONLY defence the label has against being covered by its pin, and
+ * it cannot be replaced by a z-index. The pins are Leaflet DOM in a pane above
+ * the entire GL canvas — MapLibreBackground renders as a sibling before
+ * MapContainer at `zIndex: 0` — so a pin always paints over GL text no matter
+ * how the style is ordered. (Inside GL the text is already in front of every
+ * icon: `proposal-labels` is the topmost symbol layer.)
+ *
+ * It started at 0.55em, which was flush and therefore wrong — ~6px at the mid
+ * zooms against a tail that hangs exactly 6px, so the first line of text began
+ * where the pin ended, and any hover or selected scale pushed the pin onto it.
+ * `keepsClearOfPin` in the tests checks the real worst case across the zoom
+ * range, since the pin and the type scale on DIFFERENT curves.
+ */
+export const PROPOSAL_TEXT_OFFSET_EM: [number, number] = [0, 1.0];
+
+/** Pixels the pin's tail reaches below the anchor at a Leaflet zoom, hovered —
+ *  the thing the label has to clear. Mirrors GraphLayer's `--indicator-scale`. */
+export function pinTailBelowAnchorPx(leafletZoom: number): number {
+  const zoomedIn = Math.max(0, leafletZoom - 15) * 0.1;
+  const zoomedOut = Math.max(0, 14 - leafletZoom) * 0.1;
+  const scale = Math.max(0.5, Math.min(1, 1 - zoomedIn - zoomedOut));
+  return PIN_TAIL_BELOW_ANCHOR * scale * PIN_HOVER_SCALE;
+}
+
 /** Name of the transparent collision image registered via `addImage`. */
 export const PROPOSAL_PUCK_IMAGE = "proposal-pin-puck";
 
