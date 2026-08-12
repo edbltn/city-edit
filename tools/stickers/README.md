@@ -73,7 +73,7 @@ Visits by message are a group-by on `cityedit_map_load_ms` in Metrics Explorer.
 ## The line
 
 `campaign.py` holds every message, the vote type it casts, and why. The three
-starters, then five more in the same voice — eight in all, every one of them
+starters, then three more in the same voice — six in all, every one of them
 three words or fewer.
 
 | Line | Casts | Kind |
@@ -82,10 +82,14 @@ three words or fewer.
 | Fix this intersection. | Add traffic calming | route |
 | Whose streets? | Add tree | point |
 | Nowhere to stand. | Add pedestrian refuge island | point |
-| It's dark here. | Add intersection lighting | point |
 | Press. Wait. Wait. | Fix signal timing | point |
-| This corner kills. | Fix dangerous intersection | point |
 | No way across. | Add crosswalk | route |
+
+Two more were cut on review, and the reasons are worth keeping: **"This corner
+kills."** was too dark to put on a stranger's walk to work, and **"It's dark
+here."** fails the one test a sticker has to pass — it is unreadable in the
+condition it describes, and anyone who *could* read it would be confused about
+what "here" referred to.
 
 **Three words, hard limit.** The character cap is about whether the type *fits*;
 the word cap is about whether anyone reads it. A sticker is taken in at a glance,

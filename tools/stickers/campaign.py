@@ -82,12 +82,8 @@ STICKERS = [
     # ── Point lines: a spot you are standing at ──────────────────────────
     _s("stand", "Nowhere to stand.", "Add pedestrian refuge island", "point",
        "The stranded-in-the-middle crossing."),
-    _s("dark", "It's dark here.", "Add intersection lighting", "point",
-       "The unlit crossing."),
     _s("press", "Press. Wait. Wait.", "Fix signal timing", "point",
        "The beg-button variant of 'wait' — same vote, different joke."),
-    _s("speed", "This corner kills.", "Fix dangerous intersection", "point",
-       "The blunt one. Reserve it for corners that have a crash record."),
 
     # ── Route lines: a stretch you are walking along ─────────────────────
     _s("cross", "No way across.", "Add crosswalk", "route",
