@@ -2417,10 +2417,14 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
   gap: 4px;
 }
 
+/* border-box so the 22px is the OUTER box for every tool. The buttons get
+   border-box from the UA stylesheet; the Street View <a> would not, and its
+   1px border was landing outside the 22px — a 24px square next to 22px ones. */
 .graph-proposal-tool {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
   width: 22px;
   height: 22px;
   padding: 0;
