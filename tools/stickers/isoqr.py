@@ -1,47 +1,65 @@
 """
-The code as a city.
+The code as a city, stood on its corner.
 
-Every module of the QR becomes a city block in the same 30° isometric the
-`tee-isogrid` merch is drawn in (`tools/merch/iso.py`): +x runs down-right, +y
-down-left, +z straight up. Dark modules are buildings, light modules are the
-low kerb between them, and the whole code comes out as a diamond because that is
-what a square grid does under this projection.
+Every module of the QR becomes a building. The bit it carries picks one of two
+heights — dark modules are towers, light modules are low-rise — so the skyline
+IS the code, and the whole thing comes out as a diamond because the grid is
+projected at 45°.
 
-## What a decoder actually needs, and what this costs
+## Why 45° and not the tee's isometric
 
-A decoder does not read pixels, it reads a *plane*. It finds the three finder
-patterns, solves the transform from the module grid to the image, and samples
-each module's centre. An isometric projection of a flat grid is an affine map —
-a special case of that transform — so in principle a projected code is no harder
-to read than a QR photographed at an angle, which phones do all day.
+`tools/merch/iso.py` draws the merch city in true 30° isometric, which makes a
+square grid 1.73 times as wide as it is tall. That is the wrong shape for a
+round sticker: the wide diamond eats the disc's horizontal room and leaves the
+vertical unused. Squeezing the horizontal to K = 0.5 makes the projected grid a
+PERFECT SQUARE on its corner, and a square on its corner is the best thing you
+can put in a circle — it needs a radius of 0.5·side where an unrotated square
+needs 0.707·side. That is worth about 24% more module pitch out of the same
+sticker: 1.14 mm here against the flat code's 0.92 mm on the 2.5".
 
-Three things were measured on the way to this file, and all three are load-
-bearing:
+## What was measured on the way here
 
-  * **Streets break it outright.** A gutter between blocks was the first thing
-    tried. A finder pattern is a solid 7x7 field whose 1:1:3:1:1 run signature is
-    exactly what a decoder scans for, and cutting a gutter through it turns that
-    one run into a picket fence. A 0.16-cell street failed at every size.
-  * **Raised roofs move the signal off the plane.** A block drawn h units tall
-    puts its roof h up-screen from the cell the decoder samples. With pale walls
-    the module's own cell then reads light, and anything past about a tenth of a
-    cell started failing. Dark walls fix it — the tower's own cell stays dark all
-    the way down — and heights up to 0.4 of a cell then pass.
-  * **A kerb on light modules costs reads.** A faint grey roof on every light
-    module drags it toward the binariser's threshold. Bare paper is better.
+Every constant below was set by rendering the FINISHED sticker and decoding it
+back, not by taste. Four findings, each the opposite of the obvious choice:
 
-## The honest bottom line
+  * **Streets between blocks destroy the code.** A gutter was the first thing
+    tried, since it is what the tee does. But a finder pattern is a solid 7x7
+    field whose 1:1:3:1:1 run signature is exactly what a decoder scans for, and
+    a gutter turns that one run into a picket fence. A 0.16-cell street failed at
+    every size. Blocks touch — which is also the better city, since runs of dark
+    modules merge into single large buildings rather than a grid of huts.
+  * **Towers have a hard ceiling just past 0.62 of a cell.** Heights of
+    (0.18, 0.62) read 97% on a ten-width sweep; (0.25, 0.85) collapsed to 36%,
+    because a tower that tall buries the cell behind it.
+  * **Walls must be PALER than roofs here.** An earlier, shorter version wanted
+    the opposite. At 0.62 of a cell a tower's walls cover a real fraction of the
+    cell behind, so dark walls stop being shading and start being bit errors:
+    0.70/0.55 read 97% where 0.86/0.74 read 80%.
+  * **The low-rise gets walls but no roof tint.** Its roof is where the light
+    half of the code is sampled, so it stays bare paper; its two wall faces give
+    it shape. Measured, that reads slightly BETTER than drawing nothing at all
+    (98% vs 97% on the same sweep) — the shading lands on cell edges and gives
+    the binariser a cleaner boundary than an unbroken white field.
 
-Even with all three fixed, this does not match the flat code. Measured through
-the FINISHED sticker across a range of capture widths, the flat version decodes
-100% and this one about 80%, failing completely at some widths rather than
-degrading. Making the diamond bigger does not fix it and neither does the 3"
-stock, so it is not a resolution problem: the rhombus edges run at 30° and alias
-against the decoder's binariser at particular scales, where the flat code's
-axis-aligned edges never do.
+## The honest bottom line, and why it differs by stock
 
-So this ships as an opt-in style, not the default, and anything printed with it
-wants a phone test before a run — see the README.
+Swept densely — 19 capture widths from 180 to 720 px, twelve codes, decoded
+through the finished sticker:
+
+    2.5"  flat 100%      iso 83%   (fails at 180, 330, 570, 660)
+    3"    flat 100%      iso 97%   (only 180 is weak)
+
+The failures are not gradual: at particular widths every code fails and at the
+next width every code passes. The rhombus edges run at 45° and alias against the
+decoder's binariser at certain scales, where the flat code's axis-aligned edges
+never do. Note also that a coarse test grid HIDES this — a ten-width sweep of
+the same 2.5" design scored 97%, and only the denser grid found the bands.
+
+Which is why the recommendation is per stock: on the 3", where a module is
+1.37 mm, this is a real option. On the 2.5" it is a poster design, not a
+lamp-post one. Either way it is opt-in, and a printed sheet wants a phone test
+before a run — a moving hand-held camera does not sit at one fixed scale the way
+this harness does, which may well close the gap. Or may not.
 """
 
 import math
@@ -52,13 +70,27 @@ import segno
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "merch"))
 
-from iso import mix, project  # noqa: E402
+from iso import mix  # noqa: E402
 
-#: True 30° isometric, inherited from iso.py's `project`. One consequence worth
-#: knowing: the diamond is 2·cos30 ≈ 1.73 times as wide as it is tall, so inside
-#: a circle it is width that binds and the modules come out about 18% smaller
-#: than the same code drawn square.
-K = math.cos(math.radians(30))
+#: Horizontal foreshortening. The tee's city uses true 30° isometric
+#: (K = cos 30 ≈ 0.866), which makes the grid 1.73 times as wide as it is tall.
+#: Here it is 0.5, which makes the projected grid a PERFECT SQUARE stood on its
+#: corner — and that is not a stylistic preference, it is the best possible fit
+#: for a round sticker. A square of side s needs a circle of radius 0.707s; the
+#: same square rotated onto its corner needs only 0.5s. Turning the code 45°
+#: therefore buys about 40% more module pitch out of the same disc, which is why
+#: this version's modules end up LARGER than the flat code's rather than smaller.
+K = 0.5
+
+
+def project(x: float, y: float, z: float) -> tuple[float, float]:
+    """Grid space → screen. +x runs down-right, +y down-left, +z straight up.
+
+    Same handedness as iso.py, with the horizontal squeeze under our own K so
+    the diamond comes out square. The vertical axis stays dead vertical on
+    screen, which is what keeps a building's walls parallel and cheap to draw.
+    """
+    return ((x - y) * K, (x + y) * 0.5 - z)
 
 #: NO gutter, and this one is not negotiable. Streets between blocks were the
 #: first thing tried and they break the code outright: a finder pattern is a
@@ -68,26 +100,39 @@ K = math.cos(math.radians(30))
 #: everywhere. Blocks touching is also the better city: runs of dark modules
 #: merge into single large buildings instead of a uniform grid of huts.
 STREET = 0.0
-#: Light modules are bare paper, not a low kerb. A kerb was the first idea and
-#: it measurably costs reads: a faint grey roof on every light module drags it
-#: toward the binariser's threshold, and a light module that reads dark is a bit
-#: error. Measured through the finished sticker, dropping it took the pass rate
-#: from 70% to 73%, and dropping it AND darkening the walls took it to 91%.
-KERB_H = 0.0
-TOWER_H = (0.20, 0.30, 0.40, 0.26)   # the skyline dark modules choose from
+#: EVERY module is a building, and the bit it carries picks one of two heights.
+#: Nothing is drawn flat, so the city has no holes in it — what used to be bare
+#: paper between towers is now low-rise, and the skyline itself encodes the code.
+#: The two heights are the design's main knob and are swept in `sweep_heights`.
+#: Measured, not chosen. Through the finished sticker across ten capture widths:
+#: (0.10, 0.45) reads 90%, (0.18, 0.62) reads 97%, and (0.25, 0.85) collapses to
+#: 36%. There is a hard ceiling just past 0.62 — a tower that tall buries the
+#: cell behind it, and the code goes with it.
+H_LOW = 0.18         # light modules
+H_HIGH = 0.62        # dark modules
 
 # Ink coverage per face. Roofs carry the signal and take the full ink; walls
 # stay near the paper because their overlap into the cell behind is unavoidable.
 TONE_ROOF = 1.00
-#: Walls are nearly as dark as roofs. The 3D read would be stronger with paler
-#: walls, but a tower's own cell has to stay unambiguously dark all the way down
-#: — that is what lets the roofs sit raised at all — and pale walls measurably
-#: cost reads.
-TONE_LEFT = 0.86
-TONE_RIGHT = 0.74
-TONE_KERB_ROOF = 0.0                  # the ground is the paper
-TONE_KERB_LEFT = 0.0
-TONE_KERB_RIGHT = 0.0
+#: Paler than the roof, which is the opposite of what the earlier wide-isometric
+#: version wanted. The reason is the taller buildings: at 0.62 of a cell a
+#: tower's walls cover a real fraction of the cell behind it, so dark walls stop
+#: being harmless shading and start being a bit error. Measured at these
+#: heights, 0.70/0.55 reads 97% where 0.86/0.74 reads 80% — the softer shading
+#: is both prettier and more robust.
+TONE_LEFT = 0.70
+TONE_RIGHT = 0.55
+#: The low-rise: WALLS ONLY, no roof tint. Every square is a building, but the
+#: light half of the code has to stay light, so the low-rise gets its shape from
+#: the two wall faces and leaves its roof as bare paper. That is not a
+#: compromise — measured, walls-only at 0.28/0.20 reads 98% where drawing
+#: nothing at all reads 97%, because the shading lands on cell EDGES and gives
+#: the binariser a cleaner boundary than an unbroken white field does. Tinting
+#: the roofs as well is what costs reads, since a roof sits where the module is
+#: sampled.
+TONE_LOW_ROOF = 0.0
+TONE_LOW_LEFT = 0.28
+TONE_LOW_RIGHT = 0.20
 
 
 def tones_for(paper: str, ink: str) -> dict:
@@ -102,9 +147,9 @@ def tones_for(paper: str, ink: str) -> dict:
         "roof": mix(paper, ink, TONE_ROOF),
         "left": mix(paper, ink, TONE_LEFT),
         "right": mix(paper, ink, TONE_RIGHT),
-        "kerb_roof": mix(paper, ink, TONE_KERB_ROOF),
-        "kerb_left": mix(paper, ink, TONE_KERB_LEFT),
-        "kerb_right": mix(paper, ink, TONE_KERB_RIGHT),
+        "low_roof": mix(paper, ink, TONE_LOW_ROOF),
+        "low_left": mix(paper, ink, TONE_LOW_LEFT),
+        "low_right": mix(paper, ink, TONE_LOW_RIGHT),
     }
 
 
@@ -113,14 +158,15 @@ def _poly(points, fill):
     return f'<polygon points="{pts}" fill="{fill}"/>'
 
 
-def _tower_height(col: int, row: int) -> float:
-    """A fixed skyline — the same module is the same height on every build.
+def _height(dark: bool) -> float:
+    """Binary: the module's own bit is the skyline.
 
-    Coprime strides rather than a hash, borrowed from iso.py: they guarantee no
-    two neighbours land on the same step, which is what stops a field of dark
-    modules reading as one flat slab.
+    No decorative jitter. An earlier version varied dark modules across four
+    steps for a livelier roofline, and it measurably cost reads — every extra
+    distinct roof height is another plane the decoder has to reconcile. Here the
+    only two planes in the drawing are the ones the code itself asks for.
     """
-    return TOWER_H[(col * 3 + row * 2) % len(TOWER_H)]
+    return H_HIGH if dark else H_LOW
 
 
 def _block(col: int, row: int, height: float, tones: dict, dark: bool) -> tuple[str, list]:
@@ -147,7 +193,7 @@ def _block(col: int, row: int, height: float, tones: dict, dark: bool) -> tuple[
     right = [(x1, y0, height), (x1, y1, height), (x1, y1, 0), (x1, y0, 0)]
 
     keys = (("left", "right", "roof") if dark
-            else ("kerb_left", "kerb_right", "kerb_roof"))
+            else ("low_left", "low_right", "low_roof"))
     out, points = [], []
     for corners, key in zip((left, right, roof), keys):
         flat = [project(*c) for c in corners]
@@ -174,7 +220,7 @@ def iso_qr(url: str, tones: dict, *, scale_h: float = 1.0,
 
     out, points = [], []
     for col, row, dark in cells:
-        height = (_tower_height(col, row) if dark else KERB_H) * scale_h
+        height = _height(bool(dark)) * scale_h
         markup, pts = _block(col, row, height, tones, bool(dark))
         out.append(markup)
         points += pts
@@ -219,8 +265,11 @@ def block_for_width(url: str, tones: dict, width: float, *, scale_h: float = 1.0
     body, (x0, y0, x1, y1), n = iso_qr(url, tones, scale_h=scale_h)
     s = width / (x1 - x0)
     height = (y1 - y0) * s
-    cell = width / (n * 2 * K)      # inches per cell unit
-    pitch = cell                     # the rhombus's short diagonal
+    # A cell projects to a rhombus with diagonals 2K and 1 in cell units. With
+    # K = 0.5 both are 1, so it is a square on its corner and its INSCRIBED
+    # width — the honest "how fine is a module" number — is the diagonal / √2.
+    cell = width / n
+    pitch = cell / math.sqrt(2) if K == 0.5 else cell * 2 * K / math.sqrt(2)
     markup = (f'<g transform="translate({-x0 * s:.3f},{-y0 * s:.3f}) '
               f'scale({s:.6f})">{body}</g>')
     return markup, width, height, pitch

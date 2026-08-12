@@ -94,11 +94,12 @@ WEIGHT = 700             # the variable font's maximum. Free, in the only sense
                          # advance is identical at every weight — a bolder cut
                          # sets at exactly the same size and simply puts more
                          # ink on the paper.
-#: The isometric city's diamond width, × die. It can be much larger than the
-#: flat code's square because the projection makes it SHORT — 1.73 times as wide
-#: as it is tall — so it fills the circle's widest chord and hands the vertical
-#: room back to the type.
-ISO_SIZE = 0.76
+#: The city's diamond width, × die. The diamond is a square stood on its corner,
+#: so it fits the disc far better than an unrotated square and buys about 24%
+#: more module pitch than the flat code (1.14 mm vs 0.92) — but it is also as
+#: tall as it is wide, so every step up is paid for in type size. 0.52 is where
+#: that trade sits: a materially coarser code, and the line still sets at 16 pt.
+ISO_SIZE = 0.52
 MAX_LINES = 4
 CAP_RATIO = 0.085        # cap height ceiling, × die — past this a two-word line
                          # out-shouts the code it exists to deliver
@@ -347,7 +348,9 @@ def _reach(code_w: float, code_h: float, top: float, quiet: float,
 
     For the flat code that is a bounding-box corner. For the diamond it is a
     VERTEX — using the bounding box there would reject layouts that fit
-    comfortably, since the diamond's corners are empty paper.
+    comfortably, since the diamond's corners are empty paper. That distinction
+    is the whole reason the rotated code buys anything: a square of side s needs
+    a circle of radius 0.707s, the same square on its corner needs 0.5s.
     """
     cx, cy = 0.0, top + code_h / 2
     if style == "iso":

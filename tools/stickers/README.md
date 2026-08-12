@@ -203,44 +203,58 @@ is the right setting for a thing that lives outdoors and gets rained on. The
 same URL in lowercase falls into byte mode and needs 33 modules in the same 1.1
 inches. The server lowercases the path, so the shouting never reaches anyone.
 
-## The isometric city (`--style iso`)
+## The city (`--style iso`)
 
-The code drawn as a city: every module a block in the same 30° isometric as the
-`tee-isogrid` merch, dark modules standing up as buildings, the whole code coming
-out as a diamond because that is what a square grid does under this projection.
+The code drawn as a city stood on its corner: every module is a building, the
+bit it carries picks one of two heights, and the skyline *is* the code.
 
 ```bash
-./env/bin/python build_stickers.py --messages wait --style iso
+./env/bin/python build_stickers.py --stock 3 --messages wait --style iso
 ./env/bin/python verify_scan.py          # ← do not skip this one
 ```
 
-It is **opt-in, not the default**, and the reason is measured rather than
-aesthetic. Decoded through the finished sticker across a range of capture
-widths, the flat code reads **100%** and the city about **80%** — and it fails
-*completely* at particular widths rather than degrading gracefully. Bigger
-diamonds do not fix it and neither does the 3" stock, so it is not a resolution
-problem: the rhombus edges run at 30° and alias against the decoder's binariser
-at certain scales, where the flat code's axis-aligned edges never do.
+**Use it on the 3", not the 2.5".** Swept across 19 capture widths and twelve
+codes, decoded through the finished sticker:
 
-Three things were learned getting it that far, all of them load-bearing and all
-of them counter-intuitive:
+| | module | type | decodes |
+|---|---|---|---|
+| 2.5" flat | 0.92 mm | 17.8 pt | **100%** |
+| 2.5" city | 1.14 mm | 15.9 pt | 83% |
+| 3" flat | 1.10 mm | 21.4 pt | **100%** |
+| 3" city | **1.37 mm** | 19.0 pt | **97%** |
+
+Projecting at 45° rather than the tee's 30° isometric is what makes the modules
+*bigger* than the flat code's: a square on its corner needs a circle of radius
+0.5·side where an unrotated square needs 0.707·side, so rotating the code buys
+about 24% more pitch out of the same disc. It costs some type size, because the
+diamond is as tall as it is wide.
+
+The failures are not gradual — at particular capture widths every code fails and
+at the next width every code passes, because the 45° edges alias against the
+decoder's binariser where axis-aligned ones never do. **A coarse test grid hides
+this**: a ten-width sweep of the same 2.5" design scored 97%, and only the dense
+grid found the bands. On the 3" the bigger modules put it over the line.
+
+Four things were learned getting there, each the opposite of the obvious choice:
 
 - **Streets between blocks destroy the code.** A finder pattern is a solid 7×7
   field whose 1:1:3:1:1 run signature is what a decoder scans for; a gutter turns
   that one run into a picket fence. Blocks must touch — which is also the better
   city, since runs of dark modules merge into single large buildings.
-- **Roofs must be dark all the way down.** Raising a roof moves the signal
-  off the plane the decoder solved for. With pale walls the tower's own cell
-  reads light and it breaks past a tenth of a cell; with walls nearly as dark as
-  the roof, towers up to 0.4 of a cell pass. That is why the shading is subtle —
-  a stronger 3D read costs scans.
-- **The ground is bare paper.** A faint grey kerb on light modules drags them
-  toward the binariser's threshold. Removing it, plus the dark walls, took the
-  pass rate from 70% to 91% at the sizes tested.
+- **Towers have a hard ceiling just past 0.62 of a cell.** (0.18, 0.62) reads
+  97%; (0.25, 0.85) collapses to 36%, because a tower that tall buries the cell
+  behind it.
+- **Walls must be paler than roofs.** At 0.62 of a cell a tower's walls cover a
+  real fraction of the cell behind, so dark walls stop being shading and start
+  being bit errors: 0.70/0.55 reads 97% where 0.86/0.74 reads 80%.
+- **The low-rise gets walls but no roof tint.** Its roof is where the light half
+  of the code is sampled, so it stays bare paper. That reads slightly *better*
+  than drawing nothing at all — the shading lands on cell edges and gives the
+  binariser a cleaner boundary than an unbroken white field.
 
-**Before printing a run of these, phone-test one off paper.** Software decoders
-are not phones, and the gap here is exactly the kind a real camera might close —
-or might not. That test costs one sheet and settles it.
+**Phone-test a printed sheet before a run.** A hand-held camera does not sit at
+one fixed scale the way this harness does, so it may well close the remaining
+gap — or may not. One sheet settles it.
 
 ## Painted codes (qrart)
 
