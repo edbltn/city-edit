@@ -5,6 +5,7 @@ Build the City Edit sticker sheets.
     ./env/bin/python build_stickers.py                    # the three starters
     ./env/bin/python build_stickers.py --all              # every message
     ./env/bin/python build_stickers.py --stock 3 --proof  # 3" + registration proof
+    ./env/bin/python build_stickers.py --art "PROMPT" --art-dry-run  # qrart, costed
 
 Writes, into out/<stock>/:
 
@@ -46,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import campaign  # noqa: E402
 import codes as codes_mod  # noqa: E402
+import qrart_bridge  # noqa: E402
 import sheet as sheet_mod  # noqa: E402
 import sticker as art  # noqa: E402
 
@@ -59,13 +61,13 @@ PROOF_PAPER = "#ffffff"
 
 
 def sheet_svg(stock, placements, *, proof: bool) -> str:
-    """One Letter sheet. `placements` is a list of (col, row, line, url)."""
+    """One Letter sheet. `placements` is a list of (col, row, line, url, art)."""
     w, h = sheet_mod.PAGE_W * DPI, sheet_mod.PAGE_H * DPI
     body = [f'<rect width="{w}" height="{h}" fill="{PROOF_PAPER}"/>'] if proof else []
 
-    for col, row, line, url in placements:
+    for col, row, line, url, art_path in placements:
         cx_in, cy_in = stock.centre(col, row)
-        canvas, svg = art.disc(line, url, stock.die, stock.bleed)
+        canvas, svg = art.disc(line, url, stock.die, stock.bleed, art=art_path)
         x = cx_in * DPI - canvas / 2
         y = cy_in * DPI - canvas / 2
         body.append(f'<g transform="translate({x:.2f},{y:.2f})">{svg}</g>')
@@ -77,7 +79,8 @@ def sheet_svg(stock, placements, *, proof: bool) -> str:
             )
 
     return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
+        f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'xmlns:xlink="http://www.w3.org/1999/xlink" width="{w}" height="{h}" '
         f'viewBox="0 0 {w} {h}">{"".join(body)}</svg>'
     )
 
@@ -107,8 +110,49 @@ def plan(stock, keys: list[str], copies: int) -> list[dict]:
                 "sheet": i // stock.per_sheet,
                 "col": (i % stock.per_sheet) % stock.across,
                 "row": (i % stock.per_sheet) // stock.across,
+                # Filled in by paint() when --art is on; empty means the plain
+                # vector code, which is what every sticker gets by default.
+                "art": None,
             })
     return rows
+
+
+def paint(rows, spec: qrart_bridge.ArtSpec, *, dry_run: bool) -> int:
+    """Give every sticker in the run a qrart-painted code. Returns the count
+    that got one.
+
+    Art is per CODE, and every sticker has a different code — that is the whole
+    premise of the scan flow — so this is one diffusion run per sticker, not one
+    per design. At the defaults that is roughly an hour per twelve-up sheet, so
+    the estimate is printed first and `--art-dry-run` stops here.
+
+    A code that yields nothing scannable falls back to its plain vector version
+    rather than failing the sheet: a sticker that scans is worth more than a
+    sticker that is pretty, and one stubborn code should not throw away an
+    hour of finished work. The count of fallbacks is reported at the end.
+    """
+    ok, reason = qrart_bridge.availability()
+    print(f"  qrart: {reason}")
+    if not ok:
+        raise SystemExit(1)
+    print(f"  {qrart_bridge.estimate(len(rows), spec)}")
+
+    cached = sum(1 for r in rows if qrart_bridge.cached_art(r["url"], spec))
+    print(f"  {cached}/{len(rows)} already in art-cache/")
+    if dry_run:
+        print("  --art-dry-run: stopping before any generation")
+        raise SystemExit(0)
+
+    painted = 0
+    for i, r in enumerate(rows, 1):
+        print(f"  [{i}/{len(rows)}] {r['message']} {r['code']}")
+        got = qrart_bridge.generate_art(r["url"], spec)
+        if got:
+            r["art"] = str(got)
+            painted += 1
+    if painted < len(rows):
+        print(f"  {len(rows) - painted} sticker(s) fell back to the plain code")
+    return painted
 
 
 def write_sheets(stock, rows, out: Path, *, proof: bool) -> list[Path]:
@@ -118,14 +162,25 @@ def write_sheets(stock, rows, out: Path, *, proof: bool) -> list[Path]:
         by_sheet.setdefault((r["message"], r["sheet"]), []).append(r)
 
     for (message, n), group in sorted(by_sheet.items()):
-        placements = [(r["col"], r["row"], r["line"], r["url"]) for r in group]
+        placements = [(r["col"], r["row"], r["line"], r["url"],
+                       Path(r["art"]) if r.get("art") else None) for r in group]
         stem = f'{message}-{n + 1}'
 
         svg = sheet_svg(stock, placements, proof=False)
         (out / f"{stem}.svg").write_text(svg)
+        # The SVG master keeps a transparent field, because on paper the field
+        # IS the label stock and nothing should be printed there. The PNG does
+        # not get that luxury: it is the file that gets opened, previewed and
+        # handed to a print dialog, and transparency composites against whatever
+        # is behind it — which in Preview and Finder is a mid grey, turning
+        # near-black type into something you can barely read. So the PNG is
+        # flattened onto white. It prints identically (a consumer printer lays
+        # no ink for white on white paper) and it can no longer be previewed,
+        # or composited, onto the wrong colour.
         cairosvg.svg2png(bytestring=svg.encode(), write_to=str(out / f"{stem}.png"),
                          output_width=int(sheet_mod.PAGE_W * DPI),
-                         output_height=int(sheet_mod.PAGE_H * DPI))
+                         output_height=int(sheet_mod.PAGE_H * DPI),
+                         background_color=PROOF_PAPER)
         written += [out / f"{stem}.svg", out / f"{stem}.png"]
 
         if proof:
@@ -142,12 +197,12 @@ def write_sheets(stock, rows, out: Path, *, proof: bool) -> list[Path]:
 def write_manifest(rows, out: Path) -> Path:
     path = out / "manifest.csv"
     cols = ["stock", "message", "line", "vote_type", "kind", "src", "code",
-            "url", "sheet", "col", "row"]
+            "url", "sheet", "col", "row", "art"]
     with path.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
         for r in rows:
-            w.writerow({c: r[c] for c in cols})
+            w.writerow({c: r.get(c) or "" for c in cols})
     return path
 
 
@@ -189,10 +244,15 @@ def contact_sheet(stock, keys: list[str], rows, out: Path) -> Path:
     for key in keys:
         s = campaign.BY_KEY[key]
         url = codes_mod.url_for(codes_mod.mint(key, 0, stock.key))
-        _canvas, svg = art.disc(s.display, url, stock.die, stock.bleed)
+        first = next((r for r in rows if r["message"] == key), None)
+        art_path = Path(first["art"]) if first and first.get("art") else None
+        _canvas, svg = art.disc(s.display, url, stock.die, stock.bleed,
+                                art=art_path)
         m = art.metrics(s.display, url, stock.die, stock.bleed)
         px = (stock.die + 2 * stock.bleed) * DPI
-        one = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {px} {px}" '
+        one = (f'<svg xmlns="http://www.w3.org/2000/svg" '
+               f'xmlns:xlink="http://www.w3.org/1999/xlink" '
+               f'viewBox="0 0 {px} {px}" '
                f'width="{px}" height="{px}">{svg}</svg>')
         b64 = base64.b64encode(one.encode()).decode()
         cards.append(f"""
@@ -277,6 +337,33 @@ def main():
     ap.add_argument("--proof", action="store_true",
                     help="also write registration proofs with die outlines")
     ap.add_argument("--clean", action="store_true", help="wipe out/ first")
+
+    art_g = ap.add_argument_group(
+        "qrart", "Paint the codes with qrart instead of drawing plain modules. "
+                 "Off by default. One diffusion run PER STICKER — see --art-dry-run."
+    )
+    art_g.add_argument("--art", metavar="PROMPT",
+                       help="prompt for the painted code, e.g. "
+                            "\"aerial view of a dense city at dusk, ink and gold\"")
+    art_g.add_argument("--art-dry-run", action="store_true",
+                       help="report qrart readiness, cache hits and the time "
+                            "estimate, then stop before generating anything")
+    art_g.add_argument("--art-ref", type=Path,
+                       help="reference image (IP-Adapter): steers palette and mood")
+    art_g.add_argument("--art-ref-scale", type=float, default=0.6,
+                       help="reference influence 0-1; >0.8 fights the QR")
+    art_g.add_argument("--art-strength", type=float, default=1.1,
+                       help="ControlNet scale — the art vs scannability dial. "
+                            "0.9 fragile, 1.1 balanced, 1.3+ obviously a QR")
+    art_g.add_argument("--art-candidates", type=int, default=4,
+                       help="images per code; the first that decodes to that "
+                            "code's own URL wins")
+    art_g.add_argument("--art-steps", type=int, default=30, help="diffusion steps")
+    art_g.add_argument("--art-cfg", type=float, default=7.0, help="guidance scale")
+    art_g.add_argument("--art-size", type=int, default=768,
+                       help="square resolution of the painted code")
+    art_g.add_argument("--art-seed", type=int, help="base seed (random if unset)")
+    art_g.add_argument("--art-negative", default=qrart_bridge.DEFAULT_NEGATIVE)
     args = ap.parse_args()
 
     problems = campaign.validate()
@@ -306,6 +393,18 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
 
     rows = plan(stock, keys, copies)
+
+    if args.art or args.art_dry_run:
+        if not args.art:
+            print("--art-dry-run needs --art \"<prompt>\"", file=sys.stderr)
+            return 1
+        paint(rows, qrart_bridge.ArtSpec(
+            args.art, negative=args.art_negative, ref=args.art_ref,
+            ref_scale=args.art_ref_scale, qr_strength=args.art_strength,
+            steps=args.art_steps, cfg=args.art_cfg, size=args.art_size,
+            candidates=args.art_candidates, seed=args.art_seed,
+        ), dry_run=args.art_dry_run)
+
     write_sheets(stock, rows, out, proof=args.proof)
     write_manifest(rows, out)
     write_seed(rows, out)

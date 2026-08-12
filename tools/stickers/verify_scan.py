@@ -61,10 +61,18 @@ import sticker as art  # noqa: E402
 OUT = Path(__file__).parent / "out"
 
 
-def render_disc(line: str, url: str, die: float, bleed: float, px: int) -> np.ndarray:
-    """The finished artwork, rasterised to a greyscale capture `px` wide."""
-    canvas, body = art.disc(line, url, die, bleed)
-    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{canvas}" '
+def render_disc(line: str, url: str, die: float, bleed: float, px: int,
+                art_path: Path | None = None) -> np.ndarray:
+    """The finished artwork, rasterised to a greyscale capture `px` wide.
+
+    `art_path` re-applies whatever qrart painted for this code. It matters more
+    here than anywhere else: a diffusion-painted code trades error-correction
+    headroom for looks, so this check stops being a formality and becomes the
+    thing that decides whether a painted run is printable at all.
+    """
+    canvas, body = art.disc(line, url, die, bleed, art=art_path)
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" '
+           f'xmlns:xlink="http://www.w3.org/1999/xlink" width="{canvas}" '
            f'height="{canvas}" viewBox="0 0 {canvas} {canvas}">{body}</svg>')
     png = cairosvg.svg2png(bytestring=svg.encode(), output_width=px,
                            output_height=px, background_color="#ffffff")
@@ -117,7 +125,8 @@ def main():
         bad, cv_ok = [], 0
         for r in rows:
             stock = sheet_mod.STOCKS[r["stock"]]
-            img = render_disc(r["line"], r["url"], stock.die, stock.bleed, px)
+            img = render_disc(r["line"], r["url"], stock.die, stock.bleed, px,
+                              Path(r["art"]) if r.get("art") else None)
             if read_zxing(img) != r["url"]:
                 bad.append(r)
             if read_opencv(img) == r["url"]:
@@ -138,9 +147,11 @@ def main():
     if failed:
         print(f"{failed} capture size(s) failed", file=sys.stderr)
         return 1
+    painted = sum(1 for r in rows if r.get("art"))
     print(f"all {len(rows)} stickers decode to the URL the manifest expects")
     print(f"{codes_mod.CODE_LEN}-char codes, {modules} modules, "
-          f"error correction H, {len({r['stock'] for r in rows})} stock(s)")
+          f"error correction H, {len({r['stock'] for r in rows})} stock(s), "
+          f"{painted} qrart-painted")
     return 0
 
 

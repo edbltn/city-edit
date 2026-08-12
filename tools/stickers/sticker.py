@@ -45,6 +45,7 @@ typography — lines flush to a measure, sized by their own length — with the
 measure varying per line because the paper is round.
 """
 
+import base64
 import math
 import sys
 from pathlib import Path
@@ -74,18 +75,25 @@ ACCENT = "#9A6410"       # The band. --accent (#E0A23A) cut deeper, because the
 
 BAND_WIDTH = 0.045       # visible band, × die
 GUTTER = 0.032           # clear space between band and any content, × die
-QR_SIZE = 0.44           # drawn module area, × die. Tuned against the whole
+QR_SIZE = 0.42           # drawn module area, × die. Tuned against the whole
                          # line at 2.5": bigger starves the type (0.50 drops the
-                         # longest line to 8 pt), smaller buys almost nothing
-                         # back and makes the code timid on the thing whose
-                         # entire job is to be scanned.
+                         # longest line to 8 pt), smaller buys little back and
+                         # makes the code timid on the thing whose entire job is
+                         # to be scanned. At 0.42 a module is 0.92 mm — still
+                         # more than twice the 0.4 mm a phone camera needs.
 QR_GAP = 0.042           # code baseline to cap-top of the first line, × die
 QR_QUIET = 4             # modules of quiet zone, the QR spec's minimum
-TRACKING = 0.05          # em, on the line
-LEADING = 1.06           # × type size
-WEIGHT = 600
-MAX_LINES = 3
-CAP_RATIO = 0.075        # cap height ceiling, × die — past this a two-word line
+TRACKING = 0.02          # em, on the line. Kept small: inside a circle the
+                         # binding constraint is the CHORD, so every em of
+                         # tracking is paid for directly in type size.
+LEADING = 1.00           # × type size
+WEIGHT = 700             # the variable font's maximum. Free, in the only sense
+                         # that matters here: Red Hat Mono is monospaced, so its
+                         # advance is identical at every weight — a bolder cut
+                         # sets at exactly the same size and simply puts more
+                         # ink on the paper.
+MAX_LINES = 4
+CAP_RATIO = 0.085        # cap height ceiling, × die — past this a two-word line
                          # out-shouts the code it exists to deliver
 OPTICAL_RISE = 0.020     # × die. Type is visually lighter than a solid code, so
                          # a mathematically centred block sits low.
@@ -132,6 +140,26 @@ def qr_modules(url: str) -> int:
     """Module count of the code this URL produces — the density knob the sheet
     report prints, since it decides the physical size of one module."""
     return len(segno.make(url, error="h").matrix)
+
+
+def art_image(path: Path, x: float, y: float, size: float) -> str:
+    """A diffusion-painted code (qrart) in place of the drawn modules.
+
+    Embedded as a base64 data URI rather than a file reference, so the SVG stays
+    the same self-contained single file the vector version is — one that can be
+    mailed to a print shop without an assets folder.
+
+    The painted image includes its own quiet zone (qrart encodes with the QR
+    spec's 4-module border), so `size` here is the FULL quiet square, not the
+    module square. Sizing it that way keeps the module pitch identical to the
+    vector version, which means the painted sticker occupies exactly the
+    envelope the composition already reserved and nothing else has to move.
+    """
+    b64 = base64.b64encode(path.read_bytes()).decode()
+    return (f'<image x="{x:.2f}" y="{y:.2f}" width="{size:.2f}" height="{size:.2f}" '
+            f'preserveAspectRatio="none" '
+            f'xlink:href="data:image/png;base64,{b64}" '
+            f'href="data:image/png;base64,{b64}"/>')
 
 
 # --------------------------------------------------------------------------
@@ -264,13 +292,16 @@ def set_line(line: str, die: float, qr_bottom: float,
 class Layout:
     """A solved sticker: where the code sits, how the line broke, how big it set."""
 
-    def __init__(self, band_inner, content_r, qr_side, qr_top, modules,
+    def __init__(self, band_inner, content_r, qr_side, qr_top, modules, quiet,
                  lines, size, first_base):
         self.band_inner = band_inner
         self.content_r = content_r
         self.qr_side = qr_side
         self.qr_top = qr_top
         self.modules = modules
+        #: One quiet-zone margin, in inches. Bare stock in the vector version;
+        #: painted, and part of the image, when qrart art is supplied.
+        self.quiet = quiet
         self.lines = lines
         self.size = size
         self.first_base = first_base
@@ -330,17 +361,23 @@ def compose(line: str, url: str, die: float) -> Layout:
     qr_top = max(qr_top, -qr_ceiling)
     lines, size, first_base = set_line(line, die, qr_top + qr_side, content_r)
 
-    return Layout(band_inner, content_r, qr_side, qr_top, modules,
+    return Layout(band_inner, content_r, qr_side, qr_top, modules, quiet,
                   lines, size, first_base)
 
 
 def disc(line: str, url: str, die: float, bleed: float,
-         *, ink: str = INK, accent: str = ACCENT) -> tuple[float, str]:
+         *, ink: str = INK, accent: str = ACCENT,
+         art: Path | None = None) -> tuple[float, str]:
     """Draw one sticker.
 
     Returns (canvas size in px, SVG body). The canvas is the die plus bleed on
     every side, and the origin of the returned body is that canvas's top-left,
     so a sheet can place it with a single translate.
+
+    `art` is an optional qrart-painted code (see qrart_bridge.py) that replaces
+    the drawn modules. Nothing else about the sticker changes: same band, same
+    line, same geometry — the painted image lands in exactly the envelope the
+    module grid would have occupied.
     """
     r = die / 2.0
     canvas_in = die + 2 * bleed
@@ -365,9 +402,17 @@ def disc(line: str, url: str, die: float, bleed: float,
         f'"/>'
     )
 
-    body.append(
-        qr_paths(url, cx - _px(qr_side) / 2, cy + _px(qr_top), _px(qr_side), ink)
-    )
+    if art is not None:
+        # The painted image carries its own quiet zone, so it is drawn one
+        # quiet margin larger on every side than the module square.
+        full = qr_side + 2 * lay.quiet
+        body.append(art_image(
+            art, cx - _px(full) / 2, cy + _px(qr_top - lay.quiet), _px(full)
+        ))
+    else:
+        body.append(
+            qr_paths(url, cx - _px(qr_side) / 2, cy + _px(qr_top), _px(qr_side), ink)
+        )
 
     for i, ln in enumerate(lay.lines):
         base = lay.first_base + i * LEADING * lay.size

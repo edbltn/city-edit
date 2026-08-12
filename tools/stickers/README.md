@@ -177,6 +177,13 @@ deliberately overshoots it. A drifted sheet reads as a band a hair thicker on on
 side instead of a white crescent down the edge of every sticker. Each stock's
 bleed is capped at half the gap to its neighbour, and the build checks it.
 
+**The type is bold and large on purpose.** Red Hat Mono is monospaced, so its
+advance is identical at every weight — the heaviest cut sets at exactly the same
+size and simply puts more ink on the paper, which makes weight 700 free. Tracking
+is kept to 0.02 em for the opposite reason: inside a circle the binding
+constraint is the chord, so every em of tracking is paid for directly in type
+size.
+
 **The type is solved, not laid out.** A line inside a circle has a chord for a
 measure, and the chord shrinks the further it sits from the centre. Set "TIRED
 OF WAITING?" as one line under the code and it fits at about ten point —
@@ -195,6 +202,62 @@ of byte mode's 8. That fits the link into a 29-module code at error correction
 is the right setting for a thing that lives outdoors and gets rained on. The
 same URL in lowercase falls into byte mode and needs 33 modules in the same 1.1
 inches. The server lowercases the path, so the shouting never reaches anyone.
+
+## Painted codes (qrart)
+
+The plain module grid can be replaced with a diffusion-painted one from
+[qrart](../../../qrart) — a sibling project, not part of this repo — which uses
+the clean QR as a ControlNet condition so Stable Diffusion paints your prompt
+while light and dark keep lining up with the modules. Nothing else about the
+sticker changes: same band, same line, same geometry.
+
+```bash
+# always start here: readiness, cache hits and a time estimate, no generation
+./env/bin/python build_stickers.py --messages wait \
+  --art "aerial view of a dense city at dusk, ink and gold, high detail" \
+  --art-dry-run
+
+# then, for real
+./env/bin/python build_stickers.py --messages wait --art "..." --art-strength 1.2
+./env/bin/python verify_scan.py     # ← now the gate that matters
+```
+
+**This is not free.** Art is per *code*, and every sticker has a different code —
+that is the entire premise of the scan flow — so a 12-up sheet is twelve
+diffusion runs, not one. At the defaults that is roughly **an hour per sheet** on
+Apple Silicon, plus a ~4 GB model download the first time. Results are cached in
+`art-cache/` keyed by payload plus every parameter that affects the image, so
+re-running a build is free and only a changed prompt or a new code pays again.
+The cache deliberately lives outside `out/`, where `--clean` cannot reach it.
+
+**Our payload is unusually well suited to this.** qrart's own guidance is that
+anything past ~60 characters pushes the code to a denser version and tanks the
+success rate — the model needs coarse modules to hide in. A sticker URL is 28
+characters in alphanumeric mode: a 29-module version-3 code, about as sparse as
+a useful URL gets. The short-code scheme was chosen for print legibility and
+turns out to be exactly what makes this technique viable.
+
+**Two gates, and the second one is ours.** qrart asks "does this decode?".
+`_qrart_worker.py` asks "does this decode to the URL printed on *this*
+sticker?" — a painted code that scans beautifully to the wrong place is worse
+than one that does not scan at all — and only an exact match is accepted, out of
+`--art-candidates` tries (seed variance in this technique is large). Then
+`verify_scan.py` re-renders the *finished disc* with the art in place and
+decodes that, which is the check that actually decides whether a painted run is
+printable. A code that yields nothing scannable falls back to its plain vector
+version rather than failing the sheet, and the count is reported.
+
+**Tuning.** `--art-strength` is the dial: 0.9 beautiful but fragile, 1.1
+balanced, 1.3+ obviously a QR. Prompts that work are textured and patchy —
+forests, hillside villages, clouds, crowds, circuitry, fabric — because they
+give the model places to hide modules; flat styles, big faces and empty skies
+fail. `--art-ref` takes a reference image (IP-Adapter) to steer palette and mood.
+
+**Finding qrart:** `QRART_PYTHON` (its venv interpreter), else `QRART_HOME`, else
+a checkout beside this repo. Nothing here imports qrart — it pulls in torch and
+diffusers, and this pipeline is six small packages and stays that way, so
+generation runs in qrart's own interpreter as a subprocess over a JSON pipe.
+With qrart absent the build produces exactly the vector stickers it always did.
 
 ## Verifying
 
@@ -238,3 +301,5 @@ physical objects that go on different poles and must never share an identity.
 | `sheet.py` | the two label stocks' grids, and the checks that they close |
 | `build_stickers.py` | the CLI: sheets, manifest, seed SQL, contact sheet |
 | `verify_scan.py` | decode the finished art back |
+| `qrart_bridge.py` | optional: locate qrart, cache painted codes |
+| `_qrart_worker.py` | runs inside qrart's venv; never imported here |
