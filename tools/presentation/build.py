@@ -191,8 +191,8 @@ def slides_blocks():
     pin = proposal_icon((0, 4), "safety", heat=0.92, selected=True, scale=1.7)
     add("07-top-proposal-point", "Point proposal",
         x_scene(lambda i, d: block_heat(d, HEATS[i], 2.0), ghost=0.5, extra=pin) +
-        lines(TEXT_X, [
-            "Per vote type, the **6 strongest edges**",
+        lines(TEXT_X, title="Top Point Proposals", lines_=[
+            "Per vote type, the **5 strongest blocks**",
             "compete, ranked by **net votes**.",
             "**No minimum** — one vote can earn a pin.",
             "Same-type pins stay **1 km** apart.",
@@ -257,7 +257,7 @@ def slide_route_proposal():
                          heat=0.95, selected=True, scale=2.3)
 
     add("08-top-proposal-route", "Route proposal", art +
-        lines(TEXT_X, [
+        lines(TEXT_X, title="Top Route Proposals", lines_=[
             "Start at the **highest vote count edge**.",
             "Grow along the strongest neighbor, both ways.",
             "Length budget: **2700 m + 660·√score**",

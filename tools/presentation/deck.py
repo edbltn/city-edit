@@ -301,11 +301,16 @@ def rich(x, y, text, size=21, dim=0.62, anchor="start"):
             f'xml:space="preserve">{"".join(spans)}</text>')
 
 
-def lines(x, lines_, size=25, leading=46, mid=450):
+def lines(x, lines_, size=25, leading=46, mid=450, title=None):
     """The slide's copy: plain mono at one size, keywords bold. No subtitles,
-       no second face — the only variation is what the words say."""
-    y0 = mid - (len(lines_) - 1) * leading / 2
-    return "".join(rich(x, y0 + i * leading, t, size, dim=0.66) for i, t in enumerate(lines_))
+       no second face — the only variation is what the words say. `title` sets
+       one bold line above the block, same face, a step larger."""
+    y0 = mid - (len(lines_) - 1) * leading / 2 + (34 if title else 0)
+    out = []
+    if title:
+        out.append(rich(x, y0 - 78, f"**{title}**", 32))
+    out += [rich(x, y0 + i * leading, t, size, dim=0.66) for i, t in enumerate(lines_)]
+    return "".join(out)
 
 
 # ---------------------------------------------------------------------------
