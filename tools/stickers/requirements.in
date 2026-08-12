@@ -1,0 +1,10 @@
+# Artwork
+segno          # QR codes
+fonttools      # Red Hat Mono outlining (shared with tools/merch/typo.py)
+cairosvg       # SVG → 300 DPI PNG
+pillow
+
+# verify_scan.py — decode the finished art back
+zxing-cpp                # the gate: the decoder lineage phone scanners use
+opencv-python-headless   # advisory second opinion + image loading
+numpy

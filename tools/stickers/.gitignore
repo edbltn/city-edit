@@ -1,0 +1,6 @@
+# Generated print files, manifests and seed SQL — the build is deterministic,
+# so these are always exactly reproducible from this directory.
+out/
+# Local venv symlink.
+env
+__pycache__/
