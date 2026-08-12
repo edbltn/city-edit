@@ -28,6 +28,14 @@ feet away, at an angle, in the rain, gets about four words.
 # round and the sticker stops working as a sticker.
 MAX_LINE = 26
 
+#: Three words, hard limit. The character cap above is about whether the type
+#: FITS; this is about whether anyone reads it. A sticker is taken in at a
+#: glance, side-on, while its reader is walking — and the four- and five-word
+#: lines this line-up started with were all worse than the three-word ones at
+#: exactly the moment that matters. Fewer words also set larger, since the type
+#: is sized by its own longest line.
+MAX_WORDS = 3
+
 
 class Sticker:
     """One printed message: the words, the vote it casts, the tag it reports."""
@@ -74,24 +82,16 @@ STICKERS = [
     # ── Point lines: a spot you are standing at ──────────────────────────
     _s("stand", "Nowhere to stand.", "Add pedestrian refuge island", "point",
        "The stranded-in-the-middle crossing."),
-    _s("blind", "You can't see the kids.", "Daylight this corner", "point",
-       "Parked cars at the corner, sightlines gone."),
     _s("dark", "It's dark here.", "Add intersection lighting", "point",
        "The unlit crossing."),
-    _s("turn", "They turn into you.", "Ban turn on red", "point",
-       "Right-on-red across the crosswalk you have the signal for."),
     _s("press", "Press. Wait. Wait.", "Fix signal timing", "point",
        "The beg-button variant of 'wait' — same vote, different joke."),
     _s("speed", "This corner kills.", "Fix dangerous intersection", "point",
        "The blunt one. Reserve it for corners that have a crash record."),
 
     # ── Route lines: a stretch you are walking along ─────────────────────
-    _s("slow", "Slow this street down.", "Add traffic calming", "route",
-       "The plain-language traffic-calming line."),
     _s("cross", "No way across.", "Add crosswalk", "route",
        "Long blocks with no marked crossing."),
-    _s("ledge", "This sidewalk is a ledge.", "Widen sidewalk", "route",
-       "Sidewalks narrowed to nothing by poles, sheds and kerb cuts."),
 ]
 
 BY_KEY = {s.key: s for s in STICKERS}
@@ -106,6 +106,11 @@ def validate() -> list[str]:
     problems = []
     seen_src = {}
     for s in STICKERS:
+        if len(s.line.split()) > MAX_WORDS:
+            problems.append(
+                f"{s.key}: {len(s.line.split())} words, max {MAX_WORDS} "
+                f"({s.line!r})"
+            )
         if len(s.display) > MAX_LINE:
             problems.append(
                 f"{s.key}: line is {len(s.display)} chars, max {MAX_LINE} "

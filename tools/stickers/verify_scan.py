@@ -62,7 +62,8 @@ OUT = Path(__file__).parent / "out"
 
 
 def render_disc(line: str, url: str, die: float, bleed: float, px: int,
-                art_path: Path | None = None, style: str = "flat") -> np.ndarray:
+                art_path: Path | None = None, style: str = "flat",
+                colourway: str = "dark") -> np.ndarray:
     """The finished artwork, rasterised to a greyscale capture `px` wide.
 
     `art_path` re-applies whatever qrart painted for this code. It matters more
@@ -70,12 +71,16 @@ def render_disc(line: str, url: str, die: float, bleed: float, px: int,
     headroom for looks, so this check stops being a formality and becomes the
     thing that decides whether a painted run is printable at all.
     """
-    canvas, body = art.disc(line, url, die, bleed, art=art_path, style=style)
+    canvas, body = art.disc(line, url, die, bleed, art=art_path, style=style,
+                            colourway=colourway)
     svg = (f'<svg xmlns="http://www.w3.org/2000/svg" '
            f'xmlns:xlink="http://www.w3.org/1999/xlink" width="{canvas}" '
            f'height="{canvas}" viewBox="0 0 {canvas} {canvas}">{body}</svg>')
+    # A mid grey behind the disc, not white: on the dark colourway a white
+    # ground would fuse with nothing and on the light one it would hide a
+    # missing field. Grey is what a pole looks like anyway.
     png = cairosvg.svg2png(bytestring=svg.encode(), output_width=px,
-                           output_height=px, background_color="#ffffff")
+                           output_height=px, background_color="#808080")
     return cv2.imdecode(np.frombuffer(png, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
 
 
@@ -127,7 +132,8 @@ def main():
             stock = sheet_mod.STOCKS[r["stock"]]
             img = render_disc(r["line"], r["url"], stock.die, stock.bleed, px,
                               Path(r["art"]) if r.get("art") else None,
-                              r.get("style") or "flat")
+                              r.get("style") or "flat",
+                              r.get("colourway") or "dark")
             if read_zxing(img) != r["url"]:
                 bad.append(r)
             if read_opencv(img) == r["url"]:

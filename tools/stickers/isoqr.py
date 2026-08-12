@@ -80,15 +80,17 @@ from iso import mix  # noqa: E402
 #: same square rotated onto its corner needs only 0.5s. Turning the code 45°
 #: therefore buys about 40% more module pitch out of the same disc, which is why
 #: this version's modules end up LARGER than the flat code's rather than smaller.
-K = 0.5
+K = math.cos(math.radians(30))
 
 
 def project(x: float, y: float, z: float) -> tuple[float, float]:
     """Grid space → screen. +x runs down-right, +y down-left, +z straight up.
 
-    Same handedness as iso.py, with the horizontal squeeze under our own K so
-    the diamond comes out square. The vertical axis stays dead vertical on
-    screen, which is what keeps a building's walls parallel and cheap to draw.
+    True 30° isometric, the same projection as iso.py. The one property this
+    design is built on falls straight out of it: a UNIT CUBE projects to a
+    REGULAR HEXAGON. Its eight corners land on six screen points — (0, ±1) and
+    (±cos30, ±½) — all exactly 1 from the centre. Draw the dark modules as unit
+    cubes and the code becomes a hexagonal tiling rather than a grid of boxes.
     """
     return ((x - y) * K, (x + y) * 0.5 - z)
 
@@ -104,12 +106,34 @@ STREET = 0.0
 #: Nothing is drawn flat, so the city has no holes in it — what used to be bare
 #: paper between towers is now low-rise, and the skyline itself encodes the code.
 #: The two heights are the design's main knob and are swept in `sweep_heights`.
-#: Measured, not chosen. Through the finished sticker across ten capture widths:
-#: (0.10, 0.45) reads 90%, (0.18, 0.62) reads 97%, and (0.25, 0.85) collapses to
-#: 36%. There is a hard ceiling just past 0.62 — a tower that tall buries the
-#: cell behind it, and the code goes with it.
-H_LOW = 0.18         # light modules
-H_HIGH = 0.62        # dark modules
+#: Cube height, in cells. This is the single knob that decides whether the thing
+#: scans, and the honest answer is that the most beautiful value is the one that
+#: does not work.
+#:
+#: At exactly 1.0 a cube projects to a REGULAR HEXAGON — all six silhouette
+#: corners land 1 unit from its centre — and a field of them tiles hexagonally.
+#: That is the true isometric look, and measured through the finished sticker it
+#: decodes 0% of the time, at every capture width, on both stocks and both
+#: colourways. Not "degrades": zero.
+#:
+#: The reason is the finder patterns. Each one is a solid 7x7 block wrapped in a
+#: ONE-module light ring, and that ring is exactly what a decoder scans for. A
+#: cube a full cell tall throws a wall a full cell wide, which covers its
+#: neighbour's ring completely — so the pattern the decoder is hunting for stops
+#: existing before any of the data matters.
+#:
+#: Measured, at true 30° isometric, cubes on dark modules only:
+#:
+#:     1.00 cell (regular hexagon)     0%
+#:     0.80                            0%
+#:     0.65                           14%
+#:     0.55                           58%
+#:     0.45                           77%
+#:
+#: So the default is 0.45 — a low box rather than a cube, still true isometric,
+#: still three shaded faces, but no longer a hexagon. Set it to 1.0 anywhere the
+#: code does not have to work: a poster, a screen, a tee.
+CUBE_H = 0.45
 
 # Ink coverage per face. Roofs carry the signal and take the full ink; walls
 # stay near the paper because their overlap into the cell behind is unavoidable.
@@ -158,15 +182,7 @@ def _poly(points, fill):
     return f'<polygon points="{pts}" fill="{fill}"/>'
 
 
-def _height(dark: bool) -> float:
-    """Binary: the module's own bit is the skyline.
 
-    No decorative jitter. An earlier version varied dark modules across four
-    steps for a livelier roofline, and it measurably cost reads — every extra
-    distinct roof height is another plane the decoder has to reconcile. Here the
-    only two planes in the drawing are the ones the code itself asks for.
-    """
-    return H_HIGH if dark else H_LOW
 
 
 def _block(col: int, row: int, height: float, tones: dict, dark: bool) -> tuple[str, list]:
@@ -192,8 +208,7 @@ def _block(col: int, row: int, height: float, tones: dict, dark: bool) -> tuple[
     left = [(x0, y1, height), (x1, y1, height), (x1, y1, 0), (x0, y1, 0)]
     right = [(x1, y0, height), (x1, y1, height), (x1, y1, 0), (x1, y0, 0)]
 
-    keys = (("left", "right", "roof") if dark
-            else ("low_left", "low_right", "low_roof"))
+    keys = ("left", "right", "roof")
     out, points = [], []
     for corners, key in zip((left, right, roof), keys):
         flat = [project(*c) for c in corners]
@@ -220,8 +235,11 @@ def iso_qr(url: str, tones: dict, *, scale_h: float = 1.0,
 
     out, points = [], []
     for col, row, dark in cells:
-        height = _height(bool(dark)) * scale_h
-        markup, pts = _block(col, row, height, tones, bool(dark))
+        if not dark:
+            # Light modules are empty ground. Nothing is drawn, so they stay the
+            # cleanest possible light — which is also what the decoder wants.
+            continue
+        markup, pts = _block(col, row, CUBE_H * scale_h, tones, True)
         out.append(markup)
         points += pts
 
@@ -265,11 +283,15 @@ def block_for_width(url: str, tones: dict, width: float, *, scale_h: float = 1.0
     body, (x0, y0, x1, y1), n = iso_qr(url, tones, scale_h=scale_h)
     s = width / (x1 - x0)
     height = (y1 - y0) * s
-    # A cell projects to a rhombus with diagonals 2K and 1 in cell units. With
-    # K = 0.5 both are 1, so it is a square on its corner and its INSCRIBED
-    # width — the honest "how fine is a module" number — is the diagonal / √2.
-    cell = width / n
-    pitch = cell / math.sqrt(2) if K == 0.5 else cell * 2 * K / math.sqrt(2)
+    # One cell unit, in inches. The projected grid is n·2K wide, so this is the
+    # scale everything else is quoted in: a cell's rhombus has a horizontal
+    # diagonal of 2K·s and a vertical diagonal of 1·s, and a step along either
+    # grid axis is exactly s (the axis vector (K, ½) has unit length).
+    #
+    # The number returned is the VERTICAL diagonal, which under true isometric
+    # is the short one — the honest answer to "how fine is a module", and the
+    # unit a quiet zone should be counted in.
+    pitch = width / (n * 2 * K)
     markup = (f'<g transform="translate({-x0 * s:.3f},{-y0 * s:.3f}) '
               f'scale({s:.6f})">{body}</g>')
     return markup, width, height, pitch

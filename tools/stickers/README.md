@@ -73,7 +73,8 @@ Visits by message are a group-by on `cityedit_map_load_ms` in Metrics Explorer.
 ## The line
 
 `campaign.py` holds every message, the vote type it casts, and why. The three
-starters, then nine more in the same voice.
+starters, then five more in the same voice — eight in all, every one of them
+three words or fewer.
 
 | Line | Casts | Kind |
 |------|-------|------|
@@ -81,18 +82,17 @@ starters, then nine more in the same voice.
 | Fix this intersection. | Add traffic calming | route |
 | Whose streets? | Add tree | point |
 | Nowhere to stand. | Add pedestrian refuge island | point |
-| You can't see the kids. | Daylight this corner | point |
 | It's dark here. | Add intersection lighting | point |
-| They turn into you. | Ban turn on red | point |
 | Press. Wait. Wait. | Fix signal timing | point |
 | This corner kills. | Fix dangerous intersection | point |
-| Slow this street down. | Add traffic calming | route |
 | No way across. | Add crosswalk | route |
-| This sidewalk is a ledge. | Widen sidewalk | route |
 
-Lines are capped at 26 characters. That is an editorial limit, not a rendering
-one — the art will set anything you give it, but a sticker read from six feet
-away, at an angle, in the rain, gets about four words.
+**Three words, hard limit.** The character cap is about whether the type *fits*;
+the word cap is about whether anyone reads it. A sticker is taken in at a glance,
+side-on, by someone walking. The four- and five-word lines this line-up started
+with ("You can't see the kids.", "This sidewalk is a ledge.") were all worse than
+the three-word ones at exactly that moment, and they set smaller too, since the
+type is sized by its own longest line. `campaign.validate()` enforces it.
 
 ### "Shorten the light signal"
 
@@ -203,58 +203,74 @@ is the right setting for a thing that lives outdoors and gets rained on. The
 same URL in lowercase falls into byte mode and needs 33 modules in the same 1.1
 inches. The server lowercases the path, so the shouting never reaches anyone.
 
-## The city (`--style iso`)
+## Colourways
 
-The code drawn as a city stood on its corner: every module is a building, the
-bit it carries picks one of two heights, and the skyline *is* the code.
+The default is now **white on black** — the app's own terminal palette printed,
+not a negative of the light version: `--paper` for the field, `--accent` for the
+band, a warm off-white for the type.
 
 ```bash
-./env/bin/python build_stickers.py --stock 3 --messages wait --style iso
+./env/bin/python build_stickers.py --all                    # dark (default)
+./env/bin/python build_stickers.py --all --colourway light   # dark ink on bare stock
+```
+
+Two things follow from it, and both are measured rather than assumed.
+
+**The code sits on a light chip, not knocked out of the black.** Inverted codes
+are a real compatibility risk: measured here, zxing reads a light-on-dark code
+and **OpenCV cannot read one at all**, at any size. Phone cameras mostly cope,
+but "mostly" is not good enough for the one element on the sticker that has to
+work — which is exactly the call `tools/merch/qr_tee.py` made for dark garments.
+With the chip, both decoders read it. It costs type size (14.9 pt against the
+light colourway's 17.8), because the chip has to cover the quiet zone too and
+the layout reserves the whole thing.
+
+**It costs ink.** The field is no longer bare stock, so a 2.5" disc is a full
+flood of near-black. On the 3" laser stock that is free; on the 2.5" **matte
+inkjet** paper it is slow to dry, prone to curl, and expensive. Use
+`--colourway light` there if in doubt.
+
+## The city (`--style iso`)
+
+The code as true 30° isometric cubes — the same projection as the `tee-isogrid`
+merch — sitting on the dark modules, with the light modules left as empty ground.
+
+```bash
+./env/bin/python build_stickers.py --messages wait --style iso
 ./env/bin/python verify_scan.py          # ← do not skip this one
 ```
 
-**Use it on the 3", not the 2.5".** Swept across 19 capture widths and twelve
-codes, decoded through the finished sticker:
+**The most beautiful version of this does not scan, and it is worth knowing why.**
+At a cube height of exactly 1 cell each cube projects to a *regular hexagon* —
+all six silhouette corners land the same distance from its centre — and a field
+of them tiles hexagonally. That is the true isometric look. Measured through the
+finished sticker it decodes **0%** of the time, at every capture width, on both
+stocks and both colourways. Not "degrades": zero.
 
-| | module | type | decodes |
-|---|---|---|---|
-| 2.5" flat | 0.92 mm | 17.8 pt | **100%** |
-| 2.5" city | 1.14 mm | 15.9 pt | 83% |
-| 3" flat | 1.10 mm | 21.4 pt | **100%** |
-| 3" city | **1.37 mm** | 19.0 pt | **97%** |
+The cause is the finder patterns. Each is a solid 7×7 block wrapped in a
+**one-module** light ring, and that ring is exactly what a decoder scans for. A
+cube a full cell tall throws a wall a full cell wide, which covers its
+neighbour's ring completely — so the pattern the decoder is hunting for stops
+existing before any of the data matters.
 
-Projecting at 45° rather than the tee's 30° isometric is what makes the modules
-*bigger* than the flat code's: a square on its corner needs a circle of radius
-0.5·side where an unrotated square needs 0.707·side, so rotating the code buys
-about 24% more pitch out of the same disc. It costs some type size, because the
-diamond is as tall as it is wide.
+Measured, true isometric, cubes on dark modules only:
 
-The failures are not gradual — at particular capture widths every code fails and
-at the next width every code passes, because the 45° edges alias against the
-decoder's binariser where axis-aligned ones never do. **A coarse test grid hides
-this**: a ten-width sweep of the same 2.5" design scored 97%, and only the dense
-grid found the bands. On the 3" the bigger modules put it over the line.
+| cube height | decodes |
+|---|---|
+| 1.00 cell (regular hexagon) | **0%** |
+| 0.80 | 0% |
+| 0.65 | 14% |
+| 0.55 | 58% |
+| 0.45 | 77% |
 
-Four things were learned getting there, each the opposite of the obvious choice:
+So `CUBE_H` defaults to **0.45** — a low box rather than a cube, still true
+isometric, still three shaded faces, but no longer a hexagon. Set it to `1.0`
+anywhere the code does not have to work: a poster, a screen, a tee.
 
-- **Streets between blocks destroy the code.** A finder pattern is a solid 7×7
-  field whose 1:1:3:1:1 run signature is what a decoder scans for; a gutter turns
-  that one run into a picket fence. Blocks must touch — which is also the better
-  city, since runs of dark modules merge into single large buildings.
-- **Towers have a hard ceiling just past 0.62 of a cell.** (0.18, 0.62) reads
-  97%; (0.25, 0.85) collapses to 36%, because a tower that tall buries the cell
-  behind it.
-- **Walls must be paler than roofs.** At 0.62 of a cell a tower's walls cover a
-  real fraction of the cell behind, so dark walls stop being shading and start
-  being bit errors: 0.70/0.55 reads 97% where 0.86/0.74 reads 80%.
-- **The low-rise gets walls but no roof tint.** Its roof is where the light half
-  of the code is sampled, so it stays bare paper. That reads slightly *better*
-  than drawing nothing at all — the shading lands on cell edges and gives the
-  binariser a cleaner boundary than an unbroken white field.
-
-**Phone-test a printed sheet before a run.** A hand-held camera does not sit at
-one fixed scale the way this harness does, so it may well close the remaining
-gap — or may not. One sheet settles it.
+Even at 0.45 this is 77% against the flat code's 100%, so it stays opt-in. Earlier
+attempts at a 45° square diamond and a two-height skyline are in the git history
+with their own measurements; the short version is that every one of them traded
+scans for looks, and the flat code has never lost a single read.
 
 ## Painted codes (qrart)
 

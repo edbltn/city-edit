@@ -71,6 +71,48 @@ ACCENT = "#9A6410"       # The band. --accent (#E0A23A) cut deeper, because the
                          # out to nothing on white.
 
 # --------------------------------------------------------------------------
+# Colourways
+# --------------------------------------------------------------------------
+# "dark" is the app's own palette — the terminal surface, its amber accent —
+# printed rather than inverted after the fact, so every tone is the one the
+# brand actually uses rather than a negative of the light version.
+#
+# It costs ink, and that is a real print consideration rather than a footnote:
+# the field is no longer bare stock, so a 2.5" disc is a full flood of near-black
+# on matte inkjet paper — slow to dry, prone to curl, and expensive. On the 3"
+# laser stock it is free. Print the light colourway on inkjet if in doubt.
+#
+# It also inverts the drift argument. With a printed field, registration error
+# would show as a white crescent at the die — so on this colourway the FIELD
+# bleeds past the die too, not just the band.
+
+COLOURWAYS = {
+    "light": {                  # dark ink on bare stock
+        "paper": "#ffffff",     # not printed — the label is the paper
+        "field": None,
+        "ink": INK,
+        "accent": ACCENT,
+        "code_panel": None,     # the stock is already the panel
+        "code_ink": INK,
+    },
+    "dark": {                   # the app's terminal palette, printed
+        "paper": "#0d0d0d",     # --paper
+        "field": "#0d0d0d",
+        "ink": "#f4f5f0",       # a warm off-white; pure white on black flares
+        "accent": "#E0A23A",    # --accent, at the value it was tuned for
+        # The code sits on a light chip rather than being knocked out of the
+        # black. Inverted codes are a real compatibility risk, not a theoretical
+        # one: measured here, zxing reads a light-on-dark code and OpenCV cannot
+        # read one AT ALL, at any size. Phone cameras mostly cope — but "mostly"
+        # is not good enough for the one element on the sticker that has to
+        # work, which is exactly the call tools/merch/qr_tee.py made for the
+        # same reason on dark garments.
+        "code_panel": "#f4f5f0",
+        "code_ink": "#0d0d0d",
+    },
+}
+
+# --------------------------------------------------------------------------
 # Geometry, all in inches and all as a fraction of the die, so the 2.5" and the
 # 3" are the same drawing at two sizes rather than two drawings.
 # --------------------------------------------------------------------------
@@ -99,7 +141,7 @@ WEIGHT = 700             # the variable font's maximum. Free, in the only sense
 #: more module pitch than the flat code (1.14 mm vs 0.92) — but it is also as
 #: tall as it is wide, so every step up is paid for in type size. 0.52 is where
 #: that trade sits: a materially coarser code, and the line still sets at 16 pt.
-ISO_SIZE = 0.52
+ISO_SIZE = 0.72
 MAX_LINES = 4
 CAP_RATIO = 0.085        # cap height ceiling, × die — past this a two-word line
                          # out-shouts the code it exists to deliver
@@ -301,7 +343,7 @@ class Layout:
     """A solved sticker: where the code sits, how the line broke, how big it set."""
 
     def __init__(self, band_inner, content_r, code_w, code_h, qr_top, modules,
-                 quiet, lines, size, first_base, style):
+                 quiet, lines, size, first_base, style, inset=0.0):
         self.band_inner = band_inner
         self.content_r = content_r
         #: The code block's drawn size. Square for the flat code; a wide, short
@@ -317,29 +359,44 @@ class Layout:
         self.size = size
         self.first_base = first_base
         self.style = style
+        #: How far in from the block's edge the modules start. Non-zero only
+        #: when the code is printed on a chip that must also cover the quiet zone.
+        self.inset = inset
 
     @property
     def qr_side(self) -> float:
-        """Back-compat alias — the flat code is square, so width is the side."""
-        return self.code_w
+        """The drawn module square's side — the block minus any chip margin."""
+        return self.code_w - 2 * self.inset
 
 
-def _code_block(url: str, die: float, style: str) -> tuple[float, float, int, float]:
-    """The code's drawn size for a style: (width, height, modules, quiet).
+def _code_block(url: str, die: float, style: str,
+                panel: bool = False) -> tuple[float, float, int, float, float]:
+    """The code's drawn size: (width, height, modules, outside quiet, inset).
 
     Two shapes, and the difference is the whole reason this is a function. The
     flat code is a square. The isometric city is the same grid under a 30°
     projection, which turns it into a diamond 1.73 times as wide as it is tall —
     so it eats horizontal room and hands vertical room back to the type.
+
+    `panel` folds the quiet zone INSIDE the block. On the dark colourway the
+    code is printed on a light chip, and that chip has to cover the quiet zone
+    too — a quiet zone is only quiet if it is the same tone as the background
+    the modules sit on. So the block the layout reserves grows to include it,
+    and `inset` says how far in from the block's edge the modules start.
+    Without this the chip is laid out as if it were only the modules and its
+    margin lands on top of the first line of type.
     """
     modules = qr_modules(url)
     if style == "iso":
         width = ISO_SIZE * die
         _m, w, h, cell = isoqr.block_for_width(
             url, isoqr.tones_for("#ffffff", INK), width)
-        return w, h, modules, cell * QR_QUIET
+        return w, h, modules, cell * QR_QUIET, 0.0
     side = QR_SIZE * die
-    return side, side, modules, side * QR_QUIET / modules
+    quiet = side * QR_QUIET / modules
+    if panel:
+        return side + 2 * quiet, side + 2 * quiet, modules, 0.0, quiet
+    return side, side, modules, quiet, 0.0
 
 
 def _reach(code_w: float, code_h: float, top: float, quiet: float,
@@ -360,7 +417,8 @@ def _reach(code_w: float, code_h: float, top: float, quiet: float,
                math.hypot(code_w / 2 + quiet, abs(top + code_h) + quiet))
 
 
-def compose(line: str, url: str, die: float, style: str = "flat") -> Layout:
+def compose(line: str, url: str, die: float, style: str = "flat",
+            panel: bool = False) -> Layout:
     """Solve the whole composition: code, gap, type stack, optically centred.
 
     The stack's height depends on the type size, the size depends on how much
@@ -374,7 +432,7 @@ def compose(line: str, url: str, die: float, style: str = "flat") -> Layout:
     r = die / 2.0
     band_inner = r - BAND_WIDTH * die
     content_r = band_inner - GUTTER * die
-    code_w, code_h, modules, quiet = _code_block(url, die, style)
+    code_w, code_h, modules, quiet, inset = _code_block(url, die, style, panel)
 
     f = face(WEIGHT)
     cap = f.cap_height / f.upem
@@ -412,12 +470,13 @@ def compose(line: str, url: str, die: float, style: str = "flat") -> Layout:
     lines, size, first_base = set_line(line, die, qr_top + code_h, content_r)
 
     return Layout(band_inner, content_r, code_w, code_h, qr_top, modules, quiet,
-                  lines, size, first_base, style)
+                  lines, size, first_base, style, inset)
 
 
 def disc(line: str, url: str, die: float, bleed: float,
-         *, ink: str = INK, accent: str = ACCENT,
-         art: Path | None = None, style: str = "flat") -> tuple[float, str]:
+         *, ink: str | None = None, accent: str | None = None,
+         art: Path | None = None, style: str = "flat",
+         colourway: str = "dark") -> tuple[float, str]:
     """Draw one sticker.
 
     Returns (canvas size in px, SVG body). The canvas is the die plus bleed on
@@ -432,10 +491,22 @@ def disc(line: str, url: str, die: float, bleed: float,
     r = die / 2.0
     canvas_in = die + 2 * bleed
     cx = cy = _px(canvas_in) / 2.0
-    lay = compose(line, url, die, style)
-    band_inner, qr_side, qr_top = lay.band_inner, lay.code_w, lay.qr_top
+    way = COLOURWAYS[colourway]
+    ink = ink or way["ink"]
+    accent = accent or way["accent"]
+    panel = way.get("code_panel") if style != "iso" else None
+    lay = compose(line, url, die, style, panel=bool(panel))
+    band_inner, qr_side, qr_top = lay.band_inner, lay.qr_side, lay.qr_top
 
     body = []
+    outer_r = r + bleed
+    if way["field"]:
+        # The whole disc, bleeding past the die for the same reason the band
+        # does: drift must show as a band a hair off, never as a bare crescent.
+        body.append(
+            f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{_px(outer_r):.2f}" '
+            f'fill="{way["field"]}"/>'
+        )
 
     # The band. One even-odd path (outer disc minus inner disc) so it is a true
     # annulus rather than a stroked circle whose width the renderer has to
@@ -452,10 +523,19 @@ def disc(line: str, url: str, die: float, bleed: float,
         f'"/>'
     )
 
+    if panel:
+        # The light chip, filling the block the layout reserved — modules plus
+        # the quiet zone they need around them.
+        full = _px(lay.code_w)
+        body.append(
+            f'<rect x="{cx - full / 2:.2f}" y="{cy + _px(qr_top):.2f}" '
+            f'width="{full:.2f}" height="{full:.2f}" fill="{panel}"/>'
+        )
+
     if style == "iso":
         # The city, laid into the same envelope the flat code would occupy.
         city, _w, _h, _pitch = isoqr.block_for_width(
-            url, isoqr.tones_for("#ffffff", ink), _px(lay.code_w))
+            url, isoqr.tones_for(way["paper"], ink), _px(lay.code_w))
         body.append(
             f'<g transform="translate({cx - _px(lay.code_w) / 2:.2f},'
             f'{cy + _px(qr_top):.2f})">{city}</g>'
@@ -469,7 +549,8 @@ def disc(line: str, url: str, die: float, bleed: float,
         ))
     else:
         body.append(
-            qr_paths(url, cx - _px(qr_side) / 2, cy + _px(qr_top), _px(qr_side), ink)
+            qr_paths(url, cx - _px(qr_side) / 2, cy + _px(qr_top + lay.inset),
+                     _px(qr_side), way.get("code_ink") or ink)
         )
 
     for i, ln in enumerate(lay.lines):
@@ -483,13 +564,14 @@ def disc(line: str, url: str, die: float, bleed: float,
 
 
 def metrics(line: str, url: str, die: float, bleed: float,
-            style: str = "flat") -> dict:
+            style: str = "flat", colourway: str = "dark") -> dict:
     """What the proof sheet reports: the numbers that decide whether this
     sticker works on a pole rather than on a screen."""
-    lay = compose(line, url, die, style)
+    panel = bool(COLOURWAYS[colourway].get("code_panel")) and style != "iso"
+    lay = compose(line, url, die, style, panel=panel)
     f = face(WEIGHT)
     cap = f.cap_height / f.upem
-    size, qr_side, modules = lay.size, lay.code_w, lay.modules
+    size, qr_side, modules = lay.size, lay.qr_side, lay.modules
 
     # For the diamond the number that matters is the module's THIN axis — its
     # rhombus is nearly twice as wide as it is tall, and quoting the wide

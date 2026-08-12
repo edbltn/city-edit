@@ -51,6 +51,10 @@ import qrart_bridge  # noqa: E402
 import sheet as sheet_mod  # noqa: E402
 import sticker as art  # noqa: E402
 
+#: Everything the build writes lives under out/<stock>/ and nowhere else.
+#: Ad-hoc renders — proofs, experiments, one-off previews — go to the scratchpad
+#: instead, because they used to pile up here and there is no way to tell a
+#: stale experiment from a sheet you are about to print.
 OUT = Path(__file__).parent / "out"
 DPI = art.DPI
 MAP_SLUG = "nyc-proposals"
@@ -65,10 +69,10 @@ def sheet_svg(stock, placements, *, proof: bool) -> str:
     w, h = sheet_mod.PAGE_W * DPI, sheet_mod.PAGE_H * DPI
     body = [f'<rect width="{w}" height="{h}" fill="{PROOF_PAPER}"/>'] if proof else []
 
-    for col, row, line, url, art_path, style in placements:
+    for col, row, line, url, art_path, style, way in placements:
         cx_in, cy_in = stock.centre(col, row)
         canvas, svg = art.disc(line, url, stock.die, stock.bleed, art=art_path,
-                               style=style)
+                               style=style, colourway=way)
         x = cx_in * DPI - canvas / 2
         y = cy_in * DPI - canvas / 2
         body.append(f'<g transform="translate({x:.2f},{y:.2f})">{svg}</g>')
@@ -86,7 +90,8 @@ def sheet_svg(stock, placements, *, proof: bool) -> str:
     )
 
 
-def plan(stock, keys: list[str], copies: int, style: str = "flat") -> list[dict]:
+def plan(stock, keys: list[str], copies: int, style: str = "flat",
+         way: str = "dark") -> list[dict]:
     """Mint every sticker in the run and assign it a sheet + grid cell.
 
     One message per sheet: a sheet is a stack of the same complaint, which is
@@ -118,6 +123,10 @@ def plan(stock, keys: list[str], copies: int, style: str = "flat") -> list[dict]
                 #: Recorded per sticker so verify_scan re-renders exactly what
                 #: was printed rather than assuming the default.
                 "style": style,
+                #: "light" (dark ink on bare stock) or "dark" (the app's
+                #: terminal palette, printed). Recorded per sticker so
+                #: verify_scan re-renders what was printed.
+                "colourway": way,
             })
     return rows
 
@@ -169,7 +178,8 @@ def write_sheets(stock, rows, out: Path, *, proof: bool) -> list[Path]:
     for (message, n), group in sorted(by_sheet.items()):
         placements = [(r["col"], r["row"], r["line"], r["url"],
                        Path(r["art"]) if r.get("art") else None,
-                       r.get("style") or "flat") for r in group]
+                       r.get("style") or "flat",
+                       r.get("colourway") or "dark") for r in group]
         stem = f'{message}-{n + 1}'
 
         svg = sheet_svg(stock, placements, proof=False)
@@ -203,7 +213,7 @@ def write_sheets(stock, rows, out: Path, *, proof: bool) -> list[Path]:
 def write_manifest(rows, out: Path) -> Path:
     path = out / "manifest.csv"
     cols = ["stock", "message", "line", "vote_type", "kind", "src", "code",
-            "url", "sheet", "col", "row", "art", "style"]
+            "url", "sheet", "col", "row", "art", "style", "colourway"]
     with path.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
@@ -253,8 +263,9 @@ def contact_sheet(stock, keys: list[str], rows, out: Path) -> Path:
         first = next((r for r in rows if r["message"] == key), None)
         art_path = Path(first["art"]) if first and first.get("art") else None
         style = first["style"] if first and first.get("style") else "flat"
+        way = first["colourway"] if first and first.get("colourway") else "light"
         _canvas, svg = art.disc(s.display, url, stock.die, stock.bleed,
-                                art=art_path, style=style)
+                                art=art_path, style=style, colourway=way)
         m = art.metrics(s.display, url, stock.die, stock.bleed, style)
         px = (stock.die + 2 * stock.bleed) * DPI
         one = (f'<svg xmlns="http://www.w3.org/2000/svg" '
@@ -344,6 +355,11 @@ def main():
     ap.add_argument("--proof", action="store_true",
                     help="also write registration proofs with die outlines")
     ap.add_argument("--clean", action="store_true", help="wipe out/ first")
+    ap.add_argument("--colourway", choices=sorted(art.COLOURWAYS), default="dark",
+                    help='"dark" (default) prints the app\'s terminal palette: '
+                         'white on black with the amber band. "light" is dark '
+                         'ink on bare stock — far less ink, and the safer '
+                         'choice on the 2.5" matte inkjet paper')
     ap.add_argument("--style", choices=["flat", "iso"], default="flat",
                     help='code style: "flat" is the drawn module grid (the '
                          'default, and the only one that decodes at every '
@@ -403,8 +419,14 @@ def main():
     if args.clean and out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True, exist_ok=True)
+    # Anything loose at the root of out/ is left over from an experiment. The
+    # build owns this directory, so it tidies it rather than letting stale
+    # renders accumulate beside the sheets that are about to be printed.
+    for stray in OUT.iterdir():
+        if stray.is_file():
+            stray.unlink()
 
-    rows = plan(stock, keys, copies, args.style)
+    rows = plan(stock, keys, copies, args.style, args.colourway)
 
     if args.art or args.art_dry_run:
         if not args.art:
