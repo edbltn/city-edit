@@ -1,7 +1,7 @@
 # Stickers
 
-Round die-cut stickers for lamp posts, signal boxes and sign poles. Each one is
-a QR code and one line of text, and nothing else.
+Round die-cut stickers for lamp posts, signal boxes and sign poles. A black disc
+with white type and a code, and nothing else — no border, no wordmark, no icon.
 
 ```bash
 cd tools/stickers
@@ -165,7 +165,17 @@ page. Run one `-proof.png` on plain paper first and hold it against a label
 sheet up to a window.
 
 **The 3" stock is glossy and laser-only.** It has no inkjet coating: ink sits on
-the surface, never dries, and smears on the first sticker you peel.
+the surface, never dries, and smears on the first sticker you peel. That also
+makes it the right stock for the default dark colourway, where the field is a
+flood of near-black.
+
+**There is no border any more.** The amber band came off because a ring of
+radius is the scarcest thing on a 2.5" circle. Removing it let the code grow
+from 0.92 mm per module to **1.01** *and* the line from 14.9 pt to **17** — both
+at once. The band's two jobs are covered elsewhere: edge definition is now the
+black field's (far more contrast against street furniture than an amber hairline
+had), and drift tolerance was always the bleed's job, since the field overshoots
+the die either way. `BAND_WIDTH` in `sticker.py` brings it back.
 
 ## Why it looks like this
 
@@ -236,45 +246,46 @@ inkjet** paper it is slow to dry, prone to curl, and expensive. Use
 
 ## The city (`--style iso`)
 
-The code as true 30° isometric cubes — the same projection as the `tee-isogrid`
-merch — sitting on the dark modules, with the light modules left as empty ground.
+The code as true isometric cubes — unit cubes on the dark modules, empty ground
+on the light ones — squeezed horizontally so the whole block is a **perfect
+square diamond** rather than the 1.73:1 rhombus textbook isometric gives.
 
 ```bash
-./env/bin/python build_stickers.py --messages wait --style iso
+./env/bin/python build_stickers.py --messages whose --style iso
 ./env/bin/python verify_scan.py          # ← do not skip this one
 ```
 
-**The most beautiful version of this does not scan, and it is worth knowing why.**
-At a cube height of exactly 1 cell each cube projects to a *regular hexagon* —
-all six silhouette corners land the same distance from its centre — and a field
-of them tiles hexagonally. That is the true isometric look. Measured through the
-finished sticker it decodes **0%** of the time, at every capture width, on both
-stocks and both colourways. Not "degrades": zero.
+**Full-height cubes now work, and they did not at first.** With pale walls a
+unit cube reads **0%**, at every capture width: each finder pattern is a solid
+7×7 block wrapped in a **one-module** light ring — exactly what a decoder scans
+for — and a cube a full cell tall throws a wall a full cell wide that covers its
+neighbour's ring completely. The pattern stops existing before any data matters.
 
-The cause is the finder patterns. Each is a solid 7×7 block wrapped in a
-**one-module** light ring, and that ring is exactly what a decoder scans for. A
-cube a full cell tall throws a wall a full cell wide, which covers its
-neighbour's ring completely — so the pattern the decoder is hunting for stops
-existing before any of the data matters.
+Two changes fixed it, and both were asked for on looks rather than on function.
+Darkening the walls pulled them clear of the roofs' tone, so the **roofs** became
+the only signal — and every roof sits at z=1, coplanar, which is a clean affine
+image of the module grid. The decoder locks onto the roof plane and reads it like
+a QR photographed at an angle. Squeezing to a square diamond narrowed each cube
+at the same time. Height stopped mattering the moment the walls stopped being
+signal.
 
-Measured, true isometric, cubes on dark modules only:
+**It is still not the default, for two reasons.**
 
-| cube height | decodes |
-|---|---|
-| 1.00 cell (regular hexagon) | **0%** |
-| 0.80 | 0% |
-| 0.65 | 14% |
-| 0.55 | 58% |
-| 0.45 | 77% |
+| | module | type | zxing | OpenCV |
+|---|---|---|---|---|
+| flat | **1.01 mm** | 17.0 pt | 100% | ~100% |
+| city | 0.78 mm | 15.9 pt | 100% at ≥300 px, 97% at 200 | **0%** |
 
-So `CUBE_H` defaults to **0.45** — a low box rather than a cube, still true
-isometric, still three shaded faces, but no longer a hexagon. Set it to `1.0`
-anywhere the code does not have to work: a poster, a screen, a tee.
+The module is 29% smaller, which is real margin against a bad camera. And
+**OpenCV cannot read the isometric code at all**, at any size — the same class
+of risk as an inverted code, and the reason the dark colourway prints its flat
+code on a light chip. zxing is the lineage most phone scanners use and it reads
+these perfectly, so a phone will probably be fine; "probably" is why this is
+opt-in.
 
-Even at 0.45 this is 77% against the flat code's 100%, so it stays opt-in. Earlier
-attempts at a 45° square diamond and a two-height skyline are in the git history
-with their own measurements; the short version is that every one of them traded
-scans for looks, and the flat code has never lost a single read.
+A methodological note worth keeping: a **twelve-code sweep of this scored 100%**
+and the full 108-sticker run found failures at 200 px. Small samples flatter this
+design. Any change here needs the full run, not a spot check.
 
 ## Painted codes (qrart)
 

@@ -361,10 +361,11 @@ def main():
                          'ink on bare stock — far less ink, and the safer '
                          'choice on the 2.5" matte inkjet paper')
     ap.add_argument("--style", choices=["flat", "iso"], default="flat",
-                    help='code style: "flat" is the drawn module grid (the '
-                         'default, and the only one that decodes at every '
-                         'capture width); "iso" is the isometric city — see '
-                         'the README before printing a run of it')
+                    help='code style: "flat" (default) is the plain module '
+                         'grid — a 29%% bigger module and readable by every '
+                         'decoder tried. "iso" is the isometric city, which '
+                         'zxing reads perfectly but OpenCV cannot read at all; '
+                         'see the README before printing a run of it')
 
     art_g = ap.add_argument_group(
         "qrart", "Paint the codes with qrart instead of drawing plain modules. "

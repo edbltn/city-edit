@@ -80,19 +80,42 @@ from iso import mix  # noqa: E402
 #: same square rotated onto its corner needs only 0.5s. Turning the code 45°
 #: therefore buys about 40% more module pitch out of the same disc, which is why
 #: this version's modules end up LARGER than the flat code's rather than smaller.
+#: Horizontal foreshortening, and the whole shape of the thing.
+#:
+#: True 30° isometric is cos 30 ≈ 0.866, which makes a unit cube a REGULAR
+#: hexagon and the grid 1.73 times as wide as it is tall. That is the textbook
+#: projection and the wrong proportion for a round sticker: the wide rhombus
+#: eats the disc's horizontal room and leaves the vertical unused.
+#:
+#: `square_k` squeezes the horizontal until the whole drawn block — grid plus
+#: the fringe of cube tops along its upper edges — is exactly as wide as it is
+#: tall. The hexagons come out stretched rather than regular, which is the
+#: point: a square diamond fits a circle far better than a wide one, so every
+#: unit of squeeze is module pitch bought back.
 K = math.cos(math.radians(30))
 
 
-def project(x: float, y: float, z: float) -> tuple[float, float]:
+def square_k(n: int, cube_h: float) -> float:
+    """The K that makes an n×n grid of `cube_h`-tall cubes come out square.
+
+    The projected grid is n·2K wide and n tall; the cubes add `cube_h` to the
+    height along the top edges. Setting width equal to height gives
+    2K·n = n + cube_h, so K = (n + cube_h) / 2n — about 0.517 for our 29-module
+    code with unit cubes, against true isometric's 0.866.
+    """
+    return (n + cube_h) / (2 * n)
+
+
+def project(x: float, y: float, z: float,
+            k: float | None = None) -> tuple[float, float]:
     """Grid space → screen. +x runs down-right, +y down-left, +z straight up.
 
-    True 30° isometric, the same projection as iso.py. The one property this
-    design is built on falls straight out of it: a UNIT CUBE projects to a
-    REGULAR HEXAGON. Its eight corners land on six screen points — (0, ±1) and
-    (±cos30, ±½) — all exactly 1 from the centre. Draw the dark modules as unit
-    cubes and the code becomes a hexagonal tiling rather than a grid of boxes.
+    `k` overrides the module default so a drawing can pick its own proportion;
+    the vertical axis stays dead vertical either way, which is what keeps every
+    cube's walls parallel and cheap to draw.
     """
-    return ((x - y) * K, (x + y) * 0.5 - z)
+    kk = K if k is None else k
+    return ((x - y) * kk, (x + y) * 0.5 - z)
 
 #: NO gutter, and this one is not negotiable. Streets between blocks were the
 #: first thing tried and they break the code outright: a finder pattern is a
@@ -106,34 +129,30 @@ STREET = 0.0
 #: Nothing is drawn flat, so the city has no holes in it — what used to be bare
 #: paper between towers is now low-rise, and the skyline itself encodes the code.
 #: The two heights are the design's main knob and are swept in `sweep_heights`.
-#: Cube height, in cells. This is the single knob that decides whether the thing
-#: scans, and the honest answer is that the most beautiful value is the one that
-#: does not work.
+#: Cube height, in cells — and at exactly 1.0 a cube projects to a hexagon whose
+#: six silhouette corners are equidistant from its centre, so a field of them
+#: tiles. That is the look, and it now also decodes 100% on both stocks.
 #:
-#: At exactly 1.0 a cube projects to a REGULAR HEXAGON — all six silhouette
-#: corners land 1 unit from its centre — and a field of them tiles hexagonally.
-#: That is the true isometric look, and measured through the finished sticker it
-#: decodes 0% of the time, at every capture width, on both stocks and both
-#: colourways. Not "degrades": zero.
+#: It did NOT, at first: with pale walls a full-height cube reads 0%, at every
+#: capture width, because each finder pattern is a solid 7x7 block wrapped in a
+#: ONE-module light ring — exactly what a decoder scans for — and a cube a full
+#: cell tall throws a wall a full cell wide that covers its neighbour's ring
+#: completely. The pattern stops existing before any data matters.
 #:
-#: The reason is the finder patterns. Each one is a solid 7x7 block wrapped in a
-#: ONE-module light ring, and that ring is exactly what a decoder scans for. A
-#: cube a full cell tall throws a wall a full cell wide, which covers its
-#: neighbour's ring completely — so the pattern the decoder is hunting for stops
-#: existing before any of the data matters.
+#: Two changes fixed it, both asked for on looks rather than on function.
+#: Darkening the walls pulled them well clear of the roofs' tone, so the ROOFS
+#: became the only signal — and every roof sits at z=1, coplanar, which is a
+#: clean affine image of the module grid. The decoder locks onto the roof plane
+#: and reads it like a QR photographed at an angle. Squeezing the projection to
+#: a square diamond (square_k) narrowed each cube at the same time. Height
+#: stopped being a problem the moment the walls stopped being signal — measured
+#: 100% on BOTH colourways, so this is about roof-versus-wall contrast, not
+#: about printing on black.
 #:
-#: Measured, at true 30° isometric, cubes on dark modules only:
-#:
-#:     1.00 cell (regular hexagon)     0%
-#:     0.80                            0%
-#:     0.65                           14%
-#:     0.55                           58%
-#:     0.45                           77%
-#:
-#: So the default is 0.45 — a low box rather than a cube, still true isometric,
-#: still three shaded faces, but no longer a hexagon. Set it to 1.0 anywhere the
-#: code does not have to work: a poster, a screen, a tee.
-CUBE_H = 0.45
+#: Measured with PALE walls, for the record, since it is what the ceiling looks
+#: like when the walls do carry signal: 1.00 -> 0%, 0.80 -> 0%, 0.65 -> 14%,
+#: 0.55 -> 58%, 0.45 -> 77%.
+CUBE_H = 1.0
 
 # Ink coverage per face. Roofs carry the signal and take the full ink; walls
 # stay near the paper because their overlap into the cell behind is unavoidable.
@@ -144,8 +163,8 @@ TONE_ROOF = 1.00
 #: being harmless shading and start being a bit error. Measured at these
 #: heights, 0.70/0.55 reads 97% where 0.86/0.74 reads 80% — the softer shading
 #: is both prettier and more robust.
-TONE_LEFT = 0.70
-TONE_RIGHT = 0.55
+TONE_LEFT = 0.44
+TONE_RIGHT = 0.26
 #: The low-rise: WALLS ONLY, no roof tint. Every square is a building, but the
 #: light half of the code has to stay light, so the low-rise gets its shape from
 #: the two wall faces and leaves its roof as bare paper. That is not a
@@ -185,7 +204,8 @@ def _poly(points, fill):
 
 
 
-def _block(col: int, row: int, height: float, tones: dict, dark: bool) -> tuple[str, list]:
+def _block(col: int, row: int, height: float, tones: dict, dark: bool,
+           k: float | None = None) -> tuple[str, list]:
     """One module as a volume, back faces first.
 
     The building HANGS: its roof sits at z=0 — exactly the cell the decoder
@@ -211,7 +231,7 @@ def _block(col: int, row: int, height: float, tones: dict, dark: bool) -> tuple[
     keys = ("left", "right", "roof")
     out, points = [], []
     for corners, key in zip((left, right, roof), keys):
-        flat = [project(*c) for c in corners]
+        flat = [project(*c, k) for c in corners]
         points += flat
         out.append(_poly(flat, tones[key]))
     return "".join(out), points
@@ -227,25 +247,31 @@ def iso_qr(url: str, tones: dict, *, scale_h: float = 1.0,
     """
     matrix = [list(r) for r in segno.make(url, error="h").matrix]
     n = len(matrix)
+    k = square_k(n, CUBE_H * scale_h)
 
     cells = [(c, r, matrix[r][c]) for r in range(n) for c in range(n)]
     # Painter's order: depth increases with col + row in this projection, so a
     # nearer block is always drawn over a farther one.
     cells.sort(key=lambda t: t[0] + t[1])
 
-    out, points = [], []
+    out = []
     for col, row, dark in cells:
         if not dark:
             # Light modules are empty ground. Nothing is drawn, so they stay the
             # cleanest possible light — which is also what the decoder wants.
             continue
-        markup, pts = _block(col, row, CUBE_H * scale_h, tones, True)
+        markup, _pts = _block(col, row, CUBE_H * scale_h, tones, True, k)
         out.append(markup)
-        points += pts
 
-    xs = [p[0] for p in points]
-    ys = [p[1] for p in points]
-    return "".join(out), (min(xs), min(ys), max(xs), max(ys)), n
+    # NOMINAL bounds — the whole n×n grid plus the cube fringe — not the extent
+    # of what happened to get inked. Two reasons. The code's quiet zone and the
+    # sticker's layout are properties of the GRID, so they must not move when a
+    # corner module flips. And measuring the drawn points made every URL a
+    # slightly different size: three of the diamond's four vertices sit under
+    # finder patterns and are always dark, but the fourth is data, so the block
+    # silently shrank whenever that corner came up light.
+    h = CUBE_H * scale_h
+    return "".join(out), (-n * k, -h, n * k, float(n)), n
 
 
 def svg(url: str, px: int, paper: str = "#ffffff", ink: str = "#141414",
@@ -291,7 +317,7 @@ def block_for_width(url: str, tones: dict, width: float, *, scale_h: float = 1.0
     # The number returned is the VERTICAL diagonal, which under true isometric
     # is the short one — the honest answer to "how fine is a module", and the
     # unit a quiet zone should be counted in.
-    pitch = width / (n * 2 * K)
+    pitch = width / (n * 2 * square_k(n, CUBE_H * scale_h))
     markup = (f'<g transform="translate({-x0 * s:.3f},{-y0 * s:.3f}) '
               f'scale({s:.6f})">{body}</g>')
     return markup, width, height, pitch

@@ -3,33 +3,41 @@ One sticker: a circle, a QR code, one line of text.
 
 ## The idea
 
-It is a roundel. Not a brand sticker — a warning roundel, the vocabulary of the
-things it will be stuck next to: signal boxes, sign posts, work notices. An
-amber band bleeds off the die, the field inside is the bare white label stock,
-and everything printed on that field is black. Three reading distances, the
-same structure as the tee:
+A black disc with white type and a code, bleeding off its own die. Two reading
+distances, not three: the line at arm's length, the code at six inches. There is
+no third element and no branding — a sticker that has to explain itself has
+already lost the person walking past it.
 
-    ten feet   the amber ring, which is the only thing on a grey pole
-    three feet the line, set as large as a circle will physically allow
-    six inches the code, which is the only thing here that does anything
+It used to carry an amber band around the rim, and that came off deliberately.
+A ring of radius is the scarcest thing on a 2.5" circle, and what the band was
+crowding is the whole point of the sticker. Removing it let the code grow from
+0.92 mm per module to 1.01 AND the type from 14.9 pt to 17 — both directions at
+once, which is not a trade you get often.
 
-Nothing else is on it. No wordmark, no URL, no icon. A sticker that has to
-explain itself has already lost the person walking past it.
+## Two colourways, and why the dark one prints the code on a chip
 
-## Why the field is unprinted
+The default is the app's own terminal palette printed — near-black field,
+off-white type — rather than a negative of a light design. The code, though, is
+NOT knocked out of the black: it sits on a light chip. Inverted codes are a real
+compatibility risk rather than a theoretical one, and it was measured here —
+zxing reads a light-on-dark code and OpenCV cannot read one at all, at any size.
+Phone cameras mostly cope, but "mostly" is not good enough for the one element
+on the sticker that has to work. `tools/merch/qr_tee.py` made the same call for
+dark garments, for the same reason.
 
-The label stock is matte white, and so is the brand's paper. Printing a white
-field onto white stock buys nothing and costs a full pass of ink, so the field
-is simply left alone: the sticker is the paper. That has a second, larger
-payoff. Sheet-fed label printing drifts — a sixteenth of an inch of registration
-error is ordinary — and drift is only visible where printed art meets the die
-cut. With no art at the edge except a band that deliberately overshoots it, a
-drifted sheet reads as a band a hair thicker on one side, instead of a white
-crescent down the edge of every sticker.
+The light colourway leaves the field unprinted, because the label stock is matte
+white and so is the brand's paper. It is far less ink, which matters on the 2.5"
+INKJET stock where a flood of near-black is slow to dry and prone to curl.
 
-The band's overshoot is bounded by the sheet, not by taste: it may not reach the
-neighbouring label, and on the 12-up sheet the labels are only 0.0625" apart
-vertically. See sheet.py.
+## Why the art bleeds
+
+Sheet-fed label printing drifts — a sixteenth of an inch of registration error
+is ordinary — and drift is only ever visible where printed art meets the die
+cut. So the field overshoots the die, and a misregistered sheet reads as a disc
+a hair off-centre rather than a bare crescent down one edge of every sticker.
+The overshoot is bounded by the sheet rather than by taste: it may not reach the
+neighbouring label, and on the 12-up sheet the labels are only 0.0625" apart.
+See sheet.py.
 
 ## Why the type is stacked
 
@@ -38,11 +46,11 @@ shorter the further it sits from the centre. Set "TIRED OF WAITING?" as one line
 under the code and it fits at about ten point — legible in a proof, invisible on
 a lamp post. Broken to "TIRED OF / WAITING?" the same words set at twenty.
 
-So the type is not laid out, it is solved: try one, two and three lines, break
-each into the most even stack the words allow, fit every stack to its own chords,
-and print the one that comes out biggest. This is `size_to_fit` from the merch
-typography — lines flush to a measure, sized by their own length — with the
-measure varying per line because the paper is round.
+So the type is not laid out, it is solved: try one to four lines, break each into
+the most even stack the words allow, fit every stack to its own chords, and print
+the one that comes out biggest. This is `size_to_fit` from the merch typography —
+lines flush to a measure, sized by their own length — with the measure varying
+per line because the paper is round.
 """
 
 import base64
@@ -117,14 +125,23 @@ COLOURWAYS = {
 # 3" are the same drawing at two sizes rather than two drawings.
 # --------------------------------------------------------------------------
 
-BAND_WIDTH = 0.045       # visible band, × die
+#: The amber band is gone. It read well, but it cost a ring of the disc's radius
+#: — the scarcest thing on a 2.5" circle — and what it was crowding is the whole
+#: point of the sticker. Set it back above zero to bring it back.
+#:
+#: It was doing two jobs and neither is orphaned. Edge definition on a grey pole
+#: is now the black field's, which has far more contrast against street
+#: furniture than an amber hairline. And drift tolerance was always the BLEED's
+#: job, not the band's: the field still overshoots the die, so a misregistered
+#: sheet shows a black disc a hair off-centre rather than a bare white crescent.
+BAND_WIDTH = 0.0
 GUTTER = 0.032           # clear space between band and any content, × die
-QR_SIZE = 0.42           # drawn module area, × die. Tuned against the whole
-                         # line at 2.5": bigger starves the type (0.50 drops the
-                         # longest line to 8 pt), smaller buys little back and
-                         # makes the code timid on the thing whose entire job is
-                         # to be scanned. At 0.42 a module is 0.92 mm — still
-                         # more than twice the 0.4 mm a phone camera needs.
+QR_SIZE = 0.46           # drawn module area, × die. Re-tuned after the band
+                         # came off, which freed a ring of radius and let this
+                         # go up without costing type: a module is 1.01 mm now
+                         # against 0.92 before, AND the line sets at 17 pt
+                         # against 14.9. Past here it turns: 0.50 drops the
+                         # longest line to 10 pt and 0.54 to under 7.
 QR_GAP = 0.042           # code baseline to cap-top of the first line, × die
 QR_QUIET = 4             # modules of quiet zone, the QR spec's minimum
 TRACKING = 0.02          # em, on the line. Kept small: inside a circle the
@@ -136,12 +153,12 @@ WEIGHT = 700             # the variable font's maximum. Free, in the only sense
                          # advance is identical at every weight — a bolder cut
                          # sets at exactly the same size and simply puts more
                          # ink on the paper.
-#: The city's diamond width, × die. The diamond is a square stood on its corner,
-#: so it fits the disc far better than an unrotated square and buys about 24%
-#: more module pitch than the flat code (1.14 mm vs 0.92) — but it is also as
-#: tall as it is wide, so every step up is paid for in type size. 0.52 is where
-#: that trade sits: a materially coarser code, and the line still sets at 16 pt.
-ISO_SIZE = 0.72
+#: The city's diamond width, × die. It is a square stood on its corner — see
+#: isoqr.square_k — so it is as tall as it is wide, and every step up is paid
+#: for directly in type size. Unlike the flat code it does NOT buy module pitch
+#: back: the cubes' fringe and the 45°-ish squeeze mean a module here is 0.78 mm
+#: against the flat code's 1.01. That is the price of the picture.
+ISO_SIZE = 0.62
 MAX_LINES = 4
 CAP_RATIO = 0.085        # cap height ceiling, × die — past this a two-word line
                          # out-shouts the code it exists to deliver
@@ -508,20 +525,21 @@ def disc(line: str, url: str, die: float, bleed: float,
             f'fill="{way["field"]}"/>'
         )
 
-    # The band. One even-odd path (outer disc minus inner disc) so it is a true
-    # annulus rather than a stroked circle whose width the renderer has to
-    # resolve against the die.
+    # The band, when there is one. One even-odd path (outer disc minus inner
+    # disc) so it is a true annulus rather than a stroked circle whose width the
+    # renderer has to resolve against the die.
     outer = r + bleed
-    body.append(
-        f'<path fill="{accent}" fill-rule="evenodd" d="'
-        f'M{cx - _px(outer):.2f},{cy:.2f}'
-        f'a{_px(outer):.2f},{_px(outer):.2f} 0 1,0 {_px(outer) * 2:.2f},0'
-        f'a{_px(outer):.2f},{_px(outer):.2f} 0 1,0 {-_px(outer) * 2:.2f},0Z'
-        f'M{cx - _px(band_inner):.2f},{cy:.2f}'
-        f'a{_px(band_inner):.2f},{_px(band_inner):.2f} 0 1,0 {_px(band_inner) * 2:.2f},0'
-        f'a{_px(band_inner):.2f},{_px(band_inner):.2f} 0 1,0 {-_px(band_inner) * 2:.2f},0Z'
-        f'"/>'
-    )
+    if BAND_WIDTH > 0:
+        body.append(
+            f'<path fill="{accent}" fill-rule="evenodd" d="'
+            f'M{cx - _px(outer):.2f},{cy:.2f}'
+            f'a{_px(outer):.2f},{_px(outer):.2f} 0 1,0 {_px(outer) * 2:.2f},0'
+            f'a{_px(outer):.2f},{_px(outer):.2f} 0 1,0 {-_px(outer) * 2:.2f},0Z'
+            f'M{cx - _px(band_inner):.2f},{cy:.2f}'
+            f'a{_px(band_inner):.2f},{_px(band_inner):.2f} 0 1,0 {_px(band_inner) * 2:.2f},0'
+            f'a{_px(band_inner):.2f},{_px(band_inner):.2f} 0 1,0 {-_px(band_inner) * 2:.2f},0Z'
+            f'"/>'
+        )
 
     if panel:
         # The light chip, filling the block the layout reserved — modules plus
