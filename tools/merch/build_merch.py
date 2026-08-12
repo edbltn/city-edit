@@ -65,8 +65,8 @@ def mug(name, fn, title):
 PRODUCTS = [
     tee("tee-isogrid", iso.tee_isogrid, "Isometric Grid",
         "Centre chest, front", '11" × 13"', ground=True),
-    tee("tee-single-issue", qr_tee.tee_single_issue, "Single Issue Voter",
-        "Centre chest, front", '11" × 13"', ground=True),
+    tee("tee-one-note", qr_tee.tee_one_note, "One Note",
+        "Centre chest, front", '11" × 11"', ground=True),
     tee("tee-desire-path", d.tee_desire_path, "Desire Path",
         "Full front", '11" × 14"'),
     tee("tee-heat", d.tee_heat, "Heat",
@@ -169,10 +169,9 @@ def build_lookbook() -> Path:
     sheet_variant("tee-isogrid--accent",
                   *iso.tee_isogrid(INK_ON_DARK, d.ACCENT, GARMENT_BLACK,
                                    letter_ink=d.ACCENT))
-    for key in ("quiet", "scan"):
-        sheet_variant(f"tee-single-issue--{key}",
-                      *qr_tee.tee_single_issue(INK_ON_DARK, d.ACCENT,
-                                               GARMENT_BLACK, subline=key))
+    sheet_variant("tee-one-note--line",
+                  *qr_tee.tee_one_note(INK_ON_DARK, d.ACCENT, GARMENT_BLACK,
+                                       layout="line"))
 
     html = template.replace("{{FONT}}", data_uri(FONT_WOFF2, "font/woff2"))
     html = html.replace("{{MARK}}", mark)
@@ -193,7 +192,7 @@ def main():
     ap.add_argument("--lookbook", action="store_true",
                     help="also build the self-contained proof sheet (implies --previews)")
     ap.add_argument("--qr-url", default=qr_tee.DEFAULT_URL,
-                    help="what the Single Issue Voter code points at")
+                    help="what the One Note code points at")
     ap.add_argument("--clean", action="store_true", help="wipe out/ first")
     args = ap.parse_args()
 
