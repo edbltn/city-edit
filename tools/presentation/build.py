@@ -75,8 +75,8 @@ def slides_selection():
         selection_line(direct) + kite(S, START, K) + kite(E, END, K) +
         lines(TEXT_X, [
             "Two waypoints, one route.",
-            "**OSRM** does the routing, foot profile,",
-            "with **Multilevel Dijkstra**.",
+            "**OSRM** does the routing with",
+            "**Multilevel Dijkstra**.",
         ]))
 
     add("04-waypoint-mid", "Midpoint",
@@ -86,7 +86,7 @@ def slides_selection():
             "Drag the line to add a **mid waypoint**.",
             "Tap a waypoint to **delete** it.",
             "First is @@start@@, last is ##end##.",
-            "Everything else is derived from the list.",
+            "Everything in between is a midwaypoint.",
         ]))
 
 
@@ -178,7 +178,7 @@ def slides_blocks():
             "**4 street blocks + 1 intersection**.",
             "Each graph edge/node is assigned",
             "to exactly one block.",
-            "One device, **one vote per block, per type**.",
+            "Each device gets **one vote per block, per type**.",
         ]))
 
     add("06-block-heat", "Block heat",
@@ -192,11 +192,10 @@ def slides_blocks():
     add("07-top-proposal-point", "Point proposal",
         x_scene(lambda i, d: block_heat(d, HEATS[i], 2.0), ghost=0.5, extra=pin) +
         lines(TEXT_X, title="Top Point Proposals", lines_=[
-            "Per vote type, the **5 strongest blocks**",
-            "compete, ranked by **net votes**.",
-            "**No minimum** — one vote can earn a pin.",
-            "Same-type pins stay **1 km** apart.",
-            "**One pin per block**, **50 pins** per map.",
+            "For each vote type, the **5 highest net**",
+            "**vote blocks** are \"top proposals\".",
+            "Same-type pins must be **>1 km** apart.",
+            "**50 pins** per map.",
         ]))
 
 
@@ -259,10 +258,10 @@ def slide_route_proposal():
     add("08-top-proposal-route", "Route proposal", art +
         lines(TEXT_X, title="Top Route Proposals", lines_=[
             "Start at the **highest vote count edge**.",
-            "Grow along the strongest neighbor, both ways.",
+            "Grow along the **best neighbor**, both ways.",
+            "**Pin a ghost waypoint** where routing diverges.",
             "Length budget: **2700 m + 660·√score**",
             "(after some tweaking).",
-            "**Pin a ghost waypoint** where routing diverges.",
             "**No more than 5 waypoints**.",
         ]))
 
