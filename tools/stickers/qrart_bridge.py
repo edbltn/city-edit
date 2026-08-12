@@ -54,6 +54,10 @@ HERE = Path(__file__).resolve().parent
 # a routine rebuild would be a bad trade.
 CACHE = HERE / "art-cache"
 
+# Seconds per diffusion step at 768px, measured on this machine (M-series, MPS)
+# rather than taken from qrart's README. Scaled by (size/768)^2 in estimate().
+SECONDS_PER_STEP_768 = 2.0
+
 DEFAULT_NEGATIVE = (
     "ugly, disfigured, low quality, blurry, watermark, text, frame, "
     "flat colour, smooth gradient, empty sky"
@@ -166,7 +170,6 @@ def generate_art(url: str, spec: ArtSpec, *, verbose: bool = True) -> Path | Non
     if proc.returncode != 0:
         if verbose:
             print(f"    qrart failed: {proc.stderr.strip()[:300]}", file=sys.stderr)
-        shutil.rmtree(work, ignore_errors=True)
         return None
 
     # The worker prints progress to stdout too; the JSON result is the last line.
@@ -176,15 +179,20 @@ def generate_art(url: str, spec: ArtSpec, *, verbose: bool = True) -> Path | Non
         if verbose:
             print(f"    qrart returned no result: {proc.stdout.strip()[-300:]}",
                   file=sys.stderr)
-        shutil.rmtree(work, ignore_errors=True)
         return None
 
     if not result.get("ok"):
+        # Keep the failed run. The rejected frames ARE the tuning signal — you
+        # look at them to decide whether the prompt is too flat, the strength
+        # too low, or the seed simply unlucky — and deleting them would make
+        # every failure a dead end that costs GPU time to reproduce.
         if verbose:
             tried = len(result.get("candidates", []))
             print(f"    no scannable art after {tried} candidate(s): "
-                  f"{result.get('error')}", file=sys.stderr)
-        shutil.rmtree(work, ignore_errors=True)
+                  f"{result.get('error')} — frames kept in {work.name}/",
+                  file=sys.stderr)
+        (work / "rejected.json").write_text(json.dumps(
+            {"url": url, "spec": spec.__dict__, "result": result}, indent=2) + "\n")
         return None
 
     CACHE.mkdir(parents=True, exist_ok=True)
@@ -200,8 +208,10 @@ def generate_art(url: str, spec: ArtSpec, *, verbose: bool = True) -> Path | Non
 def estimate(count: int, spec: ArtSpec) -> str:
     """A rough wall-clock estimate, so nobody starts an overnight run by
     accident. Deliberately coarse — it is a warning, not a promise."""
-    per_candidate_s = spec.steps * (spec.size / 768) ** 2 * 2.0  # ~Apple Silicon
-    total_h = count * spec.candidates * per_candidate_s / 3600
+    per_candidate_s = spec.steps * (spec.size / 768) ** 2 * SECONDS_PER_STEP_768
+    total_s = count * spec.candidates * per_candidate_s
+    span = (f"{total_s / 3600:.1f} h" if total_s >= 3600
+            else f"{total_s / 60:.0f} min")
     return (f"{count} code(s) × {spec.candidates} candidate(s) at {spec.steps} "
-            f"steps ≈ {total_h:.1f} h on Apple Silicon (first run also "
-            f"downloads ~4 GB of model weights)")
+            f"steps ≈ {span} on Apple Silicon, plus ~20 s of model load per run "
+            f"(models cached in ~/.cache/huggingface)")

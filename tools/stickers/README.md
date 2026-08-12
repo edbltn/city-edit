@@ -203,6 +203,45 @@ is the right setting for a thing that lives outdoors and gets rained on. The
 same URL in lowercase falls into byte mode and needs 33 modules in the same 1.1
 inches. The server lowercases the path, so the shouting never reaches anyone.
 
+## The isometric city (`--style iso`)
+
+The code drawn as a city: every module a block in the same 30° isometric as the
+`tee-isogrid` merch, dark modules standing up as buildings, the whole code coming
+out as a diamond because that is what a square grid does under this projection.
+
+```bash
+./env/bin/python build_stickers.py --messages wait --style iso
+./env/bin/python verify_scan.py          # ← do not skip this one
+```
+
+It is **opt-in, not the default**, and the reason is measured rather than
+aesthetic. Decoded through the finished sticker across a range of capture
+widths, the flat code reads **100%** and the city about **80%** — and it fails
+*completely* at particular widths rather than degrading gracefully. Bigger
+diamonds do not fix it and neither does the 3" stock, so it is not a resolution
+problem: the rhombus edges run at 30° and alias against the decoder's binariser
+at certain scales, where the flat code's axis-aligned edges never do.
+
+Three things were learned getting it that far, all of them load-bearing and all
+of them counter-intuitive:
+
+- **Streets between blocks destroy the code.** A finder pattern is a solid 7×7
+  field whose 1:1:3:1:1 run signature is what a decoder scans for; a gutter turns
+  that one run into a picket fence. Blocks must touch — which is also the better
+  city, since runs of dark modules merge into single large buildings.
+- **Roofs must be dark all the way down.** Raising a roof moves the signal
+  off the plane the decoder solved for. With pale walls the tower's own cell
+  reads light and it breaks past a tenth of a cell; with walls nearly as dark as
+  the roof, towers up to 0.4 of a cell pass. That is why the shading is subtle —
+  a stronger 3D read costs scans.
+- **The ground is bare paper.** A faint grey kerb on light modules drags them
+  toward the binariser's threshold. Removing it, plus the dark walls, took the
+  pass rate from 70% to 91% at the sizes tested.
+
+**Before printing a run of these, phone-test one off paper.** Software decoders
+are not phones, and the gap here is exactly the kind a real camera might close —
+or might not. That test costs one sheet and settles it.
+
 ## Painted codes (qrart)
 
 The plain module grid can be replaced with a diffusion-painted one from
@@ -300,6 +339,7 @@ physical objects that go on different poles and must never share an identity.
 | `sticker.py` | the artwork for one disc |
 | `sheet.py` | the two label stocks' grids, and the checks that they close |
 | `build_stickers.py` | the CLI: sheets, manifest, seed SQL, contact sheet |
+| `isoqr.py` | optional: the code drawn as an isometric city |
 | `verify_scan.py` | decode the finished art back |
 | `qrart_bridge.py` | optional: locate qrart, cache painted codes |
 | `_qrart_worker.py` | runs inside qrart's venv; never imported here |

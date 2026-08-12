@@ -62,7 +62,7 @@ OUT = Path(__file__).parent / "out"
 
 
 def render_disc(line: str, url: str, die: float, bleed: float, px: int,
-                art_path: Path | None = None) -> np.ndarray:
+                art_path: Path | None = None, style: str = "flat") -> np.ndarray:
     """The finished artwork, rasterised to a greyscale capture `px` wide.
 
     `art_path` re-applies whatever qrart painted for this code. It matters more
@@ -70,7 +70,7 @@ def render_disc(line: str, url: str, die: float, bleed: float, px: int,
     headroom for looks, so this check stops being a formality and becomes the
     thing that decides whether a painted run is printable at all.
     """
-    canvas, body = art.disc(line, url, die, bleed, art=art_path)
+    canvas, body = art.disc(line, url, die, bleed, art=art_path, style=style)
     svg = (f'<svg xmlns="http://www.w3.org/2000/svg" '
            f'xmlns:xlink="http://www.w3.org/1999/xlink" width="{canvas}" '
            f'height="{canvas}" viewBox="0 0 {canvas} {canvas}">{body}</svg>')
@@ -126,7 +126,8 @@ def main():
         for r in rows:
             stock = sheet_mod.STOCKS[r["stock"]]
             img = render_disc(r["line"], r["url"], stock.die, stock.bleed, px,
-                              Path(r["art"]) if r.get("art") else None)
+                              Path(r["art"]) if r.get("art") else None,
+                              r.get("style") or "flat")
             if read_zxing(img) != r["url"]:
                 bad.append(r)
             if read_opencv(img) == r["url"]:
@@ -148,10 +149,11 @@ def main():
         print(f"{failed} capture size(s) failed", file=sys.stderr)
         return 1
     painted = sum(1 for r in rows if r.get("art"))
+    isos = sum(1 for r in rows if (r.get("style") or "flat") == "iso")
     print(f"all {len(rows)} stickers decode to the URL the manifest expects")
     print(f"{codes_mod.CODE_LEN}-char codes, {modules} modules, "
           f"error correction H, {len({r['stock'] for r in rows})} stock(s), "
-          f"{painted} qrart-painted")
+          f"{painted} qrart-painted, {isos} isometric")
     return 0
 
 

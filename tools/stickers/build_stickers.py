@@ -65,9 +65,10 @@ def sheet_svg(stock, placements, *, proof: bool) -> str:
     w, h = sheet_mod.PAGE_W * DPI, sheet_mod.PAGE_H * DPI
     body = [f'<rect width="{w}" height="{h}" fill="{PROOF_PAPER}"/>'] if proof else []
 
-    for col, row, line, url, art_path in placements:
+    for col, row, line, url, art_path, style in placements:
         cx_in, cy_in = stock.centre(col, row)
-        canvas, svg = art.disc(line, url, stock.die, stock.bleed, art=art_path)
+        canvas, svg = art.disc(line, url, stock.die, stock.bleed, art=art_path,
+                               style=style)
         x = cx_in * DPI - canvas / 2
         y = cy_in * DPI - canvas / 2
         body.append(f'<g transform="translate({x:.2f},{y:.2f})">{svg}</g>')
@@ -85,7 +86,7 @@ def sheet_svg(stock, placements, *, proof: bool) -> str:
     )
 
 
-def plan(stock, keys: list[str], copies: int) -> list[dict]:
+def plan(stock, keys: list[str], copies: int, style: str = "flat") -> list[dict]:
     """Mint every sticker in the run and assign it a sheet + grid cell.
 
     One message per sheet: a sheet is a stack of the same complaint, which is
@@ -113,6 +114,10 @@ def plan(stock, keys: list[str], copies: int) -> list[dict]:
                 # Filled in by paint() when --art is on; empty means the plain
                 # vector code, which is what every sticker gets by default.
                 "art": None,
+                #: "flat" (the drawn module grid) or "iso" (the isometric city).
+                #: Recorded per sticker so verify_scan re-renders exactly what
+                #: was printed rather than assuming the default.
+                "style": style,
             })
     return rows
 
@@ -163,7 +168,8 @@ def write_sheets(stock, rows, out: Path, *, proof: bool) -> list[Path]:
 
     for (message, n), group in sorted(by_sheet.items()):
         placements = [(r["col"], r["row"], r["line"], r["url"],
-                       Path(r["art"]) if r.get("art") else None) for r in group]
+                       Path(r["art"]) if r.get("art") else None,
+                       r.get("style") or "flat") for r in group]
         stem = f'{message}-{n + 1}'
 
         svg = sheet_svg(stock, placements, proof=False)
@@ -197,7 +203,7 @@ def write_sheets(stock, rows, out: Path, *, proof: bool) -> list[Path]:
 def write_manifest(rows, out: Path) -> Path:
     path = out / "manifest.csv"
     cols = ["stock", "message", "line", "vote_type", "kind", "src", "code",
-            "url", "sheet", "col", "row", "art"]
+            "url", "sheet", "col", "row", "art", "style"]
     with path.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
@@ -246,9 +252,10 @@ def contact_sheet(stock, keys: list[str], rows, out: Path) -> Path:
         url = codes_mod.url_for(codes_mod.mint(key, 0, stock.key))
         first = next((r for r in rows if r["message"] == key), None)
         art_path = Path(first["art"]) if first and first.get("art") else None
+        style = first["style"] if first and first.get("style") else "flat"
         _canvas, svg = art.disc(s.display, url, stock.die, stock.bleed,
-                                art=art_path)
-        m = art.metrics(s.display, url, stock.die, stock.bleed)
+                                art=art_path, style=style)
+        m = art.metrics(s.display, url, stock.die, stock.bleed, style)
         px = (stock.die + 2 * stock.bleed) * DPI
         one = (f'<svg xmlns="http://www.w3.org/2000/svg" '
                f'xmlns:xlink="http://www.w3.org/1999/xlink" '
@@ -337,6 +344,11 @@ def main():
     ap.add_argument("--proof", action="store_true",
                     help="also write registration proofs with die outlines")
     ap.add_argument("--clean", action="store_true", help="wipe out/ first")
+    ap.add_argument("--style", choices=["flat", "iso"], default="flat",
+                    help='code style: "flat" is the drawn module grid (the '
+                         'default, and the only one that decodes at every '
+                         'capture width); "iso" is the isometric city — see '
+                         'the README before printing a run of it')
 
     art_g = ap.add_argument_group(
         "qrart", "Paint the codes with qrart instead of drawing plain modules. "
@@ -392,7 +404,7 @@ def main():
         shutil.rmtree(out)
     out.mkdir(parents=True, exist_ok=True)
 
-    rows = plan(stock, keys, copies)
+    rows = plan(stock, keys, copies, args.style)
 
     if args.art or args.art_dry_run:
         if not args.art:
@@ -421,7 +433,7 @@ def main():
     for key in keys:
         s = campaign.BY_KEY[key]
         url = codes_mod.url_for(codes_mod.mint(key, 0, stock.key))
-        m = art.metrics(s.display, url, stock.die, stock.bleed)
+        m = art.metrics(s.display, url, stock.die, stock.bleed, args.style)
         print(f'  {s.display:26s} {" / ".join(m["lines"]):28s} '
               f'{m["type_pt"]:5.1f}pt  {m["qr_modules"]}mod '
               f'{m["module_mm"]:.2f}mm  → {s.vote_type} ({s.kind})')

@@ -52,8 +52,10 @@ from pathlib import Path
 
 import segno
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "merch"))
 
+import isoqr  # noqa: E402
 from typo import face, text  # noqa: E402
 
 DPI = 300
@@ -92,6 +94,11 @@ WEIGHT = 700             # the variable font's maximum. Free, in the only sense
                          # advance is identical at every weight — a bolder cut
                          # sets at exactly the same size and simply puts more
                          # ink on the paper.
+#: The isometric city's diamond width, × die. It can be much larger than the
+#: flat code's square because the projection makes it SHORT — 1.73 times as wide
+#: as it is tall — so it fills the circle's widest chord and hands the vertical
+#: room back to the type.
+ISO_SIZE = 0.76
 MAX_LINES = 4
 CAP_RATIO = 0.085        # cap height ceiling, × die — past this a two-word line
                          # out-shouts the code it exists to deliver
@@ -292,11 +299,14 @@ def set_line(line: str, die: float, qr_bottom: float,
 class Layout:
     """A solved sticker: where the code sits, how the line broke, how big it set."""
 
-    def __init__(self, band_inner, content_r, qr_side, qr_top, modules, quiet,
-                 lines, size, first_base):
+    def __init__(self, band_inner, content_r, code_w, code_h, qr_top, modules,
+                 quiet, lines, size, first_base, style):
         self.band_inner = band_inner
         self.content_r = content_r
-        self.qr_side = qr_side
+        #: The code block's drawn size. Square for the flat code; a wide, short
+        #: diamond for the isometric city.
+        self.code_w = code_w
+        self.code_h = code_h
         self.qr_top = qr_top
         self.modules = modules
         #: One quiet-zone margin, in inches. Bare stock in the vector version;
@@ -305,9 +315,49 @@ class Layout:
         self.lines = lines
         self.size = size
         self.first_base = first_base
+        self.style = style
+
+    @property
+    def qr_side(self) -> float:
+        """Back-compat alias — the flat code is square, so width is the side."""
+        return self.code_w
 
 
-def compose(line: str, url: str, die: float) -> Layout:
+def _code_block(url: str, die: float, style: str) -> tuple[float, float, int, float]:
+    """The code's drawn size for a style: (width, height, modules, quiet).
+
+    Two shapes, and the difference is the whole reason this is a function. The
+    flat code is a square. The isometric city is the same grid under a 30°
+    projection, which turns it into a diamond 1.73 times as wide as it is tall —
+    so it eats horizontal room and hands vertical room back to the type.
+    """
+    modules = qr_modules(url)
+    if style == "iso":
+        width = ISO_SIZE * die
+        _m, w, h, cell = isoqr.block_for_width(
+            url, isoqr.tones_for("#ffffff", INK), width)
+        return w, h, modules, cell * QR_QUIET
+    side = QR_SIZE * die
+    return side, side, modules, side * QR_QUIET / modules
+
+
+def _reach(code_w: float, code_h: float, top: float, quiet: float,
+           style: str) -> float:
+    """How far the code (plus its quiet zone) extends from the disc's centre.
+
+    For the flat code that is a bounding-box corner. For the diamond it is a
+    VERTEX — using the bounding box there would reject layouts that fit
+    comfortably, since the diamond's corners are empty paper.
+    """
+    cx, cy = 0.0, top + code_h / 2
+    if style == "iso":
+        return max(math.hypot(code_w / 2 + quiet, cy),
+                   math.hypot(cx, abs(cy) + code_h / 2 + quiet))
+    return max(math.hypot(code_w / 2 + quiet, abs(top) + quiet),
+               math.hypot(code_w / 2 + quiet, abs(top + code_h) + quiet))
+
+
+def compose(line: str, url: str, die: float, style: str = "flat") -> Layout:
     """Solve the whole composition: code, gap, type stack, optically centred.
 
     The stack's height depends on the type size, the size depends on how much
@@ -321,12 +371,7 @@ def compose(line: str, url: str, die: float) -> Layout:
     r = die / 2.0
     band_inner = r - BAND_WIDTH * die
     content_r = band_inner - GUTTER * die
-    qr_side = QR_SIZE * die
-    modules = qr_modules(url)
-    # The quiet zone is bare stock, so it costs no ink — but it still has to
-    # clear the band, or the amber eats the code's margin and the sticker stops
-    # scanning. It is the quiet square's corners, not the modules', that must fit.
-    quiet = qr_side * QR_QUIET / modules
+    code_w, code_h, modules, quiet = _code_block(url, die, style)
 
     f = face(WEIGHT)
     cap = f.cap_height / f.upem
@@ -335,39 +380,41 @@ def compose(line: str, url: str, die: float) -> Layout:
     # Without this ceiling the fixed point below has no upper bound and simply
     # runs away: every pass frees more room under the code, which sets the type
     # larger, which makes the block taller, which lifts the code further.
-    half = qr_side / 2 + quiet
-    if half >= band_inner:
+    if _reach(code_w, code_h, -code_h / 2, quiet, style) > band_inner:
         raise ValueError(
-            f'{die}": a {qr_side:.3f}" code plus its {quiet:.3f}" quiet zone is '
-            f'wider than the {band_inner * 2:.3f}" field — lower QR_SIZE'
+            f'{die}" {style}: a {code_w:.3f}×{code_h:.3f}" code plus its '
+            f'{quiet:.3f}" quiet zone does not fit the {band_inner * 2:.3f}" '
+            f'field even centred — lower QR_SIZE/ISO_SIZE'
         )
-    qr_ceiling = math.sqrt(band_inner ** 2 - half ** 2) - quiet
-    if qr_ceiling <= qr_side / 2:
-        raise ValueError(
-            f'{die}": no vertical room for a {qr_side:.3f}" code inside the '
-            f'{band_inner * 2:.3f}" field — lower QR_SIZE'
-        )
+    lo, hi = code_h / 2, band_inner
+    for _ in range(24):
+        mid = (lo + hi) / 2
+        if _reach(code_w, code_h, -mid, quiet, style) <= band_inner:
+            lo = mid
+        else:
+            hi = mid
+    qr_ceiling = lo
 
-    qr_top = -(qr_side + QR_GAP * die) / 2.0 - OPTICAL_RISE * die
+    qr_top = -(code_h + QR_GAP * die) / 2.0 - OPTICAL_RISE * die
     lines, size, first_base = [], 0.0, 0.0
     for _ in range(12):
         qr_top = max(qr_top, -qr_ceiling)
-        lines, size, first_base = set_line(line, die, qr_top + qr_side, content_r)
+        lines, size, first_base = set_line(line, die, qr_top + code_h, content_r)
         stack_h = cap * size + (len(lines) - 1) * LEADING * size
-        total = qr_side + QR_GAP * die + stack_h
+        total = code_h + QR_GAP * die + stack_h
         qr_top = -total / 2.0 - OPTICAL_RISE * die
     # The loop's last pass solved the type against the previous position, so
     # settle both against the final one.
     qr_top = max(qr_top, -qr_ceiling)
-    lines, size, first_base = set_line(line, die, qr_top + qr_side, content_r)
+    lines, size, first_base = set_line(line, die, qr_top + code_h, content_r)
 
-    return Layout(band_inner, content_r, qr_side, qr_top, modules, quiet,
-                  lines, size, first_base)
+    return Layout(band_inner, content_r, code_w, code_h, qr_top, modules, quiet,
+                  lines, size, first_base, style)
 
 
 def disc(line: str, url: str, die: float, bleed: float,
          *, ink: str = INK, accent: str = ACCENT,
-         art: Path | None = None) -> tuple[float, str]:
+         art: Path | None = None, style: str = "flat") -> tuple[float, str]:
     """Draw one sticker.
 
     Returns (canvas size in px, SVG body). The canvas is the die plus bleed on
@@ -382,8 +429,8 @@ def disc(line: str, url: str, die: float, bleed: float,
     r = die / 2.0
     canvas_in = die + 2 * bleed
     cx = cy = _px(canvas_in) / 2.0
-    lay = compose(line, url, die)
-    band_inner, qr_side, qr_top = lay.band_inner, lay.qr_side, lay.qr_top
+    lay = compose(line, url, die, style)
+    band_inner, qr_side, qr_top = lay.band_inner, lay.code_w, lay.qr_top
 
     body = []
 
@@ -402,7 +449,15 @@ def disc(line: str, url: str, die: float, bleed: float,
         f'"/>'
     )
 
-    if art is not None:
+    if style == "iso":
+        # The city, laid into the same envelope the flat code would occupy.
+        city, _w, _h, _pitch = isoqr.block_for_width(
+            url, isoqr.tones_for("#ffffff", ink), _px(lay.code_w))
+        body.append(
+            f'<g transform="translate({cx - _px(lay.code_w) / 2:.2f},'
+            f'{cy + _px(qr_top):.2f})">{city}</g>'
+        )
+    elif art is not None:
         # The painted image carries its own quiet zone, so it is drawn one
         # quiet margin larger on every side than the module square.
         full = qr_side + 2 * lay.quiet
@@ -424,19 +479,25 @@ def disc(line: str, url: str, die: float, bleed: float,
     return _px(canvas_in), "".join(body)
 
 
-def metrics(line: str, url: str, die: float, bleed: float) -> dict:
+def metrics(line: str, url: str, die: float, bleed: float,
+            style: str = "flat") -> dict:
     """What the proof sheet reports: the numbers that decide whether this
     sticker works on a pole rather than on a screen."""
-    lay = compose(line, url, die)
+    lay = compose(line, url, die, style)
     f = face(WEIGHT)
     cap = f.cap_height / f.upem
-    size, qr_side, modules = lay.size, lay.qr_side, lay.modules
+    size, qr_side, modules = lay.size, lay.code_w, lay.modules
 
+    # For the diamond the number that matters is the module's THIN axis — its
+    # rhombus is nearly twice as wide as it is tall, and quoting the wide
+    # diagonal would flatter the design by 1.73.
+    module = (lay.code_w / (modules * 2 * isoqr.K) if style == "iso"
+              else qr_side / modules)
     return {
         "lines": lay.lines,
         "qr_modules": modules,
         "qr_in": qr_side,
-        "module_mm": qr_side * 25.4 / modules,
+        "module_mm": module * 25.4,
         "cap_mm": cap * size * 25.4,
         "type_pt": size * 72.0,
     }
