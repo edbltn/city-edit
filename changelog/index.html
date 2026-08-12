@@ -44,7 +44,14 @@
     a chord, so the art tries one, two and three line stacks and prints whichever sets biggest,
     taking &ldquo;Tired of waiting?&rdquo; from 10&nbsp;pt to 15.6. The URL is uppercase so it lands
     in QR's alphanumeric mode and fits a 29-module code at the highest error correction. All 216
-    stickers were rasterised and decoded back, one at a time, against the manifest.</p>
+    stickers were rasterised and decoded back, one at a time, against the manifest. A follow-up
+    pass fixed the line being hard to read — the cause was that the print PNGs were
+    <strong>transparent</strong>, so Preview composited near-black type onto its grey ground; they
+    are flattened onto white now, and the type went to the font's heaviest weight (free, since a
+    monospace advance is weight-invariant) and up to 13.3&ndash;21.3&nbsp;pt. The same pass added an
+    optional bridge to <strong>qrart</strong>, which paints the code with Stable Diffusion and still
+    scans — kept at arm's length in its own interpreter so no torch dependency reaches this
+    pipeline, and gated on the painted code decoding to <em>that sticker's own</em> URL.</p>
   </a>
 
   <a class="entry" href="./2026-08-09-voters-blocks-counts.html">
