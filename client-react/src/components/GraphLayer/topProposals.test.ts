@@ -10,9 +10,11 @@ import {
   selectTopProposals,
   selectTopProposalsFrom,
   computeWinnerCandidates,
+  dedupedBlockNetResolver,
   topLabelForEdges,
   TOP_PROPOSAL_MIN_NET,
   ROUTE_PROPOSAL_MIN_NET,
+  TOP_PROPOSALS_PER_TYPE,
   type EdgePosition,
   type VoteTypeWinner,
 } from "./topProposals";
@@ -26,6 +28,9 @@ const topo = (
   edges: [number, number, string][],
 ) => topologyFromJson({ nodes, edges });
 
+// With no block mapping supplied, every edge is its own block (the singleton
+// encoding graphTopology.blockKeyOf uses for unmapped edges), so these cases
+// read exactly as they did at edge grain.
 describe("computeVoteTypeWinners", () => {
   it("picks the edge with the highest net per vote type", () => {
     const legend = ["Bike lane", "Tree"];
@@ -72,6 +77,192 @@ describe("computeVoteTypeWinners", () => {
   it("returns [] for empty inputs", () => {
     expect(computeVoteTypeWinners([], [])).toEqual([]);
     expect(computeVoteTypeWinners(["A"], [])).toEqual([]);
+  });
+});
+
+// The edge-sum FALLBACK path: no deduped block arrays, so a block's score is
+// Σ of its edges' nets. This is what a station network or a map with no block
+// layer gets, and the only place the over-counting semantics survive — the
+// deduped ranking is the describe below.
+describe("computeWinnerCandidates — block-grain aggregation (edge-sum fallback)", () => {
+  const legend = ["Bike lane"];
+  // Edges 0,1 → block 0 (both directions of one street); edge 2 → block 1.
+  const twoBlocks = (e: number) => (e < 2 ? 0 : 1);
+
+  it("sums two edges of the same block into ONE candidate", () => {
+    const evt: [number, number, number][][] = [
+      [[0, 4, 0]], // block 0, edge 0: net 4
+      [[0, 3, 0]], // block 0, edge 1: net 3
+    ];
+    const out = computeWinnerCandidates(legend, evt, 5, undefined, 0, twoBlocks);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ edgeIdx: 0, count: 7 }); // 4 + 3, pinned on the strongest
+  });
+
+  it("counts downvotes against the block, not just against their own edge", () => {
+    const evt: [number, number, number][][] = [
+      [[0, 5, 0]], // block 0, edge 0: net +5
+      [[0, 0, 4]], // block 0, edge 1: net −4 (an argument about the same block)
+    ];
+    const out = computeWinnerCandidates(legend, evt, 5, undefined, 0, twoBlocks);
+    expect(out).toHaveLength(1);
+    expect(out[0].count).toBe(1);
+  });
+
+  it("beats a hotter single edge only when the block's aggregate is larger", () => {
+    const wins: [number, number, number][][] = [
+      [[0, 3, 0]], [[0, 3, 0]], // block 0: 3 + 3 = 6
+      [[0, 5, 0]],              // block 1: 5
+    ];
+    expect(computeWinnerCandidates(legend, wins, 1, undefined, 0, twoBlocks)[0])
+      .toMatchObject({ edgeIdx: 0, count: 6 });
+
+    const loses: [number, number, number][][] = [
+      [[0, 2, 0]], [[0, 2, 0]], // block 0: 2 + 2 = 4
+      [[0, 5, 0]],              // block 1: 5
+    ];
+    expect(computeWinnerCandidates(legend, loses, 1, undefined, 0, twoBlocks)[0])
+      .toMatchObject({ edgeIdx: 2, count: 5 });
+  });
+
+  it("pins the block's STRONGEST edge, ties going to the lowest edge index", () => {
+    const stronger: [number, number, number][][] = [[[0, 2, 0]], [[0, 5, 0]]];
+    expect(computeWinnerCandidates(legend, stronger, 5, undefined, 0, twoBlocks)[0].edgeIdx)
+      .toBe(1);
+
+    const tied: [number, number, number][][] = [[[0, 4, 0]], [[0, 4, 0]]];
+    expect(computeWinnerCandidates(legend, tied, 5, undefined, 0, twoBlocks)[0].edgeIdx)
+      .toBe(0);
+  });
+
+  it("chooses the representative edge independently of the shuffle salt", () => {
+    // The pin's location is not a tiebreak the salt gets to reshuffle: it must
+    // land in the same place on every device and every reload.
+    const evt: [number, number, number][][] = [[[0, 4, 0]], [[0, 4, 0]]];
+    const once = computeWinnerCandidates(legend, evt, 5, undefined, 0, twoBlocks);
+    const twice = computeWinnerCandidates(legend, evt, 5, undefined, 0, twoBlocks);
+    expect(twice).toEqual(once);
+  });
+
+  it("applies the support floor to the BLOCK total, not to single edges", () => {
+    // Neither edge clears a floor of 5 alone; together the block does.
+    const evt: [number, number, number][][] = [[[0, 4, 0]], [[0, 4, 0]]];
+    expect(computeWinnerCandidates(legend, evt, 5, undefined, 5, twoBlocks))
+      .toHaveLength(1);
+    expect(computeWinnerCandidates(legend, evt, 5, undefined, 8, twoBlocks))
+      .toHaveLength(0); // strictly greater: 8 is not > 8
+  });
+
+  it("ranks the top TOP_PROPOSALS_PER_TYPE blocks — five, not five edges", () => {
+    expect(TOP_PROPOSALS_PER_TYPE).toBe(5);
+    // Six blocks of two edges each; only the five strongest blocks survive.
+    const evt: [number, number, number][][] = [];
+    for (let block = 0; block < 6; block++) {
+      evt.push([[0, 10 - block, 0]], [[0, 10 - block, 0]]);
+    }
+    const out = computeWinnerCandidates(
+      legend, evt, TOP_PROPOSALS_PER_TYPE, undefined, 0, (e) => e >> 1
+    );
+    expect(out.map((w) => w.count)).toEqual([20, 18, 16, 14, 12]);
+    expect(out.map((w) => w.edgeIdx)).toEqual([0, 2, 4, 6, 8]);
+  });
+});
+
+describe("computeWinnerCandidates — deduped block counts (the ranking value)", () => {
+  const legend = ["Bike lane"];
+  // Edges 0–3 → block 0 (one long block); edge 4 → block 1.
+  const keyOf = (e: number) => (e < 4 ? 0 : 1);
+  // Block 0: ONE device whose route covered all four edges → four +1 edge nets.
+  // Block 1: THREE distinct devices on a single edge.
+  const evt: [number, number, number][][] = [
+    [[0, 1, 0]], [[0, 1, 0]], [[0, 1, 0]], [[0, 1, 0]],
+    [[0, 3, 0]],
+  ];
+  // The deduped truth the server maintains: 1 device vs 3 devices.
+  const deduped = {
+    vote_type_legend: legend,
+    block_vote_type_legend: ["Bike lane"],
+    block_vote_types: [[[0, 1, 0]], [[0, 3, 0]]] as [number, number, number][][],
+  };
+
+  it("ranks by PEOPLE, not by how many edges one route covered", () => {
+    // Edge sums say block 0 (4) beats block 1 (3); the deduped counts invert it.
+    expect(computeWinnerCandidates(legend, evt, 1, undefined, 0, keyOf)[0])
+      .toMatchObject({ edgeIdx: 0, count: 4 }); // over-counted, for contrast
+    const out = computeWinnerCandidates(
+      legend, evt, 5, undefined, 0, keyOf, dedupedBlockNetResolver(deduped)
+    );
+    expect(out.map((w) => ({ edgeIdx: w.edgeIdx, count: w.count })))
+      .toEqual([{ edgeIdx: 4, count: 3 }, { edgeIdx: 0, count: 1 }]);
+  });
+
+  it("bridges the two legends by LABEL, not by index", () => {
+    // block_vote_type_legend is its own index space: "Bike lane" is 1 there, 0
+    // in vote_type_legend. Reading it positionally would score the wrong type.
+    const shifted = {
+      vote_type_legend: legend,
+      block_vote_type_legend: ["Trees", "Bike lane"],
+      block_vote_types: [[[0, 99, 0], [1, 1, 0]], [[1, 3, 0]]] as [number, number, number][][],
+    };
+    const out = computeWinnerCandidates(
+      legend, evt, 5, undefined, 0, keyOf, dedupedBlockNetResolver(shifted)
+    );
+    expect(out.map((w) => w.count)).toEqual([3, 1]);
+  });
+
+  it("falls back to the edge sum when the deduped arrays are absent", () => {
+    expect(dedupedBlockNetResolver({ vote_type_legend: legend })).toBeUndefined();
+    const out = computeWinnerCandidates(
+      legend, evt, 5, undefined, 0, keyOf,
+      dedupedBlockNetResolver({ vote_type_legend: legend })
+    );
+    expect(out.map((w) => ({ edgeIdx: w.edgeIdx, count: w.count })))
+      .toEqual([{ edgeIdx: 0, count: 4 }, { edgeIdx: 4, count: 3 }]);
+  });
+
+  it("falls back for a singleton key — an unmapped edge is not a block", () => {
+    const netOf = dedupedBlockNetResolver(deduped)!;
+    expect(netOf(-2, 0)).toBeNull();
+    expect(netOf(0, 0)).toBe(1);
+  });
+
+  it("falls back when the block has no deduped row for the type yet", () => {
+    // An optimistic cast writes edges immediately; the block row arrives with
+    // the server's delta a round trip later, and the caster must see their pin.
+    const partial = {
+      vote_type_legend: legend,
+      block_vote_type_legend: ["Trees"],
+      block_vote_types: [[[0, 5, 0]], [[0, 5, 0]]] as [number, number, number][][],
+    };
+    const out = computeWinnerCandidates(
+      legend, evt, 5, undefined, 0, keyOf, dedupedBlockNetResolver(partial)
+    );
+    expect(out.map((w) => w.count)).toEqual([4, 3]); // edge sums
+  });
+
+  it("still picks the block's strongest EDGE as the pin's home", () => {
+    // Representative selection stays edge-derived — the deduped arrays have no
+    // edges in them and so cannot say where a pin goes.
+    const uneven: [number, number, number][][] = [
+      [[0, 1, 0]], [[0, 1, 0]], [[0, 5, 0]], [[0, 1, 0]],
+      [[0, 3, 0]],
+    ];
+    const out = computeWinnerCandidates(
+      legend, uneven, 5, undefined, 0, keyOf, dedupedBlockNetResolver(deduped)
+    );
+    // Block 0 pins on edge 2 (net 5, the strongest) and scores 1 (one device);
+    // block 1 pins on its only edge and scores 3.
+    expect(out.map((w) => ({ edgeIdx: w.edgeIdx, count: w.count })))
+      .toEqual([{ edgeIdx: 4, count: 3 }, { edgeIdx: 2, count: 1 }]);
+  });
+
+  it("applies the support floor to the DEDUPED net", () => {
+    // Block 0's four edges sum to 4 but only one device is behind them, so a
+    // floor of 2 must drop it while block 1 (3 devices) survives.
+    const out = computeWinnerCandidates(
+      legend, evt, 5, undefined, 2, keyOf, dedupedBlockNetResolver(deduped)
+    );
+    expect(out.map((w) => w.edgeIdx)).toEqual([4]);
   });
 });
 
@@ -422,6 +613,39 @@ describe("selectTopProposals — block uniqueness + kind filter (full path)", ()
     data.nBlocks = 2;
     const out = selectTopProposals(data, SALT, 10, 600, undefined, 0);
     expect(out.map((w) => w.label).sort()).toEqual(["Bench", "Bike"]);
+  });
+
+  it("ranks by deduped block count end-to-end, pinning the block's strongest edge", () => {
+    // Block 0 = edges 0+1 (a two-way street), block 1 = edge 2. Far apart, so
+    // spacing plays no part. Edge nets say block 0 wins 7 to 5; the deduped
+    // rows say 2 people vs 6, and the deduped answer is the one that counts.
+    const nodes: [number, number][] = [
+      [40.7000, -74.0000], [40.7001, -74.0000],
+      [40.7002, -74.0000], [40.7003, -74.0000],
+      [40.7500, -74.0000], [40.7501, -74.0000],
+    ];
+    const edges: [number, number, string][] = [[0, 1, ""], [2, 3, ""], [4, 5, ""]];
+    const data = {
+      vote_type_legend: ["Bike"],
+      edge_vote_types: [
+        [[0, 4, 0]], [[0, 3, 0]], [[0, 5, 0]],
+      ] as [number, number, number][][],
+      block_vote_type_legend: ["Bike"],
+      block_vote_types: [[[0, 2, 0]], [[0, 6, 0]]] as [number, number, number][][],
+      ...topo(nodes, edges),
+    };
+    data.edgeBlockId = Int32Array.from([0, 0, 1]);
+    data.nBlocks = 2;
+    const out = selectTopProposals(data, SALT, 10, 600, undefined, 0);
+    expect(out.map((w) => ({ edgeIdx: w.edgeIdx, count: w.count })))
+      .toEqual([{ edgeIdx: 2, count: 6 }, { edgeIdx: 0, count: 2 }]);
+
+    // Same map without the deduped arrays: the edge-sum fallback, which is the
+    // only place a block's score is a sum of its edges.
+    const noBlockRows = { ...data, block_vote_types: undefined, block_vote_type_legend: undefined };
+    expect(selectTopProposals(noBlockRows, SALT, 10, 600, undefined, 0)
+      .map((w) => ({ edgeIdx: w.edgeIdx, count: w.count })))
+      .toEqual([{ edgeIdx: 0, count: 7 }, { edgeIdx: 2, count: 5 }]);
   });
 
   it("keeps ROUTE-kind labels out of the point-based top proposals", () => {

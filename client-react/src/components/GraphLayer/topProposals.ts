@@ -3,24 +3,36 @@
 // Point-based top proposals (PBTPs) — selection
 // ==========================================================================
 // Terminology (docs/three-layer-model.md §3.1): a PBTP is a POINT-based top
-// proposal — one hot edge, shown as a square pin. Its route-based counterpart
-// is the RBTP (a hot corridor, diamond pin) in routeProposals.ts.
+// proposal — one hot block, shown as a square pin on the block's strongest
+// edge. Its route-based counterpart is the RBTP (a hot corridor, diamond pin)
+// in routeProposals.ts.
 //
 // Pure logic (no React/Leaflet) for choosing which segments get a "Top
 // Proposal" indicator. The path is five explicit steps:
 //
 //   1. computeVoteTypeWinners — for each POINT-kind vote type, the top
-//      `perTypeLimit` edges by NET (up − down) support. Net ≤ 0 is excluded,
-//      and so are ROUTE-kind types (they surface as RBTPs; a route type's hot
-//      edge is a corridor fragment, not a point proposal). Types of unknown
-//      kind (legacy suggestions never flagged) stay eligible.
+//      `perTypeLimit` BLOCKS by DEDUPED net (up − down) support. Votes are
+//      STORED on edges but COUNTED on blocks (docs/three-layer-model.md §2),
+//      and the count that matters is DISTINCT DEVICES per (block, vote type,
+//      direction) — `block_vote_types`, built server-side by block_votes.py.
+//      Summing the block's edge nets instead would rank a block by how many
+//      edges one person's route happened to cover (docs/algorithms/07-counts.md
+//      — "why summing these across a selection over-counts people"); the edge
+//      scan here therefore enumerates which (block, type) pairs exist and picks
+//      each block's REPRESENTATIVE edge — its strongest for that type, so the
+//      pin has a real location — while the ranking value comes from the deduped
+//      arrays. Block net ≤ 0 is excluded, and so are ROUTE-kind types (they
+//      surface as RBTPs; a route type's hot edge is a corridor fragment, not a
+//      point proposal). Types of unknown kind (legacy suggestions never
+//      flagged) stay eligible.
 //   2. dedupeWinnersByEdge   — collapse winners that share an edge to a single
 //      representative (tiebreak), so one edge shows one indicator and occupies
 //      one slot.
 //   3. dedupeWinnersByBlock  — at most ONE pin per street block, across ALL
-//      vote types (tiebreak keeps the strongest). Blocks are the interaction
-//      grain (docs/three-layer-model.md §2); two pins on one block read as
-//      clutter even when their types differ.
+//      vote types (tiebreak keeps the strongest). Step 1 already gives each
+//      type one candidate per block; this is the cross-TYPE half of the same
+//      rule — two pins on one block read as clutter even when their types
+//      differ.
 //   4. spaceOutWinners       — greedy per-type non-max suppression: keep a
 //      winner only if no STRONGER same-type winner already sits within
 //      `minSpacingMeters`. Collapses a hot corridor (its top edges are
@@ -30,9 +42,10 @@
 //
 // `selectTopProposals` runs all five. See topProposals.test.ts.
 //
-// Steps 1–2 scan the full edge list; 3–5 operate only on the handful of
-// surviving candidates, so the spacing pass is O(candidates²) over a few dozen
-// — negligible even though selection re-runs on every incoming vote.
+// Step 1 makes ONE pass over the edge list, tallying into a per-type map; 2–5
+// operate only on the handful of surviving candidates, so the spacing pass is
+// O(candidates²) over a few dozen — negligible even though selection re-runs on
+// every incoming vote.
 
 import type { GraphData } from "../../types";
 import { type GraphTopology, blockKeyOf, nodeLat, nodeLon, edgeFrom, edgeTo } from "./graphTopology";
@@ -40,8 +53,9 @@ import { type GraphTopology, blockKeyOf, nodeLat, nodeLon, edgeFrom, edgeTo } fr
 export interface VoteTypeWinner {
   legendIdx: number;
   label: string;
+  /** Where the pin is drawn: the winning block's strongest edge for this type. */
   edgeIdx: number;
-  count: number; // net (up − down) for this vote type on the winning edge
+  count: number; // deduped net (up − down) for this vote type on the whole block
 }
 
 /**
@@ -110,12 +124,83 @@ export const TOP_PROPOSAL_MIN_NET = 0;
 export const ROUTE_PROPOSAL_MIN_NET = 100;
 
 /**
- * Step 1 — for each vote type, the top `perTypeLimit` edges by net support
- * (highest first). Vote types whose best edge is net ≤ max(0, minNet) are
+ * Maps an edge index to its street-block key, or a negative (singleton) value
+ * when the edge is unmapped — no block layer, or an edge outside every block.
+ * `graphTopology.blockKeyOf` is the implementation; the pure steps take it as a
+ * function so they never need to know the topology layout.
+ */
+export type EdgeBlockKey = (edgeIdx: number) => number;
+
+/**
+ * The fallback block mapping: `graphTopology.blockKeyOf`'s own encoding for an
+ * unmapped edge. "No block layer" therefore means "every edge is its own
+ * block", and block-grain aggregation degrades to the edge grain it replaced
+ * rather than lumping an entire map into one proposal.
+ */
+const singletonBlockKey: EdgeBlockKey = (edgeIdx) => -(edgeIdx + 2);
+
+/**
+ * The DEDUPED net (up − down) for one (block, vote type), or null when there is
+ * no deduped row to read. See `dedupedBlockNetResolver`.
+ */
+export type BlockNetResolver = (blockKey: number, legendIdx: number) => number | null;
+
+/**
+ * The honest per-(block, vote type) net: `block_vote_types`, which the server
+ * builds by counting DISTINCT DEVICES per (block, vote type, direction) —
+ * server/block_votes.py, docs/algorithms/07-counts.md. Summing edge nets over a
+ * block would instead count one person once per edge their route happened to
+ * cover, so a single lengthwise cast on a long block would outrank a short
+ * block three separate people asked for.
+ *
+ * The two legends are DIFFERENT INDEX SPACES (`block_vote_type_legend` is built
+ * from whichever types have block rows, in their own order), so they are
+ * bridged by LABEL — once, here, into a lookup array, never per edge.
+ *
+ * Returns null, meaning "fall back to the edge sum", when:
+ *   • the deduped arrays are absent (station networks, pre-block maps);
+ *   • the key is a singleton — an unmapped edge is not a block and has no row;
+ *   • the block carries no deduped row for this type yet. The block arrays lag
+ *     an optimistic cast by one round trip (applyMyVoteChange writes edges;
+ *     only the server's delta reaches applyBlockCounts), and a caster must see
+ *     their own vote land.
+ */
+export function dedupedBlockNetResolver(
+  data: Pick<GraphData, "vote_type_legend" | "block_vote_types" | "block_vote_type_legend">
+): BlockNetResolver | undefined {
+  const blockVoteTypes = data.block_vote_types;
+  const blockLegend = data.block_vote_type_legend;
+  const legend = data.vote_type_legend;
+  if (!blockVoteTypes?.length || !blockLegend?.length || !legend?.length) return undefined;
+
+  const blockLegendIdxOf = legend.map((label) => blockLegend.indexOf(label));
+  return (blockKey, legendIdx) => {
+    if (blockKey < 0) return null;
+    const bli = blockLegendIdxOf[legendIdx];
+    if (bli === undefined || bli < 0) return null;
+    const entries = blockVoteTypes[blockKey];
+    if (!entries) return null;
+    for (const [li, up, down] of entries) {
+      if (li === bli) return up - down;
+    }
+    return null;
+  };
+}
+
+/** A block's running tally for one vote type, during the step-1 scan. */
+interface BlockTally {
+  net: number;      // Σ (up − down) over the block's edges, for this type
+  edgeIdx: number;  // the block's strongest edge so far — the pin's home
+  edgeNet: number;  // that edge's own net, kept only to compare the next one
+}
+
+/**
+ * Step 1 — for each vote type, the top `perTypeLimit` blocks by DEDUPED net
+ * support (highest first). Vote types with no block above max(0, minNet) are
  * dropped (a net-downvoted proposal is not a "top proposal", and below the
- * support floor it isn't "top" either), as are ROUTE-kind types when a
- * `kindOf` resolver is supplied — their corridors surface as RBTPs — and types
- * toggled off in the legend when an `isVisible` resolver is supplied.
+ * support floor it isn't "top" either), as are ROUTE-kind types when a `kindOf`
+ * resolver is supplied — their corridors surface as RBTPs — and types toggled
+ * off in the legend when an `isVisible` resolver is supplied.
  */
 export function computeVoteTypeWinners(
   legend: string[],
@@ -123,9 +208,13 @@ export function computeVoteTypeWinners(
   perTypeLimit = 1,
   kindOf?: VoteTypeKindResolver,
   minNet = 0,
-  isVisible?: VoteTypeVisibility
+  isVisible?: VoteTypeVisibility,
+  blockKeyOfEdge: EdgeBlockKey = singletonBlockKey,
+  blockNetOf?: BlockNetResolver
 ): VoteTypeWinner[] {
-  const candidates = computeWinnerCandidates(legend, edgeVoteTypes, perTypeLimit, kindOf, minNet);
+  const candidates = computeWinnerCandidates(
+    legend, edgeVoteTypes, perTypeLimit, kindOf, minNet, blockKeyOfEdge, blockNetOf
+  );
   return isVisible ? candidates.filter((w) => isVisible(w.label)) : candidates;
 }
 
@@ -133,7 +222,7 @@ export function computeVoteTypeWinners(
  * Step 1 WITHOUT the legend-visibility filter — the part that costs an O(edges)
  * scan, and the part that does not depend on which types are toggled on.
  *
- * Visibility is a display gesture, not a vote-state change: which edge wins for
+ * Visibility is a display gesture, not a vote-state change: which blocks win for
  * a given type is identical whether its neighbours in the legend are shown or
  * hidden. Keeping the scan separate lets the caller cache it for a vote state
  * and re-select in microseconds when the legend toggles (GraphLayer's PBTP
@@ -147,32 +236,78 @@ export function computeWinnerCandidates(
   edgeVoteTypes: [number, number, number][][],
   perTypeLimit = 1,
   kindOf?: VoteTypeKindResolver,
-  minNet = 0
+  minNet = 0,
+  blockKeyOfEdge: EdgeBlockKey = singletonBlockKey,
+  blockNetOf?: BlockNetResolver
 ): VoteTypeWinner[] {
   if (!legend.length || !edgeVoteTypes.length) return [];
 
   const floor = Math.max(0, minNet);
-  const edgesByType = new Map<number, { edgeIdx: number; count: number }[]>();
+  // legendIdx → blockKey → tally. Two maps rather than one keyed on a composite
+  // because the per-type map is exactly what the ranking below consumes.
+  const blocksByType = new Map<number, Map<number, BlockTally>>();
+  // Label/kind rejection is memoized per legend index and applied INSIDE the
+  // scan: a route-kind type on the NYC graph carries hundreds of thousands of
+  // edges, and tallying blocks we are about to discard is the only part of this
+  // loop big enough to notice.
+  const eligible: (boolean | undefined)[] = [];
+
   for (let edgeIdx = 0; edgeIdx < edgeVoteTypes.length; edgeIdx++) {
     const pairs = edgeVoteTypes[edgeIdx];
-    if (!pairs) continue;
+    if (!pairs || !pairs.length) continue;
+    const key = blockKeyOfEdge(edgeIdx);
     for (const [legendIdx, up, down] of pairs) {
-      const count = up - down;
-      if (count <= floor) continue;
-      const list = edgesByType.get(legendIdx);
-      if (list) list.push({ edgeIdx, count });
-      else edgesByType.set(legendIdx, [{ edgeIdx, count }]);
+      const net = up - down;
+      // A perfectly cancelled edge moves neither the block's total nor its
+      // choice of representative, so it never needs a tally entry.
+      if (net === 0) continue;
+      let ok = eligible[legendIdx];
+      if (ok === undefined) {
+        const label = legend[legendIdx];
+        ok = !!label && !(kindOf && kindOf(label) === "route");
+        eligible[legendIdx] = ok;
+      }
+      if (!ok) continue;
+
+      // The tally exists to (a) enumerate which (block, type) pairs carry any
+      // votes at all and (b) pick the block's representative edge. Its running
+      // `net` is only the fallback ranking value — see the loop below.
+      let byBlock = blocksByType.get(legendIdx);
+      if (!byBlock) blocksByType.set(legendIdx, (byBlock = new Map()));
+      const tally = byBlock.get(key);
+      if (!tally) {
+        byBlock.set(key, { net, edgeIdx, edgeNet: net });
+      } else {
+        tally.net += net;
+        // STRICTLY greater, so a tie keeps the lowest-index edge: the pin must
+        // land in the same place on every device and every reload, and edge
+        // order is the only ordering both agree on.
+        if (net > tally.edgeNet) {
+          tally.edgeNet = net;
+          tally.edgeIdx = edgeIdx;
+        }
+      }
     }
   }
 
   const winners: VoteTypeWinner[] = [];
-  for (const [legendIdx, edges] of edgesByType) {
+  for (const [legendIdx, byBlock] of blocksByType) {
     const label = legend[legendIdx];
     if (!label) continue;
-    if (kindOf && kindOf(label) === "route") continue;
-    edges.sort((a, b) => b.count - a.count);
-    for (const { edgeIdx, count } of edges.slice(0, perTypeLimit)) {
-      winners.push({ legendIdx, label, edgeIdx, count });
+    const blocks: { edgeIdx: number; net: number }[] = [];
+    for (const [key, tally] of byBlock) {
+      // How many PEOPLE back this block, not how many edges one of them
+      // covered. The edge sum stands in only where no deduped row exists, and
+      // is the sole place the over-counting semantics survive.
+      const net = blockNetOf?.(key, legendIdx) ?? tally.net;
+      // The floor is a BLOCK bar now: an edge in the red doesn't disqualify the
+      // block, it just costs it that much support (a downvoted direction of a
+      // two-way street is an argument about the block, not a separate place).
+      if (net > floor) blocks.push({ edgeIdx: tally.edgeIdx, net });
+    }
+    blocks.sort((a, b) => b.net - a.net || a.edgeIdx - b.edgeIdx);
+    for (const { edgeIdx, net } of blocks.slice(0, perTypeLimit)) {
+      winners.push({ legendIdx, label, edgeIdx, count: net });
     }
   }
   return winners;
@@ -239,17 +374,13 @@ export function dedupeWinnersByEdge(
 }
 
 /**
- * Maps an edge index to its street-block key, or a negative value when the
- * edge is unmapped (no block layer, or an edge outside every block).
- * `dedupeWinnersByBlock` uses this without knowing the topology layout.
- */
-export type EdgeBlockKey = (edgeIdx: number) => number;
-
-/**
  * Step 3 — at most ONE winner per street block, across ALL vote types
- * (tiebreak: higher net, then shuffle). Blocks are the unit users see and vote
- * on, so two pins on one block — even of different types — read as a stack.
- * Winners on unmapped edges (key < 0) are kept: no block layer, no constraint.
+ * (tiebreak: higher net, then shuffle). Step 1 already tallies each type to one
+ * candidate per block; what's left for this pass is the CROSS-type collision —
+ * blocks are the unit users see and vote on, so two pins on one block, even of
+ * different types, read as a stack. Winners on unmapped edges (key < 0) are
+ * kept: no block layer, no constraint. Must be given the same `blockKeyOfEdge`
+ * step 1 aggregated with, or the two disagree about what a block is.
  */
 export function dedupeWinnersByBlock(
   winners: VoteTypeWinner[],
@@ -367,10 +498,13 @@ export function applyTopProposalLimit(
     .slice(0, limit);
 }
 
-// Up to this many edges per vote type feed the spacing step, so a popular type
-// can surface several distinct LOCATIONS (not just its single best edge). The
-// spacing pass then collapses any that land on the same corridor.
-export const TOP_PROPOSALS_PER_TYPE = 6;
+// Up to this many BLOCKS per vote type feed the spacing step, so a popular type
+// can surface several distinct LOCATIONS (not just its single best block). The
+// spacing pass then collapses any that land on the same corridor. Five rather
+// than the six of the edge-grain era: a block already absorbs the near-duplicate
+// candidates (both directions of a street, both halves of a split segment) that
+// the sixth slot used to spend itself on.
+export const TOP_PROPOSALS_PER_TYPE = 5;
 
 // Two top proposals of the SAME vote type closer than this collapse to the
 // stronger one — kills the "3 identical pins stacked on one avenue" look.
@@ -382,9 +516,9 @@ export const TOP_PROPOSALS_PER_TYPE = 6;
 export const TOP_PROPOSAL_MIN_SPACING_M = 1000;
 
 /**
- * Full selection path: top-N-per-POINT-type winners → one per edge (tiebreak)
- * → one per street block across all types → per-type spatial spacing → top
- * `limit` by net. Each surviving edge appears once and consumes one slot.
+ * Full selection path: top-N-BLOCKS-per-POINT-type winners → one per edge
+ * (tiebreak) → one per street block across all types → per-type spatial spacing
+ * → top `limit` by net. Each surviving block appears once and consumes one slot.
  * `kindOf` (label → kind) keeps ROUTE-kind vote types out of the point family;
  * omit it (e.g. station networks, where every vote is a point) to admit all.
  * `minNet` is the top-proposal support floor (strictly-greater; default
@@ -393,7 +527,9 @@ export const TOP_PROPOSAL_MIN_SPACING_M = 1000;
  */
 export function selectTopProposals(
   data:
-    | (Pick<GraphData, "vote_type_legend" | "edge_vote_types"> & GraphTopology)
+    | (Pick<GraphData,
+        "vote_type_legend" | "edge_vote_types"
+        | "block_vote_types" | "block_vote_type_legend"> & GraphTopology)
     | null,
   salt: number,
   limit: number,
@@ -410,7 +546,9 @@ export function selectTopProposals(
       data.edge_vote_types ?? [],
       TOP_PROPOSALS_PER_TYPE,
       kindOf,
-      minNet
+      minNet,
+      (edgeIdx) => blockKeyOf(data, edgeIdx),
+      dedupedBlockNetResolver(data)
     ),
     salt, limit, minSpacingMeters, isVisible
   );
