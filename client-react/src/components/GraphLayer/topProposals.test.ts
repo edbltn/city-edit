@@ -10,6 +10,7 @@ import {
   selectTopProposals,
   selectTopProposalsFrom,
   computeWinnerCandidates,
+  candidatesForGraph,
   dedupedBlockNetResolver,
   topLabelForEdges,
   TOP_PROPOSAL_MIN_NET,
@@ -263,6 +264,58 @@ describe("computeWinnerCandidates — deduped block counts (the ranking value)",
       legend, evt, 5, undefined, 2, keyOf, dedupedBlockNetResolver(deduped)
     );
     expect(out.map((w) => w.edgeIdx)).toEqual([4]);
+  });
+});
+
+describe("candidatesForGraph — the app's step 1, resolvers not optional", () => {
+  // Guards the exact regression that has no other alarm: computeWinnerCandidates
+  // silently degrades to edge-grain ranking when its last two arguments are
+  // dropped, so every app call site goes through candidatesForGraph instead.
+  // If someone reintroduces a bare computeWinnerCandidates call, this fails.
+  const legend = ["Bike lane"];
+  // Edges 0–3 → block 0 (one long block); edge 4 → block 1.
+  const data = {
+    nNodes: 2,
+    nEdges: 5,
+    coords: new Int32Array(4),
+    ends: Uint32Array.from([0, 1, 1, 0, 0, 1, 1, 0, 0, 1]),
+    edgeBlockId: Int32Array.from([0, 0, 0, 0, 1]),
+    nBlocks: 2,
+    vote_type_legend: legend,
+    // Block 0: ONE device, four edges. Block 1: THREE devices, one edge.
+    edge_vote_types: [
+      [[0, 1, 0]], [[0, 1, 0]], [[0, 1, 0]], [[0, 1, 0]],
+      [[0, 3, 0]],
+    ] as [number, number, number][][],
+    block_vote_type_legend: ["Bike lane"],
+    block_vote_types: [[[0, 1, 0]], [[0, 3, 0]]] as [number, number, number][][],
+  };
+
+  it("ranks by deduped devices, so the 3-device block beats the 4-edge one", () => {
+    const out = candidatesForGraph(data, 5, undefined, 0);
+    expect(out.map((w) => ({ edgeIdx: w.edgeIdx, count: w.count })))
+      .toEqual([{ edgeIdx: 4, count: 3 }, { edgeIdx: 0, count: 1 }]);
+  });
+
+  it("differs from the resolver-less call — which is why it exists", () => {
+    // The silent-degradation shape: same data, resolvers omitted, edge grain.
+    const degraded = computeWinnerCandidates(
+      data.vote_type_legend, data.edge_vote_types, 5, undefined, 0
+    );
+    expect(degraded.map((w) => w.count)).not.toEqual(
+      candidatesForGraph(data, 5, undefined, 0).map((w) => w.count)
+    );
+    expect(degraded[0]).toMatchObject({ edgeIdx: 4, count: 3 });
+    expect(degraded).toHaveLength(5); // five singleton "blocks", not two
+  });
+
+  it("groups by block, so a long block yields ONE candidate not four", () => {
+    expect(candidatesForGraph(data, 5, undefined, 0)).toHaveLength(2);
+  });
+
+  it("applies the support floor to the deduped net", () => {
+    expect(candidatesForGraph(data, 5, undefined, 2).map((w) => w.edgeIdx))
+      .toEqual([4]);
   });
 });
 

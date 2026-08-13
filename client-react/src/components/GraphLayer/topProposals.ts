@@ -516,6 +516,42 @@ export const TOP_PROPOSALS_PER_TYPE = 5;
 export const TOP_PROPOSAL_MIN_SPACING_M = 1000;
 
 /**
+ * Step 1 for a REAL graph — `computeWinnerCandidates` with the block-grain
+ * resolvers already supplied.
+ *
+ * Both of `computeWinnerCandidates`'s resolver parameters degrade silently when
+ * omitted: `blockKeyOfEdge` falls back to `singletonBlockKey` (every edge its
+ * own block) and an absent `blockNetOf` falls back to the edge sum. That is the
+ * right behaviour for the pure function — a synthetic fixture legitimately has
+ * no block layer — but it is the wrong default for the app, where dropping
+ * either one reverts block-grain, per-device ranking to the edge grain it
+ * replaced WITHOUT any type error, test failure, or console warning.
+ *
+ * So callers holding a real GraphTopology go through here instead and never
+ * spell the resolvers themselves. There is nothing at those call sites left to
+ * forget.
+ */
+export function candidatesForGraph(
+  data: Pick<GraphData,
+    "vote_type_legend" | "edge_vote_types"
+    | "block_vote_types" | "block_vote_type_legend"> & GraphTopology,
+  perTypeLimit = TOP_PROPOSALS_PER_TYPE,
+  kindOf?: VoteTypeKindResolver,
+  minNet = TOP_PROPOSAL_MIN_NET
+): VoteTypeWinner[] {
+  return computeWinnerCandidates(
+    data.vote_type_legend ?? [],
+    data.edge_vote_types ?? [],
+    perTypeLimit,
+    kindOf,
+    minNet,
+    // Votes live on edges but count on BLOCKS, by distinct device.
+    (edgeIdx) => blockKeyOf(data, edgeIdx),
+    dedupedBlockNetResolver(data)
+  );
+}
+
+/**
  * Full selection path: top-N-BLOCKS-per-POINT-type winners → one per edge
  * (tiebreak) → one per street block across all types → per-type spatial spacing
  * → top `limit` by net. Each surviving block appears once and consumes one slot.
@@ -541,15 +577,7 @@ export function selectTopProposals(
   if (!data) return [];
   return selectTopProposalsFrom(
     data,
-    computeWinnerCandidates(
-      data.vote_type_legend ?? [],
-      data.edge_vote_types ?? [],
-      TOP_PROPOSALS_PER_TYPE,
-      kindOf,
-      minNet,
-      (edgeIdx) => blockKeyOf(data, edgeIdx),
-      dedupedBlockNetResolver(data)
-    ),
+    candidatesForGraph(data, TOP_PROPOSALS_PER_TYPE, kindOf, minNet),
     salt, limit, minSpacingMeters, isVisible
   );
 }

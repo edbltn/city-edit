@@ -37,7 +37,7 @@ import {
 import { makeVoteTypeIcon } from "./voteTypeIcon";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import {
-  computeWinnerCandidates, dedupedBlockNetResolver, selectTopProposalsFrom, topLabelForEdges,
+  candidatesForGraph, selectTopProposalsFrom, topLabelForEdges,
   TOP_PROPOSALS_PER_TYPE, TOP_PROPOSAL_MIN_SPACING_M, TOP_PROPOSAL_MIN_NET,
   ROUTE_PROPOSAL_MIN_NET,
   type VoteTypeWinner,
@@ -66,7 +66,6 @@ import {
   touchedBlockKeys,
   adjEdgesOf,
   adjShortest,
-  blockKeyOf,
 } from "./graphTopology";
 import {
   materializeBlocks, selectionVoteRows, selectionCoverage,
@@ -852,18 +851,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     if (!cache || cache.epoch !== epoch) {
       cache = {
         epoch,
-        candidates: computeWinnerCandidates(
-          data.vote_type_legend ?? [],
-          data.edge_vote_types ?? [],
+        // candidatesForGraph, not computeWinnerCandidates: it supplies the
+        // block-key + deduped-net resolvers, whose omission would silently
+        // demote this ranking to the edge grain. See its doc comment.
+        candidates: candidatesForGraph(
+          data,
           TOP_PROPOSALS_PER_TYPE,
           isStationNetwork ? undefined : voteTypeKindOf,
           // Station networks don't badge winners as "top proposals" (every
           // station renders its own pin regardless), so the floor stays off.
           isStationNetwork ? 0 : topProposalMinNet,
-          // Votes live on edges but count on blocks — by DISTINCT DEVICE, so
-          // the ranking value is the deduped block row, not a sum of edges.
-          (edgeIdx) => blockKeyOf(data, edgeIdx),
-          dedupedBlockNetResolver(data),
         ),
       };
       pbtpCandidatesRef.current = cache;
