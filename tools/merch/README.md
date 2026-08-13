@@ -17,10 +17,16 @@ single self-contained page proofing all four shirts.
 
 Two designs, two colourways each. That is the whole catalogue.
 
-| | Design | Colourways | Canvas |
+| | Print | Colourways | Canvas |
 |---|--------|-----------|--------|
-| 01 | **Isometric Grid** — the logo grid built as the street plan it always was | amber on black · grey on white | 3300 × 3900 (11 × 13 in) |
-| 02 | **One Note** — `I ♥ THIS CITY / BUT I HAVE ONE NOTE` + a code to one proposal | white on black · black on white | 3300 × 3300 (11 × 11 in) |
+| 01 | **Isometric Grid**, front — the logo grid built as the street plan it always was | amber on black · grey on white | 3300 × 3900 (11 × 13 in) |
+| 01b | **Isometric Grid**, back — the QR *as* an isometric city, `ONE OF THESE BLOCKS IS MINE / SCAN TO SEE WHICH` | white on black · black on white | 3600 × 4500 (12 × 15 in) |
+| 02 | **One Note**, front — `I ♥ THIS CITY / BUT I HAVE ONE NOTE` + a code to one proposal | white on black · black on white | 3300 × 3300 (11 × 11 in) |
+
+The back's code is drawn by `tools/stickers/isoqr.py`, not forked into here —
+one isometric-code design in the repo, not two that drift. Its projection is a
+horizontally squeezed isometric that makes the grid a square diamond rather than
+one 1.73× wider than tall, which is the right footprint for a back print.
 
 **The art is transparent.** The garment is the background, so a design puts
 down ink and nothing else. Don't flatten it onto a rectangle before uploading
@@ -37,14 +43,57 @@ tones will read off.
 - `palette.py` — the two blanks, the two inks, the accent, and `svg()`
 - `typo.py` — Red Hat Mono as vector outlines, so no print shop needs the font
   installed. The variable font is vendored in `fonts/` under the OFL
-- `iso.py` — design 01. The projection, the volumes, the standing letters
+- `iso.py` — design 01 front. The projection, the volumes, the standing letters
+- `back.py` — design 01 back. Wraps `tools/stickers/isoqr.py` in the entreaty
 - `qr_tee.py` — design 02. The heart, the type, the code
+- `tee_codes.py` — one code per shirt, minted deterministically
 - `build_merch.py` — the four SKUs and the proof sheet
+- `build_sheets.py` — a print run: per-shirt files, gang sheets, manifest, seed SQL
 
 The docstrings carry the reasoning; the short version is that the letters on 01
 stand up rather than lie on the roofs (on the ground plane a glyph shears in
 both axes and turns to mush at chest scale), and 02's heart is the Donate mark
 from `NavRail/icons.tsx` — the one curve in an otherwise square icon set.
+
+## A print run
+
+```bash
+./env/bin/python build_sheets.py --run 10
+```
+
+Ten shirts per SKU, each with its own code, into `out/run/`:
+
+| | |
+|---|---|
+| `shirts/*.png` | one 300 DPI file per physical shirt — **send these if the printer takes them** |
+| `sheets/*.pdf` | 22 in DTF gang sheets, vector, true size |
+| `sheets/*.proof.png` | the same sheets, small, to look at |
+| `manifest.csv` | every shirt, its code, its URL |
+| `seed_tees.sql` | the rows the API needs, or every scan is a 404 at the kerb |
+
+Every code is decoded back out of its own finished artwork, composited over its
+real garment colour, before the run is called good. The gate is **zxing-cpp**,
+the lineage phone scanners are built on. OpenCV is *not* a useful gate here: it
+rejects the isometric code at any resolution, including raw segno output —
+`tools/stickers/verify_scan.py` documents why.
+
+⚠️ **Load `seed_tees.sql` before the shirts leave the building.** An unseeded
+code is a 404 to whoever scans it.
+
+### Why the gang sheets are one-across, and PDF
+
+A DTF sheet is 22 in wide and these are 11–12 in prints, so two will not sit
+side by side once you leave the 0.25 in the shop needs to trim between them.
+That wastes about half of every sheet, which is why the per-shirt files are the
+better order — they let the shop nest the run itself.
+
+They are PDF because ten 11 in prints down a 22 in sheet is a long sheet: at
+300 DPI that raster is past Cairo's 32767 px surface limit and about 900 MB in
+memory. The vector PDF is exact and a few hundred KB.
+
+Each print is placed by its **ink box**, not its canvas — a design's margins
+position it on a chest and are pure cost on a sheet priced by the inch. That
+alone took the One Note sheet from 113 in to 70 in.
 
 ## The code on design 02
 
@@ -63,13 +112,26 @@ At the same 3.6 in print that is the difference between forgiving and fussy on
 cotton. `tools/stickers` made `/s/<code>` case-insensitive for exactly this
 reason.
 
-⚠️ A sticker code resolves to a *location* on first scan, which is right for a
-lamp post and wrong for a chest. Design 02 wants its own short-code namespace
-that resolves straight to a proposal — a server change, not an art change, and
-worth settling before any print run.
+### What a scan does
 
-Both colourways are rendered and decoded back with OpenCV as part of iterating
-on this design. Do that again if you touch the code path.
+1. **Fresh code** — opens `nyc-proposals` and asks for a location, so the
+   scanner can put the pin where they mean.
+2. **First vote from that scan** — the code binds to that vote: the map it
+   landed on (which need not be `nyc-proposals` — the scanner may have changed
+   map), the vote type actually cast, and the whole selection, one waypoint or
+   twenty.
+3. **Every scan after** — opens that proposal directly, no prompt.
+
+Binding is write-once: the second person to vote from a code gets the first
+person's proposal back rather than overwriting it.
+
+To un-bind a run (and only ever a run you own):
+
+```sql
+UPDATE sticker_codes SET resolved_at=NULL, lat=NULL, lon=NULL,
+  resolved_map_slug=NULL, resolved_vote_type=NULL, resolved_w=NULL
+WHERE campaign='tee-2026-08';
+```
 
 ## Print constraints the files already respect
 

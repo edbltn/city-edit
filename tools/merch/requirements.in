@@ -2,3 +2,4 @@ cairosvg
 fonttools
 pillow
 segno
+zxing-cpp
