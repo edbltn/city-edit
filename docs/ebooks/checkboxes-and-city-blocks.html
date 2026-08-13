@@ -1,5 +1,5 @@
 <title>Checkboxes and City Blocks</title>
-<meta name="description" content="One Million Checkboxes' stack against City Edit's, and the levers that are actually left.">
+<meta name="description" content="One Million Checkboxes' stack against City Edit's, and the levers that are left.">
 
 <style>
   /* ── Tokens: a two-pen plot on drafting stock ──────────────────────────
@@ -185,7 +185,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.55rem;
-    counter-reset: rail;
   }
   .rail a {
     display: grid;
@@ -489,11 +488,11 @@
     <div class="eyebrow">A stack comparison · August 2026</div>
     <h1>Checkboxes and City&nbsp;Blocks</h1>
     <p class="standfirst">
-      One Million Checkboxes served 650&nbsp;million toggles from eight droplets for
-      about $800. City Edit serves a few thousand people a week from Cloud Run and
-      still takes seconds to paint. The two systems are not competitors — they are
-      <strong>opposite shapes</strong>, and reading the shape is what tells you which
-      of City Edit's remaining levers are real.
+      One Million Checkboxes served 650&nbsp;million toggles from eight droplets
+      for about $800. City Edit serves a few thousand people a week from Cloud Run
+      and still takes seconds to paint. The two systems have
+      <strong>opposite size profiles</strong>, which is what decides whether any
+      given fix from Hamy's write-up applies here.
     </p>
     <div class="pens">
       <span class="pen pen-b">One Million Checkboxes</span>
@@ -507,15 +506,15 @@
   <nav class="rail" aria-label="Contents">
     <div class="rail-title">Contents</div>
     <ol>
-      <li><a href="#ch1"><span class="n">01</span><span>The two shapes</span></a></li>
-      <li><a href="#ch2"><span class="n">02</span><span>OMCB, faithfully</span></a></li>
-      <li><a href="#ch3"><span class="n">03</span><span>City Edit as it stands</span></a></li>
-      <li><a href="#ch4"><span class="n">04</span><span>The byte ledger</span></a></li>
-      <li><a href="#ch5"><span class="n">05</span><span>Convergent evolution</span></a></li>
-      <li><a href="#ch6"><span class="n">06</span><span>Five real divergences</span></a></li>
+      <li><a href="#ch1"><span class="n">01</span><span>Where the size is</span></a></li>
+      <li><a href="#ch2"><span class="n">02</span><span>The OMCB stack</span></a></li>
+      <li><a href="#ch3"><span class="n">03</span><span>The City Edit stack</span></a></li>
+      <li><a href="#ch4"><span class="n">04</span><span>What a cold load pulls</span></a></li>
+      <li><a href="#ch5"><span class="n">05</span><span>Where they agree</span></a></li>
+      <li><a href="#ch6"><span class="n">06</span><span>Where they differ</span></a></li>
       <li><a href="#ch7"><span class="n">07</span><span>The levers</span></a></li>
       <li><a href="#ch8"><span class="n">08</span><span>What not to copy</span></a></li>
-      <li><a href="#ch9"><span class="n">09</span><span>Measure first</span></a></li>
+      <li><a href="#ch9"><span class="n">09</span><span>How to measure</span></a></li>
       <li><a href="#appendix"><span class="n">A</span><span>Knob index</span></a></li>
     </ol>
   </nav>
@@ -526,32 +525,29 @@
     <section class="chapter" id="ch1">
       <div class="chapter-head">
         <div class="chapter-num">Chapter 01</div>
-        <h2>The two shapes</h2>
+        <h2>Where the size is</h2>
       </div>
 
       <p>
-        Both systems are "a shared mutable thing, live, in a browser." That
-        similarity is why the comparison is worth making and also why it misleads
-        if you stop there. The load characteristics come almost entirely from one
-        number: <strong>how big is the thing a client must hold before it can
-        render anything at all?</strong>
+        Both systems are a shared mutable thing, live, in a browser. Past that the
+        load characteristics come from one number: how big is the thing a client
+        must hold before it can render anything.
       </p>
 
       <p>
-        For OMCB that number is a megabit. One million booleans is 125 KB dense,
-        and Hamy didn't even send it dense — clients got
-        <code>[[CHECKED], [UNCHECKED]]</code>, two lists of indices, which on a
-        half-checked board is <em>worse</em> than the bitset but still trivially
-        small. Everything after that is delta.
+        For OMCB that's a megabit. A million booleans is 125 KB dense, and Hamy
+        didn't send it dense — clients got <code>[[CHECKED], [UNCHECKED]]</code>,
+        two lists of indices, which on a half-checked board is worse than the
+        bitset but still small. Everything after that is delta.
       </p>
 
       <p>
-        For City Edit that number is the NYC walk graph: roughly 1.3M nodes and
-        3.3M edges, shipped as the GTB2 binary blob — 50 MB raw, 15.5 MB brotli.
-        The mutable part, the votes, is <em>smaller than OMCB's entire state</em>:
-        about 57 KB in the <code>format=sparse</code> body. City Edit's problem
-        has never been the shared mutable thing. It's the immutable substrate the
-        shared mutable thing is indexed against.
+        For City Edit it's the NYC walk graph: about 1.3M nodes and 3.3M edges,
+        shipped as the GTB2 binary blob at 50 MB raw, 15.5 MB brotli. The mutable
+        part — the votes — is about 57 KB in the <code>format=sparse</code> body,
+        smaller than OMCB's entire state. City Edit's problem has never been the
+        shared mutable thing. It's the immutable substrate the votes are indexed
+        against.
       </p>
 
       <figure>
@@ -566,7 +562,6 @@
               </pattern>
             </defs>
 
-            <!-- axis label -->
             <text x="0" y="16" font-family="ui-monospace, monospace" font-size="11" fill="currentColor" opacity="0.6">
               WHAT ONE CLIENT MUST OBTAIN BEFORE FIRST PAINT
             </text>
@@ -581,7 +576,6 @@
             <!-- City Edit row -->
             <text x="0" y="146" font-family="ui-monospace, monospace" font-size="12" fill="#a8341c" font-weight="600">CITY EDIT</text>
 
-            <!-- topology bar, with scale break -->
             <rect x="0" y="156" width="300" height="30" fill="#a8341c" opacity="0.85"/>
             <path d="M 300 156 L 312 156 L 300 171 L 312 186 L 300 186 Z" fill="var(--paper)"/>
             <line x1="303" y1="152" x2="294" y2="190" stroke="currentColor" stroke-width="1.5"/>
@@ -589,35 +583,31 @@
             <rect x="312" y="156" width="118" height="30" fill="#a8341c" opacity="0.85"/>
             <text x="8" y="176" font-family="ui-monospace, monospace" font-size="11.5" fill="var(--paper)" font-weight="600">15.5 MB brotli — GTB2 topology · IMMUTABLE per graph version</text>
 
-            <!-- votes bar -->
             <rect x="436" y="156" width="10" height="30" fill="#a8341c"/>
             <line x1="441" y1="150" x2="441" y2="130" stroke="currentColor" opacity="0.5"/>
-            <text x="446" y="127" font-family="ui-monospace, monospace" font-size="10.5" fill="currentColor" opacity="0.75">57 KB sparse votes — the only mutable part</text>
+            <text x="446" y="127" font-family="ui-monospace, monospace" font-size="10.5" fill="currentColor" opacity="0.75">57 KB sparse votes — the mutable part</text>
 
-            <!-- tiles bar -->
             <rect x="452" y="156" width="308" height="30" fill="url(#hatch)" stroke="#a8341c" stroke-dasharray="3 3"/>
             <text x="460" y="176" font-family="ui-monospace, monospace" font-size="11" fill="currentColor">basemap + block tiles · range-fetched, viewport-scoped</text>
 
-            <!-- ratio annotation -->
             <line x1="0" y1="206" x2="430" y2="206" stroke="#a8341c" marker-start="url(#ar)" marker-end="url(#ar)" opacity="0.8"/>
-            <text x="0" y="228" font-family="ui-monospace, monospace" font-size="11" fill="#a8341c">124x OMCB's entire state, and none of it ever changes</text>
+            <text x="0" y="228" font-family="ui-monospace, monospace" font-size="11" fill="#a8341c">124x OMCB's whole state, and it never changes</text>
           </svg>
         </div>
         <figcaption>
-          The bar is broken because it cannot be drawn to scale. <b>City Edit's
-          mutable state is less than half the size of OMCB's</b>; the cost is the
-          immutable topology it must be indexed against, which every cold visitor
-          currently pulls whole, from the origin, for the entire city.
+          The bar is broken because it can't be drawn to scale. <b>City Edit's
+          mutable state is under half the size of OMCB's.</b> The cost is the
+          immutable topology it's indexed against, which every cold visitor pulls
+          whole, from the origin, for the entire city.
         </figcaption>
       </figure>
 
       <p>
-        Hold that asymmetry through the rest of this. It reverses almost every
-        instinct you would import from the OMCB write-up: broadcast fan-out is
-        <em>not</em> City Edit's problem, a Go rewrite would buy almost nothing,
-        and the single most valuable thing in Hamy's post — the last paragraph,
-        about scoping updates to the viewport — is the one City Edit has already
-        done for two of its three payloads and not yet for the one that matters.
+        That asymmetry reverses most of what you'd carry over from the OMCB
+        write-up. Broadcast fan-out is not City Edit's problem, and a Go rewrite
+        would buy very little. The useful part of Hamy's post is the last
+        paragraph, about scoping updates to the viewport — City Edit already does
+        that for two of its three payloads, and not for the one that matters.
       </p>
     </section>
 
@@ -625,12 +615,12 @@
     <section class="chapter" id="ch2">
       <div class="chapter-head">
         <div class="chapter-num">Chapter 02</div>
-        <h2>OMCB, faithfully</h2>
+        <h2>The OMCB stack</h2>
       </div>
 
       <p>
         The write-up is short and the architecture is smaller than the traffic
-        suggests. Reconstructed:
+        suggests.
       </p>
 
       <div class="table-wrap">
@@ -639,46 +629,44 @@
             <tr><th>Layer</th><th>OMCB</th><th>Note</th></tr>
           </thead>
           <tbody>
-            <tr><td>Client</td><td>React + react-window</td><td>Renders only the checkboxes in the viewport — but receives <em>every</em> update regardless</td></tr>
-            <tr><td>Transport</td><td>WebSocket, bidirectional</td><td>Toggle up, deltas and periodic full-state down</td></tr>
+            <tr><td>Client</td><td>React + react-window</td><td>Renders only the checkboxes in the viewport, but receives every update regardless</td></tr>
+            <tr><td>Transport</td><td>WebSocket, bidirectional</td><td>Toggle up; deltas and periodic full state down</td></tr>
             <tr><td>Initial state</td><td><code>[[CHECKED],[UNCHECKED]]</code></td><td>Two index lists, not a bitset</td></tr>
-            <tr><td>App</td><td>Flask → rewritten in Go</td><td>Author's number: <span class="c-blue">~20× faster</span></td></tr>
-            <tr><td>Fan-out</td><td>Batch writes into Redis; Redis emits a delta; servers push to attached clients</td><td>Same inversion City Edit's <code>DeltaHub</code> arrived at independently</td></tr>
+            <tr><td>App</td><td>Flask, later rewritten in Go</td><td>Author's number: <span class="c-blue">~20× faster</span></td></tr>
+            <tr><td>Fan-out</td><td>Batch writes into Redis; Redis emits a delta; servers push to attached clients</td><td>Same inversion City Edit's <code>DeltaHub</code> arrived at</td></tr>
             <tr><td>Balancer</td><td>nginx across horizontally-scaled app servers</td><td>~8 servers</td></tr>
             <tr><td>Hosts</td><td>DigitalOcean droplets, 8 GB / 50 GB, Ubuntu 24.04</td><td>Plus managed Redis</td></tr>
-            <tr><td>Database</td><td>none</td><td>Redis <em>is</em> the store</td></tr>
-            <tr><td>Bill</td><td><span class="c-blue">~$800 total</span></td><td>Dominated by egress, not compute</td></tr>
+            <tr><td>Database</td><td>none</td><td>Redis is the store</td></tr>
+            <tr><td>Bill</td><td><span class="c-blue">~$800 total</span></td><td>Mostly egress, not compute</td></tr>
           </tbody>
         </table>
       </div>
 
       <p>
-        The two failure modes he names are worth quoting in effect. First, the
-        fan-out arithmetic: <em>"one update leads to n fanout."</em> With enough
-        concurrent clients this saturates before anything else does, and the
-        mitigations he observed in production were both lossy — cap the bandwidth
-        (drop updates) and periodically re-push full state to resynchronise the
-        clients that fell behind.
+        He names two failure modes. The first is fan-out arithmetic:
+        <em>"one update leads to n fanout."</em> With enough concurrent clients
+        this saturates before anything else does, and the mitigations he saw in
+        production were both lossy — cap the bandwidth (drop updates) and
+        periodically re-push full state to resync clients that fell behind.
       </p>
 
       <p>
-        Second, and this is the sentence to actually take away: the boxes a client
-        <em>renders</em> were already viewport-scoped by react-window, but the
-        boxes it <em>receives</em> never were. His estimate for scoping the stream
-        to the visible range plus a buffer: <strong>~99% less update
-        bandwidth</strong>. He also notes the HTMX polling variant was
-        <em>"highly cacheable, client can ask for just what it needs, no wasted bw
-        sending data clients don't need"</em> — at the cost of seconds of latency
-        instead of real time.
+        The second is the one to take away. The boxes a client rendered were
+        viewport-scoped by react-window; the boxes it received never were. His
+        estimate for scoping the stream to the visible range plus a buffer:
+        <strong>~99% less update bandwidth</strong>. He also notes the HTMX polling
+        variant was <em>"highly cacheable, client can ask for just what it needs,
+        no wasted bw sending data clients don't need"</em>, at the cost of seconds
+        of latency instead of real time.
       </p>
 
       <div class="callout">
         <span class="label">The transferable claim</span>
         <p>
-          The expensive thing is not the update rate and not the language. It is
-          sending each client bytes describing parts of the world it is not
-          looking at, from a machine you pay egress on. Everything actionable in
-          this book is a restatement of that against City Edit's numbers.
+          The expensive thing isn't the update rate or the language. It's sending
+          each client bytes describing parts of the world it isn't looking at, from
+          a machine you pay egress on. The rest of this book applies that to City
+          Edit's numbers.
         </p>
       </div>
     </section>
@@ -687,24 +675,24 @@
     <section class="chapter" id="ch3">
       <div class="chapter-head">
         <div class="chapter-num">Chapter 03</div>
-        <h2>City Edit as it stands</h2>
+        <h2>The City Edit stack</h2>
       </div>
 
       <p>
-        You built it, so this chapter is a ledger, not a tour. The point is to fix
-        the numbers in one place so Chapter 7 can point at them.
+        You built it, so this is a ledger rather than a tour. It fixes the numbers
+        in one place so Chapter 7 can point at them.
       </p>
 
       <h3>Serving topology</h3>
 
       <p>
         One Cloud Run service, <code>desire-path-mapper</code>, runs nginx and
-        gunicorn side by side under supervisord in the same container. OSRM is its
-        own service so its 1.6 GB of MLD files don't sit on the app's budget.
-        Redis is Memorystore, Postgres is Cloud SQL. There is
-        <strong>no CDN and no load balancer</strong> — a
-        <code>google_cloud_run_domain_mapping</code> points the domains straight
-        at the service.
+        gunicorn side by side under supervisord in the same container. OSRM is a
+        separate service so its 1.6 GB of MLD files don't sit on the app's budget.
+        Redis is Memorystore, Postgres is Cloud SQL. There's
+        <strong>no CDN and no load balancer</strong>; a
+        <code>google_cloud_run_domain_mapping</code> points the domains straight at
+        the service.
       </p>
 
       <div class="table-wrap">
@@ -753,10 +741,9 @@
       </div>
 
       <p>
-        200 × 8 ≈ 1600 concurrent viewers before saturation, and the comment in
-        <code class="path">main.tf:328</code> is right that the ceiling is
-        <em>viewers</em>, not RPS — every WebSocket holds a concurrency slot for
-        its lifetime.
+        200 × 8 is about 1600 concurrent viewers before saturation. The comment at
+        <code class="path">main.tf:328</code> is right that the ceiling is viewers,
+        not RPS — every WebSocket holds a concurrency slot for its lifetime.
       </p>
 
       <h3>The cold-load waterfall, before and after the July work</h3>
@@ -765,8 +752,8 @@
         The <code class="path">changelog/2026-07-23-coldload-swr.html</code>
         measurements are the best data in the repo. Three headless runs on a fresh
         profile against prod <code>nyc-bikes</code>: cold 8.5–9.9 s, warm ~950 ms.
-        Three fat terms, fully serialised, and the fattest one — the ~6 s vote
-        array build — could not even begin until the topology had finished
+        Three fat terms ran strictly one after another, and the fattest — the ~6 s
+        vote array build — couldn't start until the topology had finished
         downloading.
       </p>
 
@@ -779,7 +766,6 @@
               </marker>
             </defs>
 
-            <!-- time axis -->
             <g font-family="ui-monospace, monospace" font-size="10" fill="currentColor" opacity="0.55">
               <line x1="150" y1="22" x2="750" y2="22" stroke="currentColor" opacity="0.4"/>
               <line x1="150" y1="18" x2="150" y2="300" stroke="currentColor" opacity="0.12"/>
@@ -796,7 +782,6 @@
               <text x="750" y="14" text-anchor="middle">10s</text>
             </g>
 
-            <!-- BEFORE -->
             <text x="0" y="46" font-family="ui-monospace, monospace" font-size="11" fill="currentColor" opacity="0.6" letter-spacing="1.5">BEFORE</text>
             <g font-family="ui-monospace, monospace" font-size="10.5" fill="currentColor">
               <text x="0" y="66">GET /api/maps</text>
@@ -822,7 +807,6 @@
 
             <line x1="0" y1="182" x2="760" y2="182" stroke="currentColor" opacity="0.2"/>
 
-            <!-- AFTER -->
             <text x="0" y="206" font-family="ui-monospace, monospace" font-size="11" fill="currentColor" opacity="0.6" letter-spacing="1.5">AFTER</text>
             <g font-family="ui-monospace, monospace" font-size="10.5" fill="currentColor">
               <text x="0" y="226">GET /api/maps</text>
@@ -847,22 +831,22 @@
           </svg>
         </div>
         <figcaption>
-          Four fixes closed the gap: prewarm the <b>mode-scoped</b> cache key that
+          Four fixes closed the gap: prewarm the <b>mode-scoped</b> cache key
           clients actually request, always serve stale and rebuild on a background
-          OS thread, apply the same treatment to the map config, and fire the vote
-          fetch in parallel with the topology at step 0. What is left on the
-          critical path is <b>almost entirely one 15.5 MB download from a single
-          origin</b> — which is Chapter 7's first lever.
+          OS thread, do the same for the map config, and fire the vote fetch in
+          parallel with the topology at step 0. What's left on the critical path is
+          <b>almost entirely one 15.5 MB download from a single origin</b>, which
+          is Chapter 7's first lever.
         </figcaption>
       </figure>
 
-      <h3>Where the client's work goes after the bytes land</h3>
+      <h3>Client work after the bytes land</h3>
 
       <p>
-        Even with a warm IndexedDB topology, the client still does real work
-        before it can hit-test. <code class="path">GraphLayer.tsx:1947–1975</code>
-        builds the node adjacency, the block index, then the edge and node spatial
-        indexes — the last two yielding to the main thread every 120,000 items:
+        Even with a warm IndexedDB topology the client does real work before it can
+        hit-test. <code class="path">GraphLayer.tsx:1947–1975</code> builds the node
+        adjacency, the block index, then the edge and node spatial indexes, the
+        last two yielding to the main thread every 120,000 items:
       </p>
 
       <p class="srcline">client-react/src/components/GraphLayer/spatialLookup.ts:178</p>
@@ -871,10 +855,10 @@
 if (i &gt; 0 &amp;&amp; i % INDEX_YIELD_BATCH === 0) await yieldToMain();</code></pre>
 
       <p>
-        On 3.3M edges that is ~28 yields for the edge index and ~11 for the nodes,
-        all on the main thread, all after the download. It's correctly sliced so
-        it doesn't jank the paint — but it is still serial with everything else
-        the main thread wants to do.
+        On 3.3M edges that's ~28 yields for the edge index and ~11 for the nodes,
+        all on the main thread, all after the download. The slicing keeps it from
+        janking the paint, but it's still serial with everything else the main
+        thread wants to do.
       </p>
     </section>
 
@@ -882,12 +866,12 @@ if (i &gt; 0 &amp;&amp; i % INDEX_YIELD_BATCH === 0) await yieldToMain();</code>
     <section class="chapter" id="ch4">
       <div class="chapter-head">
         <div class="chapter-num">Chapter 04</div>
-        <h2>The byte ledger</h2>
+        <h2>What a cold load pulls</h2>
       </div>
 
       <p>
-        Every payload a cold NYC visitor pulls, with its cache header and its
-        origin. This table is the diagnosis; Chapter 7 is the treatment.
+        Every payload a cold NYC visitor downloads, with its cache header and its
+        origin.
       </p>
 
       <div class="table-wrap">
@@ -956,19 +940,18 @@ if (i &gt; 0 &amp;&amp; i % INDEX_YIELD_BATCH === 0) await yieldToMain();</code>
       </div>
 
       <p>
-        Read the "Served by" column as the finding. Every byte in the first five
-        rows leaves <em>the same Cloud Run instance</em>, in
-        <code>us-central1</code>, over the same single gevent worker's nginx. The
-        one row that comes off a CDN is the one you don't own.
+        The finding is in the "Served by" column. Every byte in the first five rows
+        leaves the same Cloud Run instance in <code>us-central1</code>, through the
+        same single gevent worker's nginx. The one row served off a CDN is the one
+        we don't own.
       </p>
 
       <p>
-        And note the perverse ordering: the payload with the strongest immutability
-        guarantee in the whole system — the topology blob, byte-identical for every
-        visitor to a given graph version, already content-addressed by
-        <code>?v=</code> — is the one with no edge in front of it. The tiles, which
-        <em>do</em> have a caching tier, are the ones already scoped to a viewport
-        and therefore cheap.
+        The ordering is backwards. The topology blob has the strongest
+        immutability guarantee in the system — byte-identical for every visitor to
+        a given graph version, already content-addressed by <code>?v=</code> — and
+        it's the payload with no edge in front of it. The tiles, which do have a
+        caching tier, are already viewport-scoped and therefore cheap.
       </p>
 
       <figure>
@@ -1031,14 +1014,14 @@ if (i &gt; 0 &amp;&amp; i % INDEX_YIELD_BATCH === 0) await yieldToMain();</code>
               <text x="560" y="181" text-anchor="middle" opacity="0.6">topology/&lt;version&gt;.gtb2.br</text>
             </g>
 
-            <text x="0" y="226" font-family="ui-monospace, monospace" font-size="10.5" fill="currentColor" opacity="0.7">The blob is already content-addressed by ?v= — the version IS the cache key.</text>
-            <text x="0" y="244" font-family="ui-monospace, monospace" font-size="10.5" fill="currentColor" opacity="0.7">Nothing about invalidation changes; there is simply nothing to invalidate.</text>
+            <text x="0" y="226" font-family="ui-monospace, monospace" font-size="10.5" fill="currentColor" opacity="0.7">The blob is already content-addressed by ?v= — the version is the cache key.</text>
+            <text x="0" y="244" font-family="ui-monospace, monospace" font-size="10.5" fill="currentColor" opacity="0.7">There is nothing to invalidate, so no purge story is needed.</text>
           </svg>
         </div>
         <figcaption>
-          The edit is small because the hard part is already done: the client
+          The change is small because the hard part is done: the client
           version-busts the URL at <b>GraphLayer.tsx:1868</b>, so the object is
-          immutable by construction and a CDN needs no purge story.
+          immutable by construction.
         </figcaption>
       </figure>
     </section>
@@ -1047,24 +1030,23 @@ if (i &gt; 0 &amp;&amp; i % INDEX_YIELD_BATCH === 0) await yieldToMain();</code>
     <section class="chapter" id="ch5">
       <div class="chapter-head">
         <div class="chapter-num">Chapter 05</div>
-        <h2>Convergent evolution</h2>
+        <h2>Where they agree</h2>
       </div>
 
       <p>
-        Four places where the two stacks arrived at the same answer from opposite
-        directions. These are worth naming because they're the parts you should
-        <em>stop optimising</em> — they're done, and OMCB's experience confirms the
-        shape at a scale City Edit will not see.
+        Four places both stacks landed on the same answer. These are the parts to
+        stop optimising — they're done, and OMCB confirms the shape at a scale City
+        Edit won't see.
       </p>
 
       <h3>1 · Batch to Redis, emit a delta, fan out from one listener</h3>
 
       <p>
         Hamy: <em>"Change is batched to Redis. Redis emits a delta. Servers get
-        delta and push it to attached clients."</em> City Edit reached the identical
+        delta and push it to attached clients."</em> City Edit made the same
         inversion in <code class="path">server/delta_hub.py</code> after finding #4
-        of the July 8 load test: before it, every WebSocket client held its own
-        Redis pubsub connection <em>and</em> its own 10 Hz polling thread.
+        of the July 8 load test. Before it, every WebSocket client held its own
+        Redis pubsub connection and its own 10 Hz polling thread.
       </p>
 
       <figure>
@@ -1109,23 +1091,22 @@ if (i &gt; 0 &amp;&amp; i % INDEX_YIELD_BATCH === 0) await yieldToMain();</code>
                 <text x="731" y="87" text-anchor="middle" font-size="9.5">ws</text>
               </g>
 
-              <text x="0" y="132" opacity="0.7">One merged {"type":"deltas", "rev":max, "items":[…]} per flush window per map —</text>
+              <text x="0" y="132" opacity="0.7">One merged {"type":"deltas", "rev":max, "items":[…]} per flush window per map,</text>
               <text x="0" y="148" opacity="0.7">not one send per vote per client. Merged counts are authoritative SETs, so</text>
-              <text x="0" y="164" opacity="0.7">coalescing is lossless and a client's optimistic guess cannot drift.</text>
+              <text x="0" y="164" opacity="0.7">coalescing is lossless and a client's optimistic guess can't drift.</text>
 
               <line x1="0" y1="182" x2="760" y2="182" stroke="currentColor" opacity="0.2"/>
-              <text x="0" y="204" fill="#14509b">OMCB reached the same shape — one global room instead of one per map, and</text>
-              <text x="0" y="220" fill="#14509b">a bandwidth cap on top because its fan-out was 1M-box-wide, not 145-edge-wide.</text>
+              <text x="0" y="204" fill="#14509b">OMCB has the same shape — one global room instead of one per map, plus a</text>
+              <text x="0" y="220" fill="#14509b">bandwidth cap, since its fan-out was 1M boxes wide rather than 145 edges.</text>
             </g>
           </svg>
         </div>
         <figcaption>
           <b>Knobs:</b> <code>FLUSH_INTERVAL 0.1</code>,
-          <code>HOLE_GRACE 0.3</code>, <code>QUEUE_MAX 256</code> —
+          <code>HOLE_GRACE 0.3</code>, <code>QUEUE_MAX 256</code> at
           <code class="path">server/delta_hub.py:36–38</code>. An overflowing
-          subscriber gets its socket closed; reconnect plus gap-refetch resyncs it,
-          which is exactly OMCB's periodic-full-push, done per-client instead of
-          globally.
+          subscriber gets its socket closed; reconnect plus gap-refetch resyncs it.
+          That's OMCB's periodic full push, done per client instead of globally.
         </figcaption>
       </figure>
 
@@ -1147,21 +1128,19 @@ def pack(edge_id, mode, vt_id):
     return (vt_id &lt;&lt; 28) | (mode &lt;&lt; 24) | edge_id</code></pre>
 
       <p>
-        The failure mode is worth remembering as a general lesson about packed
-        layouts: <code>vt</code> was 16 bits until July, <code>vote_types</code> is
-        a global <code>SERIAL</code>, a bulk import pushed ids past 65535, and the
-        overflow bit landed <em>exactly on the direction bit</em> — silently
-        recording every such vote as a downvote.
+        The failure mode generalises to any packed layout. <code>vt</code> was 16
+        bits until July, <code>vote_types</code> is a global <code>SERIAL</code>, a
+        bulk import pushed ids past 65535, and the overflow bit landed on the
+        direction bit — recording every such vote as a downvote.
       </p>
 
-      <h3>3 · Snapshot + delta, with the client reconciling forward</h3>
+      <h3>3 · Snapshot plus delta, client reconciles forward</h3>
 
       <p>
         Both systems serve a possibly-stale full state and let deltas carry the
-        client forward. City Edit's version is more disciplined than OMCB's,
-        because it has to be: the snapshot is debounced (<code>2.0 s</code>), and
-        the ETag is computed from <em>the served entry</em>, never the live
-        revision —
+        client forward. City Edit's version is stricter because it has to be: the
+        snapshot is debounced at 2.0 s, and the ETag comes from the served entry,
+        never the live revision.
       </p>
 
       <p class="srcline">server/app.py:2223–2234</p>
@@ -1172,20 +1151,20 @@ def pack(edge_id, mode, vt_id):
 <span class="c">    304-pins-stale-body bug of the blocks re-bake incident)."""</span></code></pre>
 
       <p>
-        Plus <code>X-Vote-Rev</code> / <code>X-Vote-Rev-Current</code> so a page
-        load — which has no deltas to reconcile from — can notice it is behind and
-        schedule exactly one refetch. That's the part OMCB solved by pushing full
-        state to everyone periodically.
+        Plus <code>X-Vote-Rev</code> and <code>X-Vote-Rev-Current</code>, so a page
+        load — which has no deltas to reconcile from — can tell it's behind and
+        schedule one refetch. OMCB solved that by pushing full state to everyone
+        periodically.
       </p>
 
       <h3>4 · Viewport rendering that isn't viewport fetching</h3>
 
       <p>
         react-window renders only visible checkboxes but receives all updates. City
-        Edit's MapLibre layers render only the visible tiles — and for basemap,
-        blocks and places, only <em>fetch</em> the visible tiles. For the topology,
-        it fetches the whole city. Same gap, different payload. Hamy's ~99%
-        estimate is the reason Lever 2 exists.
+        Edit's MapLibre layers render only visible tiles, and for basemap, blocks
+        and places they only fetch visible tiles. For the topology it fetches the
+        whole city. Same gap, different payload; Hamy's ~99% estimate is why
+        Lever 2 exists.
       </p>
     </section>
 
@@ -1193,7 +1172,7 @@ def pack(edge_id, mode, vt_id):
     <section class="chapter" id="ch6">
       <div class="chapter-head">
         <div class="chapter-num">Chapter 06</div>
-        <h2>Five real divergences</h2>
+        <h2>Where they differ</h2>
       </div>
 
       <div class="table-wrap">
@@ -1206,49 +1185,49 @@ def pack(edge_id, mode, vt_id):
               <td><b>What's big</b></td>
               <td>Nothing. 125 KB total.</td>
               <td>An immutable 15.5 MB substrate per city.</td>
-              <td>OMCB optimises the stream; City Edit must optimise the <em>first</em> transfer.</td>
+              <td>OMCB optimises the stream; City Edit has to optimise the first transfer.</td>
             </tr>
             <tr>
               <td><b>Fan-out direction</b></td>
               <td>Server → all, continuously. n clients × every update.</td>
               <td>Server → subscribers of one map, merged every 100 ms, ~145 edges per cast.</td>
-              <td>Fan-out is a solved, small cost here. Do not spend effort on it.</td>
+              <td>Fan-out is already small here. Not worth further effort.</td>
             </tr>
             <tr>
               <td><b>Statefulness of a request</b></td>
-              <td>Stateless app servers over a shared Redis. Any droplet serves any client.</td>
+              <td>Stateless app servers over shared Redis. Any droplet serves any client.</td>
               <td>Instances hold multi-GB resident graphs and per-instance vote snapshot caches.</td>
               <td>Scale-out is expensive: each new instance pays a graph load and rebuilds its own snapshots.</td>
             </tr>
             <tr>
               <td><b>Concurrency model</b></td>
-              <td>~8 processes across 8 boxes; Go goroutines after the rewrite.</td>
-              <td>One gevent worker per instance, 8 instances max. Python, GIL-bound on every C-extension call that doesn't yield.</td>
-              <td>A single non-yielding operation head-of-line-blocks an entire instance's 200 concurrency slots.</td>
+              <td>~8 processes across 8 boxes; goroutines after the rewrite.</td>
+              <td>One gevent worker per instance, 8 instances max. GIL-bound on every C-extension call that doesn't yield.</td>
+              <td>A single non-yielding operation blocks all 200 of an instance's concurrency slots.</td>
             </tr>
             <tr>
               <td><b>Edge</b></td>
-              <td>DO egress, no CDN, and the author's regret is about the price of that egress.</td>
-              <td>Cloud Run domain mapping, no CDN, and the cost is <em>latency</em> more than money.</td>
-              <td>Same missing tier, different bill. Both authors should have put a CDN in front.</td>
+              <td>DO egress, no CDN; the author's regret is the price of that egress.</td>
+              <td>Cloud Run domain mapping, no CDN; the cost is latency more than money.</td>
+              <td>Same missing tier, different bill.</td>
             </tr>
           </tbody>
         </table>
       </div>
 
       <p>
-        Row four deserves elaboration, because it's the one that quietly caps
-        everything. Under one gevent worker, concurrency exists only where the code
-        yields. That is why <code class="path">server/database.py</code> needed
-        psycogreen — without the wait callback, psycopg2 froze the whole hub for
-        every query, and the July 7 report shows P99s across <em>unrelated</em>
-        endpoints moving together whenever the 3.6 s maps aggregate ran.
+        Row four caps everything else. Under one gevent worker, concurrency exists
+        only where the code yields. That's why
+        <code class="path">server/database.py</code> needed psycogreen: without the
+        wait callback, psycopg2 froze the hub for every query, and the July 7 report
+        shows P99s across unrelated endpoints moving together whenever the 3.6 s
+        maps aggregate ran.
       </p>
 
       <p>
-        The same hazard is live in two places today. The PMTiles reader re-parses
-        root and leaf directories in pure Python on every tile — roughly 5 ms with
-        no yields — which is why there's a hot-bytes LRU in front of it:
+        Two instances of that hazard are live today. The PMTiles reader re-parses
+        root and leaf directories in pure Python on every tile — about 5 ms with no
+        yields — hence the hot-bytes LRU in front of it:
       </p>
 
       <p class="srcline">server/app.py:2019–2025</p>
@@ -1259,13 +1238,14 @@ with _tile_lock:
     body = _tile_gzip_lru.get(key)</code></pre>
 
       <p>
-        And the vote array build calls <code>np.add.at</code> / <code>np.maximum.at</code>
-        over the whole vote set inside one C call. It's fast — the vectorised
-        rewrite in <code class="path">server/vote_store.py:318</code> replaced a
-        4.6M-iteration Python loop — but it does not yield, so those hundreds of
-        milliseconds are hub-frozen. Which is exactly why the SWR rebuild was moved
-        onto a real OS thread rather than a greenlet: the GIL hands off every few
-        ms, so the hub keeps serving.
+        And the vote array build runs <code>np.add.at</code> /
+        <code>np.maximum.at</code> over the whole vote set inside one C call. It's
+        fast — the vectorised rewrite at
+        <code class="path">server/vote_store.py:318</code> replaced a
+        4.6M-iteration Python loop — but it doesn't yield, so those hundreds of
+        milliseconds freeze the hub. That's why the SWR rebuild runs on a real OS
+        thread rather than a greenlet: the GIL hands off every few ms, so the hub
+        keeps serving.
       </p>
     </section>
 
@@ -1278,8 +1258,7 @@ with _tile_lock:
 
       <p>
         Ranked by expected latency win per unit of risk, against the current
-        ~2.5–3.5 s cold path and ~950 ms warm path. Every one is grounded in the
-        ledger in Chapter 4.
+        ~2.5–3.5 s cold path and ~950 ms warm path.
       </p>
 
       <!-- L1 -->
@@ -1290,25 +1269,23 @@ with _tile_lock:
         </div>
         <div class="lever-body">
           <dl class="spec">
-            <dt>Target</dt><dd>The 15.5 MB topology blob first; then <code>graph.pmtiles</code>, <code>blocks.pmtiles</code>, <code>places.pmtiles</code>, and <code>/assets/</code>.</dd>
+            <dt>Target</dt><dd>The 15.5 MB topology blob first, then <code>graph.pmtiles</code>, <code>blocks.pmtiles</code>, <code>places.pmtiles</code>, and <code>/assets/</code>.</dd>
             <dt>Where</dt><dd><code class="path">terraform/main.tf:524</code> (domain mapping today) · <code class="path">deploy/nginx-cloudrun.conf:136</code> · <code class="path">GraphLayer.tsx:1868, 1906</code></dd>
-            <dt>Win</dt><dd>Removes a trans-continental round trip and origin bandwidth from the dominant remaining term of every cold load. Also removes 15.5 MB × N from the single gevent worker's nginx.</dd>
-            <dt>Risk</dt><dd>Low. The blob is already version-addressed; there is no invalidation story to get wrong.</dd>
+            <dt>Win</dt><dd>Removes a cross-country round trip and origin bandwidth from the dominant remaining term of every cold load, and takes 15.5 MB × N off the single gevent worker's nginx.</dd>
+            <dt>Risk</dt><dd>Low. The blob is already version-addressed, so there's no invalidation to get wrong.</dd>
           </dl>
 
           <p>
-            This is the one place where OMCB's lesson transfers verbatim, and it
-            is currently City Edit's largest single unclaimed win. Today
-            <em>every</em> cold visitor, wherever they are, pulls 15.5 MB from one
-            instance in <code>us-central1</code> through an nginx sharing a
-            container with the app. There is no reason for those bytes to touch
-            the app at all.
+            This is where OMCB's lesson transfers directly, and it's the largest
+            unclaimed win. Today every cold visitor, wherever they are, pulls
+            15.5 MB from one instance in <code>us-central1</code> through an nginx
+            sharing a container with the app. Those bytes don't need to touch the
+            app at all.
           </p>
 
           <p>
-            The mechanism is already halfway built. The client cache-busts by
-            graph version because a stale topology paired with fresh votes crashes
-            mobile Safari:
+            Half the mechanism exists. The client cache-busts by graph version
+            because a stale topology paired with fresh votes crashes mobile Safari:
           </p>
 
           <p class="srcline">client-react/src/components/GraphLayer/GraphLayer.tsx:1868–1882</p>
@@ -1322,21 +1299,21 @@ const binVersion = version
   : null;</code></pre>
 
           <p>
-            So the object key writes itself:
+            So the object key is already determined:
             <code>gs://…/topology/&lt;binVersion&gt;.gtb2.br</code>. Publish it at
-            graph-build time (the same place <code>topology_binary_br()</code>
-            already runs in <code class="path">server/graph_registry.py:392</code>),
-            front the bucket with an external HTTPS LB + Cloud CDN, and either
-            302 <code>/api/graph-topology?format=bin</code> to the object or have
-            the client build the CDN URL directly. Keep the Flask route as the
-            fallback so a missing object degrades to today's behaviour instead of
-            a blank map.
+            graph-build time, where <code>topology_binary_br()</code> already runs
+            (<code class="path">server/graph_registry.py:392</code>), front the
+            bucket with an external HTTPS LB plus Cloud CDN, and either 302
+            <code>/api/graph-topology?format=bin</code> to the object or have the
+            client build the CDN URL directly. Keep the Flask route as a fallback
+            so a missing object degrades to today's behaviour instead of a blank
+            map.
           </p>
 
           <p>
-            Note the ordering advantage: standing up the LB for the blob gives you
-            the tier for <code>/assets/</code> and the PMTiles archives for free,
-            and those are already <code>immutable</code> / week-long.
+            Standing up the LB for the blob also gives you the tier for
+            <code>/assets/</code> and the PMTiles archives, which are already
+            <code>immutable</code> or week-long.
           </p>
         </div>
       </div>
@@ -1349,59 +1326,55 @@ const binVersion = version
         </div>
         <div class="lever-body">
           <dl class="spec">
-            <dt>Target</dt><dd>The GTB2 blob's <em>size</em>, not its delivery.</dd>
+            <dt>Target</dt><dd>The GTB2 blob's size, not its delivery.</dd>
             <dt>Where</dt><dd><code class="path">server/graph_registry.py:170–190</code> (blob assembly) · <code class="path">client-react/src/components/GraphLayer/graphTopology.ts</code> (decode + accessors)</dd>
             <dt>Win</dt><dd>Potentially the same order Hamy estimated for OMCB — a first view covers a small fraction of a 5-borough graph.</dd>
-            <dt>Risk</dt><dd class="c-red">High. This is a real architectural change, not a config one.</dd>
+            <dt>Risk</dt><dd class="c-red">High. An architectural change, not a config one.</dd>
           </dl>
 
           <p>
-            This is Hamy's ~99% observation applied to the payload that deserves
-            it. A cold visitor to <code>/m/nyc-walkways</code> sees a few square
+            A cold visitor to <code>/m/nyc-walkways</code> sees a few square
             kilometres and receives 3.3M edges. The blob is a flat concatenation —
             header, coords, ends, edge→block ids — with <code>edge_id</code> as an
-            implicit array index, which is precisely what makes chunking hard:
-            every id in the vote arrays, the block index and the URL waypoints is
-            a global index into that array.
+            implicit array index, which is what makes chunking hard: every id in
+            the vote arrays, the block index and the URL waypoints is a global
+            index into that array.
           </p>
 
-          <p>
-            Two viable shapes, in increasing order of ambition:
-          </p>
+          <p>Two workable shapes, in increasing order of effort:</p>
 
           <ol class="body-list">
             <li>
               <b>Bbox-scoped blob with a global id space.</b> Serve
-              <code>?format=bin&amp;bbox=…</code> returning a <em>sparse</em> GTB2
-              variant: an explicit <code>edge_id</code> column alongside coords and
-              ends, covering only edges intersecting the view plus a ring. Client
-              holds a holey topology — the same trick
-              <code class="path">sparseVotes.ts</code> already plays for votes —
-              and fetches additional bboxes on pan. Every consumer already indexes
-              by edge id, so ids stay global and nothing downstream renumbers.
+              <code>?format=bin&amp;bbox=…</code> returning a sparse GTB2 variant:
+              an explicit <code>edge_id</code> column alongside coords and ends,
+              covering only edges intersecting the view plus a ring. The client
+              holds a holey topology, the same trick
+              <code class="path">sparseVotes.ts</code> plays for votes, and fetches
+              more bboxes on pan. Every consumer already indexes by edge id, so
+              ids stay global and nothing downstream renumbers.
             </li>
             <li>
               <b>Topology as tiles.</b> Reuse the machinery already serving
-              <code>/api/tile/&lt;city&gt;/blocks/&lt;z&gt;/&lt;x&gt;/&lt;y&gt;.mvt</code>
-              — including the nginx <code>proxy_cache</code>, the 204-for-empty
-              convention, and the immutable ETags — for graph geometry. This makes
-              Lever 1 and Lever 2 the same lever.
+              <code>/api/tile/&lt;city&gt;/blocks/&lt;z&gt;/&lt;x&gt;/&lt;y&gt;.mvt</code>,
+              including the nginx <code>proxy_cache</code>, the 204-for-empty
+              convention, and the immutable ETags. That makes Lever 1 and Lever 2
+              the same lever.
             </li>
           </ol>
 
           <div class="callout">
             <span class="label">What breaks</span>
             <p>
-              Anything that needs the <em>global</em> graph rather than the visible
-              one: <code>buildNodeAdj</code>, route-proposal corridor growth
-              (<code>ROUTE_CHECK_MAX_POPS 30000</code> A* runs), and
+              Anything needing the global graph rather than the visible one:
+              <code>buildNodeAdj</code>, route-proposal corridor growth (A* with
+              <code>ROUTE_CHECK_MAX_POPS 30000</code>), and
               <code>topProposals</code> spacing at
-              <code>TOP_PROPOSAL_MIN_SPACING_M 600</code>. The honest answer is
-              probably that proposal computation moves server-side or into a
-              worker fed by a coarse city-wide summary, and the client keeps only
-              the geometry it can see. That is a redesign, so cost it before
-              starting — but the number it is chasing is the whole remaining cold
-              path.
+              <code>TOP_PROPOSAL_MIN_SPACING_M 600</code>. Proposal computation
+              probably has to move server-side or into a worker fed by a coarse
+              city-wide summary, with the client holding only the geometry it can
+              see. That's a redesign, so cost it before starting — but the number
+              it's chasing is the whole remaining cold path.
             </p>
           </div>
         </div>
@@ -1417,59 +1390,58 @@ const binVersion = version
           <dl class="spec">
             <dt>Target</dt><dd>4 vCPU serving through 1 gevent worker.</dd>
             <dt>Where</dt><dd><code class="path">deploy/supervisord.conf</code> · <code class="path">terraform/main.tf:329, 407</code></dd>
-            <dt>Win</dt><dd>Removes head-of-line blocking on every non-yielding operation: the PMTiles directory parse, the numpy vote build, brotli, any un-patched C call.</dd>
+            <dt>Win</dt><dd>Removes head-of-line blocking on non-yielding operations: the PMTiles directory parse, the numpy vote build, brotli, any un-patched C call.</dd>
             <dt>Risk</dt><dd class="c-red">Memory. Each worker is a full copy of the resident graphs.</dd>
           </dl>
 
           <p>
-            The comment at <code class="path">main.tf:404</code> is honest about
-            this: "the single gevent worker plus nginx gzip are the concurrency
-            ceiling per instance — extra cores keep topology/vote-snapshot
-            compression off the request path's back." Three cores are doing
-            compression and nothing else.
+            The comment at <code class="path">main.tf:404</code> states the
+            situation: "the single gevent worker plus nginx gzip are the
+            concurrency ceiling per instance — extra cores keep topology/vote-snapshot
+            compression off the request path's back." Three cores do compression
+            and nothing else.
           </p>
 
           <p>
-            You can't naively set <code>--workers 4</code>: 1.35 Gi resident × 4
-            blows the 8 Gi limit. But the barrier is softer than it looks, because
-            the correctness prerequisites are already met — the voter
-            read-modify-write is serialised fleet-wide by
+            <code>--workers 4</code> won't work directly: 1.35 Gi resident × 4
+            exceeds the 8 Gi limit. But the correctness prerequisites are met — the
+            voter read-modify-write is serialised fleet-wide by
             <code>vote_store.voter_lock</code>, and each instance's vote cache is a
-            bounded shared-nothing LRU with Redis holding truth. That is exactly
-            the argument <code class="path">main.tf:432–440</code> makes for
-            <code>maxScale 8</code>; it applies within an instance too.
+            bounded shared-nothing LRU with Redis holding truth. That's the same
+            argument <code class="path">main.tf:432–440</code> makes for
+            <code>maxScale 8</code>, and it holds within an instance too.
           </p>
 
           <p>Three routes, cheapest first:</p>
 
           <ul>
             <li>
-              <b>Preload + fork.</b> <code>gunicorn --preload</code> loads the
+              <b>Preload and fork.</b> <code>gunicorn --preload</code> loads the
               graph arrays once in the arbiter; workers fork and share pages
               copy-on-write. <code>walk_graph_arrays.npz</code> decodes to numpy
-              arrays that are never mutated at runtime, so CoW should hold — the
+              arrays that aren't mutated at runtime, so CoW should hold — the
               refcount-touching problem that defeats this for Python objects
-              largely doesn't apply to the array buffers themselves.
+              mostly doesn't apply to the array buffers.
             </li>
             <li>
-              <b>Two workers at 4 Gi each.</b> Doubles the yield-free-operation
-              tolerance for one config line, no sharing tricks. The measured 1.35 Gi
-              is with <em>every</em> city warm; a two-worker instance would need
-              per-worker LRU budgets trimmed from <code>VOTE_CACHE_MAX_MB 512</code>.
+              <b>Two workers at 4 Gi each.</b> Doubles the tolerance for
+              yield-free operations for one config line. The 1.35 Gi measurement is
+              with every city warm; a two-worker instance would need per-worker LRU
+              budgets trimmed from <code>VOTE_CACHE_MAX_MB 512</code>.
             </li>
             <li>
-              <b>Split the workload.</b> Serve the big static blobs from the CDN
-              (Lever 1) and this pressure mostly evaporates, because the remaining
-              Flask work is small JSON and tiles.
+              <b>Move the load elsewhere.</b> Serve the big static blobs from the
+              CDN (Lever 1) and most of this pressure goes away, since the
+              remaining Flask work is small JSON and tiles.
             </li>
           </ul>
 
           <p class="verdict">
             <span class="label">Verdict</span>
-            Do Lever 1 first and re-measure. If the worker still blocks, preload +
-            2 workers is the next step, not more instances — <code>maxScale 8</code>
-            already exists and each scale-out instance pays a fresh graph load and
-            a fresh set of ~6 s snapshot builds.
+            Do Lever 1 first and re-measure. If the worker still blocks, preload
+            plus 2 workers is the next step rather than more instances —
+            <code>maxScale 8</code> already exists, and each scale-out instance
+            pays a fresh graph load and a fresh set of ~6 s snapshot builds.
           </p>
         </div>
       </div>
@@ -1484,16 +1456,16 @@ const binVersion = version
           <dl class="spec">
             <dt>Target</dt><dd>The ~6 s array build, currently rebuilt per instance × map × mode.</dd>
             <dt>Where</dt><dd><code class="path">server/app.py:328–332, 2376–2404</code> · <code class="path">server/vote_store.py:318</code></dd>
-            <dt>Win</dt><dd>Kills the last inline-build path and makes scale-out cheap.</dd>
-            <dt>Risk</dt><dd>Low–medium. Redis is 1 GB BASIC with <code>allkeys-lru</code>; a large snapshot value could evict vote data.</dd>
+            <dt>Win</dt><dd>Removes the last inline-build path and makes scale-out cheap.</dd>
+            <dt>Risk</dt><dd>Low to medium. Redis is 1 GB BASIC with <code>allkeys-lru</code>, so a large snapshot value could evict vote data.</dd>
           </dl>
 
           <p>
             The cache today is an in-process <code>OrderedDict</code> bounded at
-            512 MB. It's correct and it's shared-nothing by design — but that means
-            every instance the autoscaler adds starts cold, and the fork at
+            512 MB. It's correct and shared-nothing by design, which means every
+            instance the autoscaler adds starts cold, and the fork at
             <code class="path">app.py:2376</code> still builds inline when nothing
-            is cached at all:
+            is cached:
           </p>
 
           <p class="srcline">server/app.py:2390–2401</p>
@@ -1508,21 +1480,21 @@ const binVersion = version
                  <span class="hi">or _build_graph_votes_body_locked(rmap, mode, fresh_rev, cache_key)</span>)</code></pre>
 
           <p>
-            The natural fix follows the shape you already chose for the topology:
-            the sparse body is ~57 KB, small enough to live in Redis under
+            The fix follows the shape already chosen for the topology. The sparse
+            body is ~57 KB, small enough to live in Redis under
             <code>votesnap:&lt;slug&gt;:&lt;mode&gt;:&lt;rev&gt;</code> with a short
             TTL. A cold instance then serves a fresh visitor from Redis in
-            milliseconds instead of building the arrays. The instance-local LRU
-            stays as an L1 in front of it.
+            milliseconds instead of building the arrays, with the instance-local
+            LRU staying as an L1 in front.
           </p>
 
           <p>
-            Watch the eviction interaction: Memorystore is 1 GB with
+            Watch the eviction interaction. Memorystore is 1 GB with
             <code>allkeys-lru</code>, and per the monitoring runbook, past 100% it
-            starts evicting the vote hashes themselves — which are the serving
-            source of truth. Snapshots are regenerable and vote hashes are not, so
-            either give snapshots a TTL short enough that they're never the
-            LRU-resident bulk, or bump <code>memory_size_gb</code> alongside.
+            evicts the vote hashes themselves, which are the serving source of
+            truth. Snapshots are regenerable and vote hashes aren't, so either give
+            snapshots a TTL short enough that they're never the LRU-resident bulk,
+            or bump <code>memory_size_gb</code> alongside.
           </p>
         </div>
       </div>
@@ -1535,38 +1507,36 @@ const binVersion = version
         </div>
         <div class="lever-body">
           <dl class="spec">
-            <dt>Target</dt><dd>The post-download gap on <em>warm</em> loads — the ~950 ms that isn't network.</dd>
+            <dt>Target</dt><dd>The post-download gap on warm loads — the ~950 ms that isn't network.</dd>
             <dt>Where</dt><dd><code class="path">GraphLayer.tsx:1947–1975</code> · <code class="path">spatialLookup.ts:178</code> · <code class="path">graphCache.ts</code></dd>
             <dt>Win</dt><dd>Interaction-ready sooner on repeat visits, which is most visits.</dd>
-            <dt>Risk</dt><dd>Low, structurally — the payload is already transferable.</dd>
+            <dt>Risk</dt><dd>Low. The payload is already transferable.</dd>
           </dl>
 
           <p>
             On a warm load the topology comes out of IndexedDB as an
-            <code>ArrayBuffer</code> — deliberately, because structured-cloning
+            <code>ArrayBuffer</code>, deliberately, because structured-cloning
             millions of small arrays is itself a mobile memory spike. Then the main
             thread decodes it and builds four indexes in 120,000-item slices.
           </p>
 
           <p>
-            Everything about that pipeline is already worker-shaped: the input is a
-            transferable <code>ArrayBuffer</code>, and the output —
-            <code>coords</code> (Int32Array), <code>ends</code> (Uint32Array),
-            <code>edgeBlockId</code> (Int32Array) — is entirely typed arrays. A
-            worker could read IndexedDB directly, decode, build the spatial
-            indexes, and post typed arrays back with zero-copy transfer. The
-            <code>yieldToMain</code> slicing then becomes unnecessary rather than
-            merely well-tuned.
+            That pipeline is already worker-shaped. The input is a transferable
+            <code>ArrayBuffer</code>, and the output — <code>coords</code>
+            (Int32Array), <code>ends</code> (Uint32Array), <code>edgeBlockId</code>
+            (Int32Array) — is all typed arrays. A worker could read IndexedDB
+            directly, decode, build the spatial indexes, and post typed arrays back
+            with zero-copy transfer. The <code>yieldToMain</code> slicing then
+            becomes unnecessary rather than just well-tuned.
           </p>
 
           <p>
-            The same argument applies to route-proposal recompute, which is already
-            <code>requestIdleCallback</code>-scheduled with a 4 s timeout and sliced
-            one vote type at a time. It runs A* with a 30,000-pop cap per corridor
-            check and up to 16 recovery checks per corridor. That's a worker's job,
-            not an idle callback's — the reason it's an idle callback is that it
-            needs the topology, which lives on the main thread. Move the topology
-            into the worker and both problems close together.
+            Same argument for route-proposal recompute, already
+            <code>requestIdleCallback</code>-scheduled with a 4 s timeout and
+            sliced one vote type at a time. It runs A* with a 30,000-pop cap per
+            corridor check and up to 16 recovery checks per corridor. It's an idle
+            callback because it needs the topology, which lives on the main thread.
+            Move the topology into the worker and both close together.
           </p>
         </div>
       </div>
@@ -1584,26 +1554,25 @@ const binVersion = version
           </dl>
 
           <p>
-            It is the most quotable number in Hamy's post and the one most likely
-            to send you down a six-week detour. His 20× was against per-request
-            Python doing per-connection work at high fan-out — request handling
-            <em>was</em> the workload.
+            It's the most quotable number in the post and the least applicable. His
+            20× was against per-request Python doing per-connection work at high
+            fan-out, where request handling was the workload.
           </p>
 
           <p>
             City Edit's hot loops already left Python. <code>build_arrays</code> is
-            numpy scatter-adds; the tile path is a byte pass-through with an LRU;
+            numpy scatter-adds, the tile path is a byte pass-through with an LRU,
             the topology blob is <code>ndarray.tobytes()</code> concatenation
-            pre-compressed once per graph load; routing is OSRM, a C++ service.
-            What's left in Python is the glue, and the glue is not the ~2.5 s.
+            pre-compressed once per graph load, and routing is OSRM in C++. What's
+            left in Python is glue, and glue isn't the ~2.5 s.
           </p>
 
           <p>
-            The <em>runtime</em> lesson that does transfer is narrower and is
-            Lever 3: the problem is not that Python is slow, it's that one gevent
-            worker has no parallelism to fall back on when a C call doesn't yield.
-            Go would fix that as a side effect of rewriting everything. Two gunicorn
-            workers fix it for one line.
+            The runtime lesson that does transfer is Lever 3, and it's narrower:
+            the problem isn't that Python is slow, it's that one gevent worker has
+            no parallelism to fall back on when a C call doesn't yield. Go would
+            fix that as a side effect of rewriting everything; two gunicorn workers
+            fix it in one line.
           </p>
         </div>
       </div>
@@ -1618,40 +1587,38 @@ const binVersion = version
 
       <h3>Redis as the only store</h3>
       <p>
-        OMCB has no database. City Edit's split — Postgres canonical,
-        Redis serving — is load-bearing and should stay. The
-        <code>rebuild_redis_for_map</code> path exists precisely because Memorystore
-        is 1 GB with <code>allkeys-lru</code> and <em>will</em> evict under
+        OMCB has no database. City Edit's split — Postgres canonical, Redis serving
+        — should stay. The <code>rebuild_redis_for_map</code> path exists because
+        Memorystore is 1 GB with <code>allkeys-lru</code> and will evict under
         pressure. A checkbox board can be recreated from nothing; 1.8M vote rows
-        with device identity and provenance cannot.
+        with device identity and provenance can't.
       </p>
 
       <h3>Capping bandwidth by dropping updates</h3>
       <p>
         OMCB's mitigation was to shed deltas and periodically re-push full state.
-        City Edit's equivalent already exists in a strictly better form: an
-        overflowing subscriber is closed (<code>QUEUE_MAX 256</code>) and its
-        reconnect + gap-refetch resyncs only that client. Don't add a global cap;
-        the per-client one is more precise and already handles the case.
+        City Edit's equivalent is better: an overflowing subscriber is closed
+        (<code>QUEUE_MAX 256</code>) and its reconnect plus gap-refetch resyncs only
+        that client. Don't add a global cap; the per-client one is more precise and
+        already covers the case.
       </p>
 
       <h3>Polling instead of WebSockets</h3>
       <p>
-        Hamy's HTMX variant traded real-time for cacheability. That trade is wrong
+        Hamy's HTMX variant traded real time for cacheability. That trade is wrong
         here: City Edit's WS traffic is a merged 100 ms flush of ~145-edge casts on
-        a map with a handful of concurrent viewers — it is not the cost. The
-        cacheable-payload half of his argument is right, and City Edit should take
-        it — but for the <em>topology</em>, via a CDN, not by downgrading the vote
-        stream.
+        a map with a handful of concurrent viewers, so it isn't the cost. The
+        cacheable-payload half of the argument is right, but it applies to the
+        topology via a CDN, not to downgrading the vote stream.
       </p>
 
       <h3>Horizontal scale-out as the first answer</h3>
       <p>
-        Eight cheap stateless droplets works because an OMCB app server holds
-        nothing. A City Edit instance holds every city graph. <code>maxScale 8</code>
-        is correct as a safety valve and wrong as a performance strategy: each
-        added instance pays a graph load, a set of ~6 s snapshot builds, and its own
-        512 MB LRU before it helps anyone.
+        Eight cheap stateless droplets work because an OMCB app server holds
+        nothing. A City Edit instance holds every city graph.
+        <code>maxScale 8</code> is a reasonable safety valve and a poor performance
+        strategy: each added instance pays a graph load, a set of ~6 s snapshot
+        builds, and its own 512 MB LRU before it helps anyone.
       </p>
     </section>
 
@@ -1659,26 +1626,25 @@ const binVersion = version
     <section class="chapter" id="ch9">
       <div class="chapter-head">
         <div class="chapter-num">Chapter 09</div>
-        <h2>Measure first</h2>
+        <h2>How to measure</h2>
       </div>
 
       <p>
-        The instrumentation for all of this already exists — the July 22 work built
-        it. Use it as the gate on every lever above.
+        The instrumentation already exists from the July 22 work. Use it as the
+        gate on every lever above.
       </p>
 
-      <h4>The one number that matters</h4>
+      <h4>The number that matters</h4>
       <p>
         <code>cityedit_map_load_ms</code>, a log-based distribution extracted from
         the <code>[MAPLOAD]</code> line at
-        <code class="path">server/app.py:2260</code>, labelled by
-        <code>map</code> / <code>cached</code> / <code>nav</code> / <code>src</code>.
-        The client beacons it from
+        <code class="path">server/app.py:2260</code>, labelled by <code>map</code>,
+        <code>cached</code>, <code>nav</code> and <code>src</code>. The client
+        beacons it from
         <code class="path">client-react/src/utils/loadTelemetry.ts</code> when the
-        full-screen loader first dismisses — base map ready <em>and</em> heatmap
-        painted. Split every measurement by <code>cached_topo</code>: Lever 1 and 2
-        move the cold arm, Lever 5 moves the warm arm, and averaging them hides
-        both.
+        full-screen loader first dismisses (base map ready and heatmap painted).
+        Split every measurement by <code>cached_topo</code>: Levers 1 and 2 move
+        the cold arm, Lever 5 moves the warm arm, and averaging them hides both.
       </p>
 
       <h4>Reproducing a cold load</h4>
@@ -1693,16 +1659,16 @@ curl -o /dev/null -s -H 'Accept-Encoding: br' \
 
       <p>
         For the end-to-end number, headless Chrome on a fresh profile is what
-        produced the 8.5–9.9 s figures — a warm browser profile measures the wrong
-        arm. And per the debugging notes: a hidden or occluded Chrome window
-        freezes rAF, so MapLibre never fires <code>load</code> and the beacon never
-        sends. Bring the window forward or you'll measure nothing.
+        produced the 8.5–9.9 s figures; a warm browser profile measures the wrong
+        arm. Also note that a hidden or occluded Chrome window freezes rAF, so
+        MapLibre never fires <code>load</code> and the beacon never sends. Bring
+        the window forward first.
       </p>
 
-      <h4>The alerts that will tell you a lever went wrong</h4>
+      <h4>Alerts that will tell you a lever went wrong</h4>
       <ul>
-        <li><b>App memory &gt; 90% of 8 Gi</b> — the first thing Lever 3 (more workers) will trip. Steady state is ~70–75%.</li>
-        <li><b>Redis memory &gt; 85%</b> — the first thing Lever 4 (snapshots in Redis) will trip. Past 100%, <code>allkeys-lru</code> evicts vote data and the heatmap silently loses votes.</li>
+        <li><b>App memory &gt; 90% of 8 Gi</b> — what Lever 3 (more workers) will trip first. Steady state is ~70–75%.</li>
+        <li><b>Redis memory &gt; 85%</b> — what Lever 4 (snapshots in Redis) will trip first. Past 100%, <code>allkeys-lru</code> evicts vote data and the heatmap silently loses votes.</li>
         <li><b>Sustained 5xx</b> — a gunicorn worker timeout on a graph load, or an OOM restart loop.</li>
       </ul>
     </section>
@@ -1715,9 +1681,9 @@ curl -o /dev/null -s -H 'Accept-Encoding: br' \
       </div>
 
       <p>
-        Every tunable this book touches, with where it lives and what moves when
-        you turn it. Algorithm knobs are documented and machine-checked separately
-        in <code class="path">docs/algorithms/</code> — this is the performance set.
+        Every tunable this book touches, with where it lives and what moves when you
+        change it. Algorithm knobs are documented and machine-checked separately in
+        <code class="path">docs/algorithms/</code>; this is the performance set.
       </p>
 
       <h4>Serving</h4>
@@ -1725,13 +1691,13 @@ curl -o /dev/null -s -H 'Accept-Encoding: br' \
         <table>
           <thead><tr><th>Knob</th><th class="num">Value</th><th>Defined in</th><th>What moves</th></tr></thead>
           <tbody>
-            <tr><td><code>container_concurrency</code></td><td class="num">200</td><td><code class="path">terraform/main.tf:329</code></td><td>Concurrent <em>viewers</em> per instance — each WS holds a slot for life. 200 × 8 ≈ 1600.</td></tr>
-            <tr><td><code>maxScale</code></td><td class="num">8</td><td><code class="path">terraform/main.tf:441</code></td><td>Safety valve. Each added instance pays a graph load + fresh snapshot builds.</td></tr>
+            <tr><td><code>container_concurrency</code></td><td class="num">200</td><td><code class="path">terraform/main.tf:329</code></td><td>Concurrent viewers per instance — each WS holds a slot for life. 200 × 8 ≈ 1600.</td></tr>
+            <tr><td><code>maxScale</code></td><td class="num">8</td><td><code class="path">terraform/main.tf:441</code></td><td>Safety valve. Each added instance pays a graph load plus fresh snapshot builds.</td></tr>
             <tr><td><code>cpu / memory</code></td><td class="num">4 / 8Gi</td><td><code class="path">terraform/main.tf:407</code></td><td>~1.35 Gi resident with everything warm. 3 of 4 cores currently do compression only.</td></tr>
             <tr><td><code>--workers</code></td><td class="num">1</td><td><code class="path">deploy/supervisord.conf</code></td><td>Lever 3. The head-of-line-blocking ceiling.</td></tr>
             <tr><td><code>--worker-connections</code></td><td class="num">2000</td><td><code class="path">deploy/supervisord.conf</code></td><td>Above <code>container_concurrency</code>, so it never binds first.</td></tr>
             <tr><td><code>--timeout</code></td><td class="num">600</td><td><code class="path">deploy/supervisord.conf</code></td><td>A graph load holds the GIL for tens of seconds; the 120 s default killed the worker mid-warmup.</td></tr>
-            <tr><td><code>keepalive</code> / <code>keepalive_timeout</code></td><td class="num">32 / 55s</td><td><code class="path">nginx-cloudrun.conf:46–50</code></td><td>Must retire <em>before</em> gunicorn's 75 s, or a POST racing the FIN fails and votes are never retried.</td></tr>
+            <tr><td><code>keepalive</code> / <code>keepalive_timeout</code></td><td class="num">32 / 55s</td><td><code class="path">nginx-cloudrun.conf:46–50</code></td><td>Must retire before gunicorn's 75 s, or a POST racing the FIN fails — and votes are never retried.</td></tr>
             <tr><td><code>brotli_comp_level</code></td><td class="num">5</td><td><code class="path">nginx-cloudrun.conf:25</code></td><td>Response compression. The topology blob is pre-compressed in Python, not here.</td></tr>
             <tr><td><code>proxy_cache_path max_size</code></td><td class="num">128m</td><td><code class="path">nginx-cloudrun.conf:57</code></td><td>Tile cache on tmpfs — counts against instance memory, hence small.</td></tr>
           </tbody>
@@ -1745,12 +1711,12 @@ curl -o /dev/null -s -H 'Accept-Encoding: br' \
           <tbody>
             <tr><td><code>VOTE_CACHE_MAX_MB</code></td><td class="num">512</td><td><code class="path">server/app.py:329</code></td><td>Per-instance snapshot LRU budget. Eviction sends the next request down the inline-build path.</td></tr>
             <tr><td><code>GRAPH_VOTES_DEBOUNCE</code></td><td class="num">2.0 s</td><td><code class="path">server/app.py:429</code></td><td>How long a rev-stale snapshot may still serve. Raise it and page loads paint further behind; lower it and rebuild pressure rises.</td></tr>
-            <tr><td><code>Cache-Control</code> (graph-votes)</td><td class="num">max-age=5</td><td><code class="path">server/app.py:2430</code></td><td>Browser-side reuse window between the ETag revalidations.</td></tr>
+            <tr><td><code>Cache-Control</code> (graph-votes)</td><td class="num">max-age=5</td><td><code class="path">server/app.py:2430</code></td><td>Browser-side reuse window between ETag revalidations.</td></tr>
             <tr><td><code>FLUSH_INTERVAL</code></td><td class="num">0.1 s</td><td><code class="path">server/delta_hub.py:36</code></td><td>Merged-delta cadence per map. Perceived liveness vs sends per second.</td></tr>
             <tr><td><code>HOLE_GRACE</code></td><td class="num">0.3 s</td><td><code class="path">server/delta_hub.py:37</code></td><td>How long a batch waits for a straggler rev before flushing with a gap.</td></tr>
             <tr><td><code>QUEUE_MAX</code></td><td class="num">256</td><td><code class="path">server/delta_hub.py:38</code></td><td>Lag a client may accrue before its socket is closed and it resyncs by refetch.</td></tr>
-            <tr><td><code>voter_lock</code> timeout / ttl</td><td class="num">5 s / 10 s</td><td><code class="path">server/vote_store.py:34</code></td><td>Cross-instance serialization of one voter's RMW. Falls open on contention — a vote must never hang.</td></tr>
-            <tr><td>WS <code>KEEPALIVE</code></td><td class="num">30 s</td><td><code class="path">server/app.py:1278</code></td><td>Idle frame cadence; nginx <code>/ws</code> read timeout is 86400 s.</td></tr>
+            <tr><td><code>voter_lock</code> timeout / ttl</td><td class="num">5 s / 10 s</td><td><code class="path">server/vote_store.py:34</code></td><td>Cross-instance serialization of one voter's RMW. Falls open on contention, since a vote must never hang.</td></tr>
+            <tr><td>WS <code>KEEPALIVE</code></td><td class="num">30 s</td><td><code class="path">server/app.py:1278</code></td><td>Idle frame cadence. nginx <code>/ws</code> read timeout is 86400 s.</td></tr>
           </tbody>
         </table>
       </div>
@@ -1765,7 +1731,7 @@ curl -o /dev/null -s -H 'Accept-Encoding: br' \
             <tr><td><code>ROUTE_CHECK_MAX_POPS</code></td><td class="num">30000</td><td><code class="path">routeProposals.ts:481</code></td><td>A* pop cap per corridor check; fails open to keep recompute bounded.</td></tr>
             <tr><td><code>MAX_RECOVERY_CHECKS</code></td><td class="num">16</td><td><code class="path">routeProposals.ts:493</code></td><td>Recovery A*s per corridor. Raise it and recompute time grows.</td></tr>
             <tr><td><code>DB_VERSION</code></td><td class="num">4</td><td><code class="path">graphCache.ts:32</code></td><td>IndexedDB schema. Bumping purges poisoned entries — the escape hatch from a crash loop.</td></tr>
-            <tr><td><code>format=sparse</code></td><td class="num">—</td><td><code class="path">GraphLayer.tsx:1691</code></td><td>~57 KB vs 26 MB dense. Dense still served for old cached clients.</td></tr>
+            <tr><td><code>format=sparse</code></td><td class="num">—</td><td><code class="path">GraphLayer.tsx:1691</code></td><td>~57 KB vs 26 MB dense. Dense is still served for old cached clients.</td></tr>
           </tbody>
         </table>
       </div>
