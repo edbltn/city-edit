@@ -49,6 +49,7 @@ from database import (
     get_sticker, resolve_sticker,
     DATABASE_URL,
 )
+from vote_identity import counting_identity
 
 # ── Logging ────────────────────────────────────────────────────────────────
 
@@ -78,12 +79,19 @@ PASSCODE_TOKEN_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 # When unset, those endpoints are disabled (403) rather than silently open.
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
 
-# Soft per-IP abuse cap. device_id stays the hard dedup key, but a single IP may
-# hold at most this many DISTINCT devices voting a given (map, edge, vote_type).
-# This is a speed bump against one person clearing localStorage to mint fresh
-# device_ids and re-vote the same edge — while a threshold > 1 still lets a few
-# genuine people behind one NAT/router each vote. Imports key ip_hash per-ride
-# (ip_from_voter), so they're unique on both axes and never trip this.
+# Soft per-IP abuse cap, guarding the EDGE layer. device_id stays the hard dedup
+# key for storage, but a single IP may hold at most this many DISTINCT devices
+# voting a given (map, edge, vote_type). This is a speed bump against one person
+# clearing localStorage to mint fresh device_ids and re-vote the same edge —
+# while a threshold > 1 still lets a few genuine people behind one NAT/router
+# each vote. Imports key ip_hash per-ride (ip_from_voter), so they're unique on
+# both axes and never trip this.
+#
+# The BLOCK layer no longer needs this cap to stay honest: since 2026-08-13 it
+# dedupes on the counting identity (vote_identity.py), so the extra devices this
+# cap tolerates collapse to one voter there anyway. The cap still matters for
+# the raw edge counters in `ev:`, which carry no identity at all and would
+# otherwise show one person's fragmented ids as N votes on one edge.
 #
 # Past the cap a fresh device doesn't add a vote (which would let one IP inflate
 # a total without bound) — it takes over the IP's least-recently-active device
@@ -344,7 +352,7 @@ _build_locks_guard = threading.Lock()
 # rapid +/− toggle can't read a stale prior direction (see /api/vote). This is
 # the PER-PROCESS half of the guarantee; across Flask instances/workers the
 # Redis lock in cast_vote (vote_store.voter_lock) provides the same scope
-# fleet-wide. STRIPED by (slug, device): a voter's own casts serialize, but
+# fleet-wide. STRIPED by (slug, counting identity): a voter's own casts serialize, but
 # different voters vote concurrently — a single global lock here capped the
 # whole instance at ~9 votes/s (changelog/2026-07-08-agent-load-test.html,
 # finding #1 / mitigation M2). Redis counter updates are atomic HINCRBYs and
@@ -352,8 +360,8 @@ _build_locks_guard = threading.Lock()
 _VOTE_LOCK_STRIPES = tuple(threading.Lock() for _ in range(256))
 
 
-def _voter_lock_stripe(slug: str, device_id: str) -> threading.Lock:
-    return _VOTE_LOCK_STRIPES[hash((slug, device_id)) % len(_VOTE_LOCK_STRIPES)]
+def _voter_lock_stripe(slug: str, identity: str) -> threading.Lock:
+    return _VOTE_LOCK_STRIPES[hash((slug, identity)) % len(_VOTE_LOCK_STRIPES)]
 
 
 # ── Vote-path saturation: backpressure valve + rolling metrics (M5) ─────────
@@ -569,14 +577,15 @@ def _build_graph_votes_body_locked(
         # renumber on every re-bake, so stale bagg entries would color and count
         # the wrong polygons. The blocks version marker rides next to the bagg.
         bver_key = f"bver:{rmap.slug}:{block_mode}"
+        bver_now = block_votes.version_marker(rmap.graph.blocks_version)
         bagg_cold = redis_client.exists(block_votes.bagg_key(rmap.slug, block_mode)) == 0
-        bagg_stale = (redis_client.get(bver_key) or "") != (rmap.graph.blocks_version or "")
+        bagg_stale = (redis_client.get(bver_key) or "") != bver_now
         if (bagg_cold or bagg_stale) and redis_client.hlen(vote_store.hash_key(rmap.slug)) > 0:
             block_votes.rebuild_from_db(
                 redis_client, rmap.slug, block_mode, rmap.graph.edge_block_id,
-                database.fetch_edge_vote_devices(rmap.slug))
+                database.fetch_edge_vote_identities(rmap.slug))
         if bagg_cold or bagg_stale:
-            redis_client.set(bver_key, rmap.graph.blocks_version or "")
+            redis_client.set(bver_key, bver_now)
         arrays.update(block_votes.build_block_arrays(
             redis_client, rmap.slug, block_mode, rmap.graph.n_blocks))
         arrays["blocks_version"] = rmap.graph.blocks_version
@@ -1541,6 +1550,12 @@ def cast_vote():
         return jsonify({"error": "No edges to vote on"}), 400
 
     device_id, ip_hash = _resolve_user(data, ip_from_voter=bool(data.get("ip_from_voter")))
+    # Two identities, deliberately (vote_identity.py): `device_id` OWNS the row
+    # — it decides what this press means, what it may clear, and what
+    # /api/my-votes hands back — while `identity` is what the block layer counts
+    # as one person. They differ whenever a browser's localStorage doesn't
+    # survive the visit, which is the common case on a QR scan.
+    identity = counting_identity(device_id, ip_hash)
     mode_int = vote_store.mode_to_int(mode)  # Redis key only; DB scopes by map_slug
     slug = rmap.slug
 
@@ -1574,17 +1589,24 @@ def cast_vote():
 
         # voter_lock serializes this voter's read-modify-write ACROSS instances
         # (Redis); the stripe serializes it within THIS process. Both are scoped
-        # per (slug, device) — different voters proceed concurrently — and
-        # together they hold whether the app runs one worker or a fleet. A
+        # per (slug, COUNTING identity) — different voters proceed concurrently
+        # — and together they hold whether the app runs one worker or a fleet. A
         # stripe held past the shed timeout (a wedged same-voter cast) sheds
         # rather than parking this request thread behind it.
+        #
+        # Scoped to the counting identity, NOT the device, because that is the
+        # granularity at which two casts can now collide: co-NAT devices share a
+        # `bd:` field, and block_votes' deferred HDEL would drop one of them from
+        # the hash while the aggregate kept its +1. Strictly coarser than the
+        # device lock it replaces, so the per-device read-modify-write below
+        # stays just as protected.
         ebid = rmap.graph.edge_block_id  # None unless this map has a block layer
-        stripe = _voter_lock_stripe(slug, device_id)
+        stripe = _voter_lock_stripe(slug, identity)
         if not stripe.acquire(timeout=VOTE_LOCK_SHED_SECONDS):
             return _shed_response("stripe", retry_after=2)
         lock_wait_s = time.monotonic() - t_handler0
         stripe_acquired = True
-        with vote_store.voter_lock(redis_client, slug, device_id):
+        with vote_store.voter_lock(redis_client, slug, identity):
             # Block-scoped clear-then-cast (docs/three-layer-model.md §4): the
             # plan clears this device's same-type rows across every touched
             # block, then casts on exactly the selection edges.
@@ -1619,7 +1641,7 @@ def cast_vote():
                 block_ops = [(int(ebid[eid]), prev, new)
                              for eid, prev, new in ops if 0 <= eid < n_edges]
                 block_votes.apply_block_deltas_batch(
-                    redis_client, slug, mode_int, block_ops, vt_id, device_id
+                    redis_client, slug, mode_int, block_ops, vt_id, identity
                 )
             changed = [eid for eid, _, _ in ops]
             reversed_any = any(prev in (vote_store.UP, vote_store.DOWN)

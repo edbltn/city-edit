@@ -89,11 +89,11 @@ def test_rebuild_matches_incremental(redis_client):
     bv.apply_block_delta(redis_client, SLUG, MODE, 20, VT, DOWN, 0, "d2")
     incremental = redis_client.hgetall(bv.bagg_key(SLUG, MODE))
 
-    # Equivalent canonical rows: (edge_id, vt_id, direction, device_id)
+    # Equivalent canonical rows: (edge_id, vt_id, direction, device_id, ip_hash)
     rows = [
-        (0, VT, UP, "d1"),
-        (1, VT, UP, "d1"),
-        (2, VT, DOWN, "d2"),
+        (0, VT, UP, "d1", "d1"),
+        (1, VT, UP, "d1", "d1"),
+        (2, VT, DOWN, "d2", "d2"),
     ]
     bv.rebuild_from_db(redis_client, SLUG, MODE, EDGE_BLOCK, rows)
     rebuilt = redis_client.hgetall(bv.bagg_key(SLUG, MODE))
@@ -110,8 +110,8 @@ def test_rebuild_warns_on_both_directions_in_a_block(redis_client, caplog):
     # Canonical rows violating the §2.5 invariant: one device holds UP on edge 0
     # and DOWN on edge 1, both in block 10. Rebuild logs a warning, no crash.
     rows = [
-        (0, VT, UP, "d1"),
-        (1, VT, DOWN, "d1"),
+        (0, VT, UP, "d1", "ip1"),
+        (1, VT, DOWN, "d1", "ip1"),
     ]
     with caplog.at_level(logging.WARNING, logger="block_votes"):
         bv.rebuild_from_db(redis_client, SLUG, MODE, EDGE_BLOCK, rows)
@@ -123,13 +123,90 @@ def test_rebuild_warns_on_both_directions_in_a_block(redis_client, caplog):
 
 def test_rebuild_no_warning_when_consistent(redis_client, caplog):
     rows = [
-        (0, VT, UP, "d1"),
-        (1, VT, UP, "d1"),
-        (2, VT, DOWN, "d1"),  # different block — allowed
+        (0, VT, UP, "d1", "ip1"),
+        (1, VT, UP, "d1", "ip1"),
+        (2, VT, DOWN, "d1", "ip1"),  # different block — allowed
     ]
     with caplog.at_level(logging.WARNING, logger="block_votes"):
         bv.rebuild_from_db(redis_client, SLUG, MODE, EDGE_BLOCK, rows)
     assert not [r for r in caplog.records if "invariant violation" in r.message]
+
+
+# ── Counting identity (vote_identity) ──────────────────────────────────────
+#
+# The block layer counts on the COUNTING identity, not the device that owns the
+# row. These pin the two halves of that: fragmented ids behind one IP collapse
+# (the 2026-08-13 prod bug), and genuinely different people still accumulate.
+
+def test_rebuild_collapses_fragmented_devices_behind_one_ip(redis_client):
+    # One person, one IP, three device_ids — a phone whose localStorage did not
+    # survive between scans. Under device identity this block read 3.
+    rows = [
+        (0, VT, UP, "dev-a", "ip1"),
+        (0, VT, UP, "dev-b", "ip1"),
+        (1, VT, UP, "dev-c", "ip1"),
+    ]
+    bv.rebuild_from_db(redis_client, SLUG, MODE, EDGE_BLOCK, rows)
+    assert total(redis_client, 10) == 1
+    # …and the multiplicity remembers all three, so no single retraction
+    # can drop the block below what is still genuinely there.
+    assert redis_client.hget(bv.bd_key(SLUG, MODE, 10, VT, 0), "ip1") == "3"
+
+
+def test_rebuild_keeps_distinct_ips_apart(redis_client):
+    rows = [
+        (0, VT, UP, "dev-a", "ip1"),
+        (1, VT, UP, "dev-b", "ip2"),
+    ]
+    bv.rebuild_from_db(redis_client, SLUG, MODE, EDGE_BLOCK, rows)
+    assert total(redis_client, 10) == 2
+
+
+def test_rebuild_falls_back_to_device_without_an_ip(redis_client):
+    # Rows predating the ip_hash column: no IP to collapse on, so each device
+    # counts — exactly the old behaviour, for those rows only.
+    rows = [
+        (0, VT, UP, "dev-a", None),
+        (1, VT, UP, "dev-b", None),
+    ]
+    bv.rebuild_from_db(redis_client, SLUG, MODE, EDGE_BLOCK, rows)
+    assert total(redis_client, 10) == 2
+
+
+def test_shared_identity_survives_one_voters_retraction(redis_client):
+    # Two devices behind one IP vote the same block; one takes their vote back.
+    # The block must still count 1 — the other person is still asking for it.
+    bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "ip1")
+    bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, UP, 0, "ip1")
+    assert total(redis_client, 10) == 1
+    bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, 0, UP, "ip1")
+    assert total(redis_client, 10) == 1
+    bv.apply_block_delta(redis_client, SLUG, MODE, 10, VT, 0, UP, "ip1")
+    assert total(redis_client, 10) == 0
+
+
+def test_rebuild_does_not_warn_when_co_nat_voters_disagree(redis_client, caplog):
+    # Two DEVICES behind one IP, opposite directions on one block. The
+    # one-direction invariant is per device and neither breaks it, so this is a
+    # disagreement, not corruption — it must not be logged as a violation.
+    rows = [
+        (0, VT, UP, "dev-a", "ip1"),
+        (1, VT, DOWN, "dev-b", "ip1"),
+    ]
+    with caplog.at_level(logging.WARNING, logger="block_votes"):
+        bv.rebuild_from_db(redis_client, SLUG, MODE, EDGE_BLOCK, rows)
+    assert not [r for r in caplog.records if "invariant violation" in r.message]
+    # Both sides are counted; the block nets out to zero, one up and one down.
+    arr = bv.build_block_arrays(redis_client, SLUG, MODE, N_BLOCKS)
+    assert arr["block_vote_types"][10] == [[0, 1, 1]]
+
+
+def test_version_marker_changes_with_the_counting_identity():
+    # The marker forces a rebuild when a field's MEANING changes, not just when
+    # block ids renumber — otherwise two keyings would share one hash.
+    import vote_identity
+    assert vote_identity.SCHEME in bv.version_marker("blocks-v9")
+    assert bv.version_marker("blocks-v9") != bv.version_marker("blocks-v10")
 
 
 # ── Batched write path (apply_block_deltas_batch ≡ per-edge loop) ───────────

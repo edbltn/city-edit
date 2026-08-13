@@ -31,21 +31,27 @@ logger = logging.getLogger(__name__)
 # ── Cross-instance voter lock ──────────────────────────────────────────────
 
 @contextlib.contextmanager
-def voter_lock(redis_client, slug: str, device_id: str,
+def voter_lock(redis_client, slug: str, identity: str,
                timeout: float = 5.0, ttl: int = 10):
     """Serialize one voter's read-modify-write on a map ACROSS Flask instances.
+
+    `identity` is whatever the caller counts as one voter — since 2026-08-13
+    that is the COUNTING identity (vote_identity.py), not the device, because
+    co-NAT devices now share a `bd:` field and must not interleave on it. The
+    cost is that everyone behind one IP serializes here; the lock holds only a
+    batched pipeline, and `VOTE_LOCK_SHED_SECONDS` bounds the wait.
 
     The app's per-process threading.Lock only orders votes within a single
     worker; run more than one worker/instance and two near-simultaneous votes
     from the same voter can each read the same prior direction and double-apply
     (inflating the count, or leaving a stuck toggle). A short Redis SET-NX lock
-    keyed by (slug, device_id) closes that race fleet-wide.
+    keyed by (slug, identity) closes that race fleet-wide.
 
     Best effort: the lock auto-expires (ttl) so a crashed holder can't wedge a
     voter, and if Redis is unavailable we proceed anyway (the per-process lock
     still holds) — a vote must never hang on the limiter. Yields True when the
     cross-instance lock was actually held, False when we fell open."""
-    key = f"votelock:{slug}:{device_id}"
+    key = f"votelock:{slug}:{identity}"
     token = os.urandom(8).hex()
     acquired = False
     try:

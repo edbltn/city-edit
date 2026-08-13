@@ -20,7 +20,7 @@ the obvious failure: a single popular avenue does not get to be all of them.
 A **PBTP** is one hot **block**, drawn as a **square** pin at the midpoint of the
 block's strongest edge. Votes are stored on edges and counted on blocks
 ([three-layer model](../three-layer-model.md) §2), so the ranking is over the
-block's **deduped** count — how many distinct devices asked for this on this
+block's **deduped** count — how many distinct voters asked for this on this
 block. The two directions of a two-way street are one proposal backed by
 everyone who voted either, not two rivals splitting them; and one person routing
 the length of a block is one voice, not one per edge they crossed
@@ -103,7 +103,7 @@ writes its direction onto every selected edge, so one person routing lengthwise
 through a block leaves +1 on each edge they covered. Summing those would rank a
 block by *how many edges somebody selected* — the exact over-count
 [dossier 07](07-counts.md) is about. The honest number already exists:
-`block_vote_types`, which the server maintains by counting distinct devices per
+`block_vote_types`, which the server maintains by counting distinct voters per
 (block, vote type, direction) inside the vote lock (`server/block_votes.py`,
 `build_block_arrays` / `apply_block_delta`), which the heatmap already colours by
 ([dossier 05](05-heat-coloring.md)), and which `voteApply.applyBlockCounts`
@@ -113,7 +113,7 @@ patches live from each delta. So:
 |---|---|
 | **Which blocks exist**, and which (block, type) pairs carry votes | the edge scan over `edge_vote_types` |
 | **Block identity** | `blockKeyOf` — the same mapping step 3 dedupes on |
-| **How much support a block has** (the ranking value, and what the floor is applied to) | `block_vote_types` — deduped, per device |
+| **How much support a block has** (the ranking value, and what the floor is applied to) | `block_vote_types` — deduped, per voter (`server/vote_identity.py`) |
 | **Where the pin goes** | the edge scan again: the block's strongest edge for that type. The deduped arrays contain no edges and cannot answer this |
 
 The two legends are **different index spaces** — `block_vote_type_legend` is
@@ -162,9 +162,11 @@ Enforced by `topProposals.test.ts`:
 - **One pin per block, globally.** Not per type — across all of them. Step 1
   enforces it within a type; step 3 across types.
 - **Ranking is at block grain, by people.** A block's score is its deduped
-  `block_vote_types` net, so one device covering four edges of a block never
-  outranks a block three separate devices asked for. The edge sum is used only
-  where no deduped row exists.
+  `block_vote_types` net, so one voter covering four edges of a block never
+  outranks a block three separate voters asked for. What counts as one voter is
+  `server/vote_identity.py`, NOT the device that owns the row — on 2026-08-13 one
+  iPhone whose storage kept resetting held the map's top-ranked PBTP with a
+  count of 3. The edge sum is used only where no deduped row exists.
 - **The pin lands on the block's strongest edge**, chosen without the salt:
   same votes → same location, on every device and every reload. Ties go to the
   lowest edge id. This stays edge-derived — the deduped arrays have no edges in

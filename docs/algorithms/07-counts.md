@@ -2,6 +2,8 @@
 title: Displayed counts
 description: What a "voter" is, what a "block" is, and why the honest number sometimes has to come from the server.
 sources:
+  - path: server/vote_identity.py
+    anchors: [counting_identity, COUNT_BY, SQL_IDENTITY]
   - path: server/database.py
     anchors: [count_unique_voters_for_edges, list_maps]
   - path: server/block_votes.py
@@ -33,9 +35,9 @@ EDGE      one row per (edge, vote type, device, direction)
           A route cast writes a row on EVERY edge of EVERY block the corridor
           covers. One person, hundreds of rows.
                 │
-                │  dedupe per (block, vote type, direction, device)
+                │  dedupe per (block, vote type, direction, IDENTITY)
                 ▼
-BLOCK     block_vote_types — "how many distinct devices voted this type on
+BLOCK     block_vote_types — "how many distinct voters asked for this type on
           this block". Correct FOR ONE BLOCK.
                 │
                 │  sum across a selection's blocks   ← THE TRAP
@@ -43,10 +45,19 @@ BLOCK     block_vote_types — "how many distinct devices voted this type on
 SELECTION Summing block counts counts one person ONCE PER BLOCK.
           Across a 12-block corridor, 36 people read as 432.
                 │
-                │  COUNT(DISTINCT device_id) over the whole edge set
+                │  COUNT(DISTINCT identity) over the whole edge set
                 ▼
 PEOPLE    /api/route-votes — the honest number.
 ```
+
+**IDENTITY is not `device_id`.** Rows are OWNED by the device that cast them —
+that is what decides whether a press is a re-vote and what an unvote may
+delete — but they are COUNTED on the identity `server/vote_identity.py`
+returns, which is the IP hash (falling back to the device when there is no IP).
+The two split apart in the case that matters most: a QR sticker scanned on a
+phone whose localStorage does not survive the visit mints a fresh `device_id`
+per page load, and every one of them could vote the same block again. See
+`vote_identity.py` for the full reasoning and the NAT trade-off it accepts.
 
 The dedup at the block level is real and useful: it is what makes the
 one-direction-per-block invariant enforceable and what block heat is built on.
@@ -79,7 +90,7 @@ useRouteVoteRows(edgeIds):
     otherwise:
         rows = null                         # callers render PENDING, not a guess
         POST /api/route-votes { map, edge_ids }
-            -> SELECT vote_type_id, direction, COUNT(DISTINCT device_id)
+            -> SELECT vote_type_id, direction, COUNT(DISTINCT <identity>)
                FROM edge_votes
                WHERE map_slug = ? AND edge_id = ANY(?)
                GROUP BY vote_type_id, direction
@@ -136,11 +147,19 @@ about; the client caps its cache key at the same list.
 
 ## Invariants
 
-- **Deduped per device at the block grain.** One device voting a type/direction
-  on many edges of one block counts once for that block.
+- **Deduped per identity at the block grain.** One voter casting a
+  type/direction on many edges of one block counts once for that block, and
+  devices sharing an identity collapse into that one count.
 - **One direction per block per (device, type).** Casting is clear-then-cast, so a
   device can never hold both an up and a down on the same block for the same
-  type — see [three-layer-model.md](../three-layer-model.md) §4.
+  type — see [three-layer-model.md](../three-layer-model.md) §4. Note this is a
+  per-DEVICE invariant: two people behind one NAT share a counting identity and
+  may legitimately hold opposite directions on a block, which is a disagreement
+  and not corruption.
+- **Ownership and counting never merge.** `device_id` owns a row; the counting
+  identity aggregates it. Any code that unvotes, reads "my votes", or decides
+  what a press means uses the device — using the identity there would let one
+  person retract a stranger's vote.
 - **Distinct-voter numbers never come from local sums.** If the server hasn't
   answered, the UI shows pending.
 - **Counts and coverage share a regime.** Both pick block-vs-edge the same way,
@@ -155,23 +174,27 @@ about; the client caps its cache key at the same list.
 | A 12-block corridor's card read **432 voters** for 36 people | Local per-block sums added the same device once per block | `/api/route-votes` distinct-device counts, via `useRouteVoteRows` |
 | The number silently corrected itself ~300 ms after appearing | The card rendered the inflated local sum, then swapped in server truth | `null` → `PENDING_GLYPH`; never substitute a guess |
 | The hover card and the summary card showed different totals | Two independent code paths | One hook, one shared cache |
-| Negative block counts on prod | Counter-vote imports wrote `-1` rows; block counts dedupe per device, so any `-1` row showed the block negative | Flips banned on prod imports; all 308 k `-1` rows deleted |
+| Negative block counts on prod | Counter-vote imports wrote `-1` rows; block counts dedupe per voter, so any `-1` row showed the block negative | Flips banned on prod imports; all 308 k `-1` rows deleted |
+| One iPhone became the city's **top** "Fix signal timing" proposal (2026-08-13) | Six page loads in three minutes minted six `voter_id`s — storage was not surviving the visit — so three of them counted as three separate people on one block, and each reload's "my votes" was empty, inviting the next press | Count on the IP hash, not the device (`vote_identity.py`); `bver:` carries the scheme so the aggregate rebuilds |
 | A vote type appeared in coverage with nobody standing behind it | `[type, 0, 0]` entries — up and down cancelled | Skipped explicitly in `selectionCoverage` |
 
 ## Extension points
 
 - **Distinct voters for map cards.** The headline "votes" number is a row count.
-  A materialized `COUNT(DISTINCT device_id)` per map, refreshed on write, would
+  A materialized `COUNT(DISTINCT <identity>)` per map, refreshed on write, would
   make the number mean what readers already assume it means — and would fix the
   landing-page ranking at the same time ([dossier 06](06-ranking.md)).
 - **Distinct voters in heat.** Block heat sums deduped block counts, which is the
   right grain for one block and drifts for corridors. A distinct-voter heat would
   need the count precomputed server-side per block set — expensive, but the
   aggregate structures in `block_votes.py` are the natural place.
-- **Devices are not people.** `device_id` is the identity throughout: one person
-  on a phone and a laptop is two, a shared device is one. That limit is worth
-  stating wherever these numbers are published, and no amount of query-writing
-  fixes it — it is a product decision about whether accounts exist.
+- **Neither key is a person.** Counting moved from the device to the IP hash
+  because the device was fragmenting (see the failure table), but an IP is only
+  a better proxy, not a right one: it over-collapses an office and
+  under-collapses a phone that changes network between visits. Both limits are
+  worth stating wherever these numbers are published, and no amount of
+  query-writing fixes either — whether accounts exist is a product decision.
+  `VOTE_COUNT_IDENTITY=device` restores the old key without a redeploy.
 - **Coverage weighted by length.** Coverage counts blocks equally, so a 40 m
   block and a 280 m one contribute the same. Length-weighted coverage would be a
   truer picture of reach, at the cost of a number that is harder to explain.

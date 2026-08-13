@@ -18,6 +18,8 @@ import psycopg2
 from psycopg2.extras import execute_values
 from psycopg2.pool import ThreadedConnectionPool
 
+import vote_identity
+
 # Under the gevent worker, plain psycopg2 blocks the event-loop hub for the
 # full duration of every query — one slow aggregate froze ALL in-flight
 # requests on the instance. psycogreen's wait callback makes psycopg2 yield to
@@ -626,19 +628,23 @@ def get_voter_type_rows(
 def count_unique_voters_for_edges(
     map_slug: str, edge_ids: list[int]
 ) -> list[tuple[int, int, int]]:
-    """Distinct-device vote counts over an edge set, per (vote type, direction).
+    """Distinct-voter vote counts over an edge set, per (vote type, direction).
 
-    A device that voted the same type/direction on many edges of the set (a
-    route cast fans one vote across every edge of every block it covers)
-    counts ONCE — the honest "how many people voted on this route" number
-    the route-summary card shows. Returns [(vote_type_id, direction, count)].
+    A voter who cast the same type/direction on many edges of the set (a route
+    cast fans one vote across every edge of every block it covers) counts
+    ONCE — the honest "how many people voted on this route" number the
+    route-summary card shows. Returns [(vote_type_id, direction, count)].
+
+    Counted on the same identity as the block layer (vote_identity.SQL_IDENTITY),
+    so the card and the pins can't disagree about how many people that is.
     """
     if not DATABASE_URL or not edge_ids:
         return []
     try:
         with get_cursor() as cursor:
             cursor.execute(
-                """SELECT vote_type_id, direction, COUNT(DISTINCT device_id)
+                f"""SELECT vote_type_id, direction,
+                          COUNT(DISTINCT {vote_identity.SQL_IDENTITY})
                    FROM edge_votes
                    WHERE map_slug = %s AND edge_id = ANY(%s)
                    GROUP BY vote_type_id, direction""",
@@ -776,22 +782,24 @@ def aggregate_votes_for_replay(map_slug: Optional[str] = None) -> list[tuple[str
         return []
 
 
-def fetch_edge_vote_devices(map_slug: str) -> list[tuple[int, int, int, str]]:
-    """Device-level edge votes for one map: (edge_id, vote_type_id, direction,
-    device_id). Unlike aggregate_votes_for_replay (which discards identity), this
-    keeps device_id so block_votes.rebuild_from_db can reconstruct the per-block
-    dedup. One row per stored vote (already unique per edge/type/device)."""
+def fetch_edge_vote_identities(map_slug: str) -> list[tuple[int, int, int, str, str]]:
+    """Identity-bearing edge votes for one map: (edge_id, vote_type_id,
+    direction, device_id, ip_hash). Unlike aggregate_votes_for_replay (which
+    discards identity), this keeps both so block_votes.rebuild_from_db can
+    reconstruct the per-block dedup: it counts on the counting identity and
+    checks the one-direction invariant on the device. One row per stored vote
+    (already unique per edge/type/device)."""
     if not DATABASE_URL:
         return []
     try:
         with get_cursor() as cursor:
             cursor.execute("""
-                SELECT edge_id, vote_type_id, direction, device_id
+                SELECT edge_id, vote_type_id, direction, device_id, ip_hash
                 FROM edge_votes WHERE map_slug = %s
             """, (map_slug,))
             return cursor.fetchall()
     except Exception as e:
-        logger.error(f"[DB] Failed to fetch edge vote devices for '{map_slug}': {e}")
+        logger.error(f"[DB] Failed to fetch edge vote identities for '{map_slug}': {e}")
         return []
 
 

@@ -6,21 +6,27 @@ Block-level vote display — a deduplicated projection of edge votes onto blocks
 
 Votes are stored per graph **edge** (see vote_store.py / database.edge_votes,
 unchanged). For *display* we aggregate to **blocks** (one polygon per street
-segment) and deduplicate so that **each (block, vote_type, direction, device)
+segment) and deduplicate so that **each (block, vote_type, direction, voter)
 counts at most once** — even when a single route laid a user's vote across many
 edges inside one block.
 
-Edge counts in Redis (`ev:<slug>`) have already discarded device identity, so we
+"Voter" here is the COUNTING identity, not the row's owner: vote_identity.py
+decides what counts as one person (the IP hash by default, so a browser whose
+localStorage does not survive the visit cannot vote the same block twice), while
+`device_id` stays the storage key that owns and can retract the row. Everything
+below is keyed on the counting identity; callers pass it in already resolved.
+
+Edge counts in Redis (`ev:<slug>`) have already discarded voter identity, so we
 cannot dedupe users from them. Instead we maintain a small, **incremental,
-Redis-native** structure keyed by device, updated inside the same vote lock as
+Redis-native** structure keyed by identity, updated inside the same vote lock as
 the edge write. This keeps serving block votes as fast as the edge heatmap, at
 the cost of being derived state that must be rebuilt from Postgres on cold-start
 or graph resnap (see `rebuild_from_db`). Full rationale + invariants:
 docs/vote-system-design.md §2.
 
 Redis keys (namespaced per map slug + mode):
-  bd:<slug>:<mode>:<block>:<vt>:<dir>   HASH  field=device_id  value=edge-multiplicity
-                                        → HLEN == distinct devices == deduped count
+  bd:<slug>:<mode>:<block>:<vt>:<dir>   HASH  field=identity  value=edge-multiplicity
+                                        → HLEN == distinct voters == deduped count
   bagg:<slug>:<mode>                    HASH  field=packed(block,vt,dir)  value=deduped count
                                         → one HGETALL serves the whole block layer
 
@@ -29,12 +35,28 @@ Redis keys (namespaced per map slug + mode):
 
 import logging
 
+import vote_identity
+
 logger = logging.getLogger(__name__)
+
+
+def version_marker(blocks_version: str | None) -> str:
+    """What `bver:<slug>:<mode>` stores, so the aggregate rebuilds when either
+    of the two things that change a field's MEANING changes.
+
+    Block ids renumber on every re-bake (blocks_version), and the counting
+    identity decides what a field IS (vote_identity.SCHEME). Mixing two
+    identity keyings inside one `bd:` hash would count the same person twice
+    — the exact failure the identity change exists to fix — so the scheme is
+    part of the marker and a flip forces a rebuild from Postgres.
+    """
+    return f"{blocks_version or ''}|{vote_identity.SCHEME}"
+
 
 # ── Slots and keys ──────────────────────────────────────────────────────────
 #
 # A SLOT is the (block_id, vt_id, direction bit) triple both Redis structures
-# are keyed by: `bd:` holds one device-multiplicity hash per slot, `bagg:`
+# are keyed by: `bd:` holds one identity-multiplicity hash per slot, `bagg:`
 # holds one deduped count per slot. Every path below carries slots and derives
 # whichever key it needs from them — so the two encodings are written once, and
 # no code has to recover a slot by taking a key string apart again.
@@ -43,7 +65,7 @@ Slot = tuple[int, int, int]
 
 
 def bd_key(slug: str, mode: int, block_id: int, vt_id: int, dbit: int) -> str:
-    """Per-(block,vote_type,direction) device-multiplicity hash. HLEN = deduped count."""
+    """Per-(block,vote_type,direction) identity-multiplicity hash. HLEN = deduped count."""
     return f"bd:{slug}:{mode}:{block_id}:{vt_id}:{dbit}"
 
 
@@ -94,8 +116,8 @@ def _slot_bagg_field(slot: Slot) -> str:
 
 def _transitions(block_id: int, vt_id: int,
                  prev_dir: int, new_dir: int) -> list[tuple[Slot, int]]:
-    """The device-multiplicity moves one edge's direction change implies:
-    +1 on the slot the device enters, −1 on the slot it leaves (enter first,
+    """The identity-multiplicity moves one edge's direction change implies:
+    +1 on the slot the voter enters, −1 on the slot they leave (enter first,
     so a same-block clear-then-recast can never transiently read as absent).
 
     This is the whole of "which counters move" — both write paths below share
@@ -117,12 +139,18 @@ def _transitions(block_id: int, vt_id: int,
 
 def apply_block_delta(
     redis_client, slug: str, mode: int, block_id: int, vt_id: int,
-    new_dir: int, prev_dir: int, device_id: str,
+    new_dir: int, prev_dir: int, identity: str,
 ) -> None:
-    """Move one device across directions for one block, keeping the deduped
-    aggregate exact. Called once per *changed* edge (the caller resolves the
-    edge's block via `edge_block_id`); blocks aggregate naturally because the
-    aggregate only moves on the device's 0↔1 presence boundary within the block.
+    """Move one voter across directions for one block, keeping the deduped
+    aggregate exact. `identity` is the COUNTING identity (vote_identity.py), not
+    the device that owns the row. Called once per *changed* edge (the caller
+    resolves the edge's block via `edge_block_id`); blocks aggregate naturally
+    because the aggregate only moves on the voter's 0↔1 presence boundary
+    within the block.
+
+    Multiplicity makes a coarse identity safe: when two devices behind one IP
+    both vote a block, the shared field counts up to 2 and the block still reads
+    1, and either of them retracting leaves the other's vote standing.
 
     new_dir/prev_dir use +1 (up), -1 (down), 0 (none). A no-op when unchanged or
     when the edge has no block (caller passes block_id < 0 → skip there).
@@ -136,14 +164,14 @@ def apply_block_delta(
     pipe = redis_client.pipeline()
     for slot, delta in _transitions(block_id, vt_id, prev_dir, new_dir):
         bdk = _slot_bd_key(slug, mode, slot)
-        # HINCRBY returns the new value: ==1 on the way up means this device
-        # just became present, ==0 on the way down means it fully left.
-        n = redis_client.hincrby(bdk, device_id, delta)
+        # HINCRBY returns the new value: ==1 on the way up means this voter
+        # just became present, ==0 on the way down means they fully left.
+        n = redis_client.hincrby(bdk, identity, delta)
         if delta > 0:
             if n == 1:
                 pipe.hincrby(bagg, _slot_bagg_field(slot), 1)
         elif n <= 0:
-            redis_client.hdel(bdk, device_id)
+            redis_client.hdel(bdk, identity)
             if n == 0:
                 pipe.hincrby(bagg, _slot_bagg_field(slot), -1)
     pipe.execute()
@@ -151,7 +179,7 @@ def apply_block_delta(
 
 def apply_block_deltas(
     redis_client, slug: str, mode: int, edge_block_id, changed_edges: list[int],
-    vt_id: int, new_dir: int, prev_dirs: dict[int, int], device_id: str,
+    vt_id: int, new_dir: int, prev_dirs: dict[int, int], identity: str,
 ) -> None:
     """Vectorized convenience: apply the block delta for every changed edge.
 
@@ -169,12 +197,12 @@ def apply_block_deltas(
         if b < 0:
             continue
         apply_block_delta(redis_client, slug, mode, b, vt_id,
-                          new_dir, prev_dirs.get(eid, 0), device_id)
+                          new_dir, prev_dirs.get(eid, 0), identity)
 
 
 def apply_block_deltas_batch(
     redis_client, slug: str, mode: int,
-    block_ops: list[tuple[int, int, int]], vt_id: int, device_id: str,
+    block_ops: list[tuple[int, int, int]], vt_id: int, identity: str,
 ) -> None:
     """Apply a whole vote plan's block deltas in TWO round trips.
 
@@ -189,9 +217,18 @@ def apply_block_deltas_batch(
       · bagg moves on every presence-boundary crossing (+1 result == 1,
         −1 result == 0), same as the loop — crossings are real regardless of
         interleaving, and opposite crossings on one slot cancel via summing.
-      · a device field is deleted only when the LAST op touching it left
+      · an identity field is deleted only when the LAST op touching it left
         it ≤ 0 — deferring HDEL per-op could wipe a field a later op in the
         same plan re-created (clear on edge A + cast on edge B, same block).
+
+    Phase B's HDEL is NOT safe against a concurrent writer on the same field,
+    and a coarse counting identity creates such writers where a per-device key
+    had none: two devices behind one IP share a field, so an interleaved
+    "A drives it to 0 / B raises it to 1 / A's deferred HDEL lands" loses B's
+    vote from the hash while `bagg` keeps its +1 — and B's eventual unvote then
+    decrements to −1, which is not the ==0 boundary, so the aggregate never
+    comes back. The fix is upstream and total: app.py takes the vote lock on the
+    COUNTING identity, so everyone who can touch a field is serialized on it.
     """
     # Phase A: every transition the plan implies, pipelined in op order.
     moves = [move for block_id, prev_dir, new_dir in block_ops
@@ -200,7 +237,7 @@ def apply_block_deltas_batch(
         return
     pipe = redis_client.pipeline()
     for slot, delta in moves:
-        pipe.hincrby(_slot_bd_key(slug, mode, slot), device_id, delta)
+        pipe.hincrby(_slot_bd_key(slug, mode, slot), identity, delta)
     results = pipe.execute()
 
     # Phase B: aggregate boundary crossings + final-state cleanup.
@@ -218,7 +255,7 @@ def apply_block_deltas_batch(
     queued = False
     for slot, n in final_mult.items():
         if n <= 0:
-            pipe.hdel(_slot_bd_key(slug, mode, slot), device_id)
+            pipe.hdel(_slot_bd_key(slug, mode, slot), identity)
             queued = True
     for slot, move in bagg_moves.items():
         if move:
@@ -330,11 +367,18 @@ def rebuild_from_db(
 ) -> int:
     """Rebuild bd:/bagg: for a map+mode from canonical edge_votes rows.
 
-    `rows` is an iterable of (edge_id, vote_type_id, direction, device_id) for the
-    map (direction is +1/-1). Idempotent: clears first, replays multiplicities,
-    then derives the aggregate as HLEN of each device hash. Returns block count
-    touched. Called on cold Redis (hydration) and after a graph resnap (edge_ids
-    and thus edge_block_id changed). See docs/vote-system-design.md §2.6.
+    `rows` is an iterable of (edge_id, vote_type_id, direction, device_id,
+    ip_hash) for the map (direction is +1/-1). BOTH identities are needed and
+    they are not interchangeable: the multiplicity is keyed on the counting
+    identity (what a block counts), while the §2.5 one-direction invariant is
+    checked per DEVICE (what casting actually enforces — two people behind one
+    NAT legitimately disagree, and that must not be logged as corruption).
+
+    Idempotent: clears first, replays multiplicities, then derives the aggregate
+    as HLEN of each identity hash. Returns block count touched. Called on cold
+    Redis (hydration), after a graph resnap (edge_ids and thus edge_block_id
+    changed), and after a counting-identity change (version_marker). See
+    docs/vote-system-design.md §2.6.
     """
     from vote_store import dir_to_bit, UP, DOWN
     if edge_block_id is None:
@@ -348,12 +392,13 @@ def rebuild_from_db(
     seen_dir: dict[tuple[int, int, str], int] = {}
     pipe = redis_client.pipeline()
     n = 0
-    for edge_id, vt_id, direction, device_id in rows:
+    for edge_id, vt_id, direction, device_id, ip_hash in rows:
         if edge_id < 0 or edge_id >= n_edges:
             continue
         b = int(edge_block_id[edge_id])
         if b < 0:
             continue
+        identity = vote_identity.counting_identity(device_id, ip_hash)
         d = direction if direction in (UP, DOWN) else UP
         dbit = dir_to_bit(d)
         key = (b, vt_id, device_id)
@@ -366,14 +411,14 @@ def rebuild_from_db(
                 f"vt {vt_id} device {device_id} holds BOTH directions")
             seen_dir[key] = 2
         slot = (b, vt_id, dbit)
-        pipe.hincrby(_slot_bd_key(slug, mode, slot), device_id, 1)
+        pipe.hincrby(_slot_bd_key(slug, mode, slot), identity, 1)
         touched.add(slot)
         n += 1
         if n % 5000 == 0:
             pipe.execute(); pipe = redis_client.pipeline()
     pipe.execute()
 
-    # Derive the aggregate: deduped count == HLEN of each device hash. Both
+    # Derive the aggregate: deduped count == HLEN of each identity hash. Both
     # halves are pipelined — a rebuild touches every voted slot in the map, so
     # reading the lengths one at a time was one full round trip per slot.
     slots = list(touched)

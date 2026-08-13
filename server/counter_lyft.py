@@ -48,7 +48,7 @@ covered blocks), so a second pass changes nothing.
 
 Cancellation only ever removes the device's OWN votes, so a (vote_type, edge)
 tally can never go negative and no device is counted "against" at block level
-(block counts dedupe per device — block_votes.py). The legacy --flip mode
+(block counts dedupe per voter — block_votes.py). The legacy --flip mode
 casts direction=-1 instead, guarded by a running tally gate (NetGate) that
 keeps every tally ≥ 0: a flip is a −2 swing so it's only cast while the tally
 stays positive; the last upvote is downgraded to a removal; zeroed edges are
