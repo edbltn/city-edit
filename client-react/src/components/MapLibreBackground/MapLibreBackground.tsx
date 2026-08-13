@@ -19,6 +19,11 @@ import {
   type MapStyle,
 } from "../../mapStyles";
 import { makeHeatNormalization } from "../../map/blockHeat";
+import {
+  createArrivalAnimator,
+  type ArrivalAnimator,
+  type HeatChange,
+} from "../../map/arrivalAnimation";
 import { hottestBlockId } from "./hottestBlock";
 import { registerPlaceIcons, placeIconExpression } from "./placeIcons";
 import { PLACE_LABEL_TEXT_SIZE } from "./placeLabelStyle";
@@ -44,6 +49,13 @@ export interface BlockVotesDetail {
   blockDiff: ArrayLike<number>;
   max: number;    // positive-arm ceiling (floored so quiet maps don't saturate)
   maxNeg: number; // negative-arm ceiling (own, tighter floor — see GraphLayer)
+  // Why this payload was broadcast. ONLY "delta" — a vote landing, the caster's
+  // own or anyone else's, arriving over the WebSocket delta hub — animates (see
+  // map/arrivalAnimation). Loads paint instantly because the whole map is
+  // arriving at once and a citywide shimmer says nothing; a legend toggle
+  // paints instantly because re-ranking every block is the user's own filter
+  // action, not news from the city. Absent → treated as "load".
+  source?: "load" | "delta" | "filter";
 }
 export const BLOCK_VOTES_EVENT = "city-edit:block-votes";
 
@@ -146,6 +158,36 @@ function blockLinePaint(style: MapStyle): maplibregl.LineLayerSpecification["pai
       0.001, 0.72,
       1.0, 1.0,
     ],
+  };
+}
+
+/** The arrival spark: a bright hairline ring that traces a block for the ~half
+ *  second after a vote lands on it, then leaves nothing behind. Driven by
+ *  feature-state "arrive" ∈ [0,1], which map/arrivalAnimation eases from a fast
+ *  attack down to zero — this layer is pure paint, so the whole gesture is a
+ *  per-frame GPU evaluation of one opacity, with no geometry work.
+ *
+ *  ONE constant colour, deliberately. The spark says "here, just now"; the heat
+ *  underneath — already easing up or down the ramp over the same window — says
+ *  what landed and in which direction. Keeping the colour constant also keeps
+ *  `line-color` out of the per-vertex paint attributes, so this layer adds
+ *  exactly one data-driven binder to the block tiles' vertex memory, which is
+ *  the kind of thing that matters on the NYC tileset. heatTip is the ramp's
+ *  incandescent end and flips polarity with the basemap for free: a warm
+ *  near-white flare on the dark maps, a deep ink one on the light (multiply)
+ *  maps, either way the map's own identity hue rather than a generic white. */
+function blockArrivalPaint(style: MapStyle): maplibregl.LineLayerSpecification["paint"] {
+  const arrive: maplibregl.ExpressionSpecification = [
+    "coalesce", ["feature-state", "arrive"], 0,
+  ];
+  return {
+    "line-color": heatTip(style.heat, style.basemap),
+    "line-opacity": ["*", arrive, 0.85],
+    // A touch wider than the heat outline (1.1–2.0px) so the pulse reads as a
+    // ring AROUND the block rather than as its outline briefly changing colour.
+    "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1.4, 16, 2.6],
+    // Just enough bleed to look like light rather than like a border.
+    "line-blur": 0.9,
   };
 }
 
@@ -362,6 +404,17 @@ function buildStyle(
         "source-layer": "blocks",
         paint: blockLinePaint(mapStyle),
       },
+      // Arrival spark — transient, above the heat it announces and below the
+      // selection UI (a landing vote must never outshout what the user is
+      // pointing at). Idle cost is nil: feature-state "arrive" defaults to 0,
+      // so every block renders at zero opacity until one is actually animating.
+      {
+        id: "block-arrival",
+        type: "line",
+        source: "blocks",
+        "source-layer": "blocks",
+        paint: blockArrivalPaint(mapStyle),
+      },
       // Block selection — feature-state { selected } lights the block polygons
       // covering the current selection/hover: a faint translucent fill plus a
       // hairline casing in the style's selection token (white on dark,
@@ -432,6 +485,13 @@ interface MapLibreBackgroundProps {
 export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBackgroundProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  // Owned by the heat effect below; read by the camera effect, which has to be
+  // able to call off the animation when a Leaflet zoom takes over the container.
+  const arrivalRef = useRef<ArrivalAnimator | null>(null);
+  // True for the length of a Leaflet zoom ride. Set by the camera effect, read
+  // by the animator — a vote that lands mid-ride must paint instantly, the same
+  // as one already in flight when the ride started.
+  const zoomRidingRef = useRef(false);
 
   // Initialize MapLibre map (gracefully handles WebGL unavailability)
   useEffect(() => {
@@ -579,10 +639,27 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
       if (!document.hidden) reconcile();
     };
 
+    // A zoom takes the container away from MapLibre: for the length of the ride
+    // the GL frame is a frozen bitmap being CSS-scaled, so anything still
+    // animating feature-state would be repainting a stale camera underneath a
+    // transform — cost without a picture. Land every in-flight arrival on its
+    // final heat, and hold the flag that makes votes landing MID-ride paint
+    // instantly too. The animation is news about a moment; once the user has
+    // moved on to changing the view, that moment is over.
+    const startZoomRide = () => {
+      zoomRidingRef.current = true;
+      arrivalRef.current?.settle();
+    };
+    const endZoomRide = () => {
+      zoomRidingRef.current = false;
+      reconcile();
+    };
+
     // Sync on every move frame for smooth panning
     leafletMap.on("move", syncCamera);
     leafletMap.on("zoomanim", handleZoomAnim);
-    leafletMap.on("zoomend", reconcile);
+    leafletMap.on("zoomstart", startZoomRide);
+    leafletMap.on("zoomend", endZoomRide);
     leafletMap.on("moveend", reconcile);
     document.addEventListener("visibilitychange", handleVisibility);
     // Initial sync
@@ -591,7 +668,8 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
     return () => {
       leafletMap.off("move", syncCamera);
       leafletMap.off("zoomanim", handleZoomAnim);
-      leafletMap.off("zoomend", reconcile);
+      leafletMap.off("zoomstart", startZoomRide);
+      leafletMap.off("zoomend", endZoomRide);
       leafletMap.off("moveend", reconcile);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
@@ -612,6 +690,22 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
     const applied = { current: null as { heat: Map<number, number>; denomKey: string } | null };
 
     const featureOf = (id: number) => ({ source: "blocks", sourceLayer: "blocks", id });
+
+    // The arrival animation. It only ever touches blocks the diff below hands
+    // it, and it writes both of its keys in one setFeatureState per block per
+    // frame — the whole gesture costs (animating blocks × frames), not
+    // (blocks × tiles). `selected` is untouched: setFeatureState merges keys.
+    const arrival = createArrivalAnimator({
+      write: (id, heat, arrive) => {
+        const ml = mapRef.current;
+        if (ml && ml.getSource("blocks")) ml.setFeatureState(featureOf(id), { heat, arrive });
+      },
+      now: () => performance.now(),
+      requestFrame: (cb) => requestAnimationFrame(cb),
+      cancelFrame: (h) => cancelAnimationFrame(h),
+      suspended: () => zoomRidingRef.current,
+    });
+    arrivalRef.current = arrival;
 
     const applySelected = () => {
       const ml = mapRef.current;
@@ -641,7 +735,19 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
       // NYC bike map, on EVERY vote and EVERY sourcedata event) was the main
       // "zooming reloads the whole map" cost.
       const full = !prev || prev.denomKey !== denomKey;
+      // A vote landing is the one thing worth animating: the block it touched
+      // should bloom into its new heat rather than snap. Everything else — the
+      // first paint, a cache/network load, a legend toggle, a renormalized full
+      // rewrite — paints instantly, because in those the whole map is changing
+      // and motion would carry no information. The animator additionally
+      // honours prefers-reduced-motion and caps itself under a burst, so this
+      // flag is about MEANING; the policy for how much motion lives there.
+      const animate = !full && detail.source === "delta";
+      // Hand the source back before writing directly to it, or an in-flight
+      // tween would overwrite these values on its next frame.
+      if (!animate) arrival[full ? "reset" : "settle"]();
       const next = new Map<number, number>();
+      const changes: HeatChange[] = [];
       let writes = 0;
       if (full) {
         // Clear prior states, then set only the blocks with a nonzero
@@ -665,7 +771,8 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
             const h = signedHeat(v);
             next.set(id, h);
             if (prev.heat.get(id) !== h) {
-              ml.setFeatureState(featureOf(id), { heat: h });
+              if (animate) changes.push({ id, from: prev.heat.get(id) ?? 0, to: h });
+              else ml.setFeatureState(featureOf(id), { heat: h });
               writes++;
             }
           }
@@ -673,10 +780,14 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         // Blocks whose differential just returned to zero: cool back to invisible.
         for (const id of prev.heat.keys()) {
           if (!next.has(id)) {
-            ml.setFeatureState(featureOf(id), { heat: 0 });
+            if (animate) changes.push({ id, from: prev.heat.get(id)!, to: 0 });
+            else ml.setFeatureState(featureOf(id), { heat: 0 });
             writes++;
           }
         }
+        // ONE cohort per apply: a vote that lit a whole corridor blooms as a
+        // single gesture rather than as N independently-timed twinkles.
+        arrival.arrive(changes);
       }
       // Perf harness hook (perf/instrument.js): stamp the first heat apply —
       // feature-state isn't introspectable from outside, so this is the one
@@ -686,7 +797,8 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
           ?.mark("first-heat-apply");
       }
       applied.current = { heat: next, denomKey };
-      dlog("blocks", `heat apply (${full ? "full" : "diff"}): ${writes} writes, ${next.size} lit`);
+      dlog("blocks", `heat apply (${full ? "full" : "diff"}): ${writes} writes, ${next.size} lit`
+        + (animate ? `, ${changes.length} arriving (${arrival.size} in flight)` : ""));
       debugState("blockHeatNonzero", next.size);
     };
 
@@ -732,6 +844,8 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
       window.removeEventListener(BLOCK_VOTES_EVENT, onVotes);
       window.removeEventListener(BLOCK_SELECT_EVENT, onSelect);
       ml?.off("sourcedata", onSourceData);
+      arrival.reset();
+      arrivalRef.current = null;
     };
   }, []);
 

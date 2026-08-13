@@ -1442,7 +1442,14 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // MapLibre fill layer and switch the canvas edge-heatmap off — blocks are the
   // primary heat, edges show only on hover/selection. No-blocks maps keep the
   // per-edge canvas heatmap exactly as before.
-  const broadcastBlockVotes = useCallback((voteData: Partial<GraphData>) => {
+  // `source` tells the block layer WHY the heat moved. Only "delta" — a vote
+  // landing, this user's or anyone else's, arriving over the WebSocket hub —
+  // animates its arrival (map/arrivalAnimation); loads and legend toggles paint
+  // instantly. Defaults to "load": a new call site is silent until it opts in.
+  const broadcastBlockVotes = useCallback((
+    voteData: Partial<GraphData>,
+    source: BlockVotesDetail["source"] = "load",
+  ) => {
     const blockVotes = voteData.block_votes;
     // NOT Array.isArray — the sparse decoder hands us an Int32Array, which is
     // not an Array but is exactly as broadcastable.
@@ -1462,6 +1469,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       blockDiff: diff,
       max: Math.max(HEAT_FULL_SCALE, maxPos),
       maxNeg: Math.max(NEG_HEAT_FULL_SCALE, maxNeg),
+      source,
     };
     window.dispatchEvent(new CustomEvent(BLOCK_VOTES_EVENT, { detail }));
   }, []);
@@ -1607,7 +1615,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   useEffect(() => subscribeVoteTypeFilter(() => {
     dlog("proposals", `vote-type filter: ${getHiddenVoteTypes().size} hidden`);
     const data = graphDataRef.current;
-    if (data) broadcastBlockVotes(data);
+    if (data) broadcastBlockVotes(data, "filter");
     scheduleRedrawRef.current();
     requestProposalsRecomputeRef.current(true);
   }), [broadcastBlockVotes]);
@@ -1775,7 +1783,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       applyEdgeVoteChange(data, adj, delta.edges, vtLabel, delta.dir ?? 1, delta.reversed ?? false);
     }
     if (delta.blockCounts && applyBlockCounts(data, vtLabel, delta.blockCounts)) {
-      broadcastBlockVotes(data);
+      broadcastBlockVotes(data, "delta");
     }
     lastRevRef.current = delta.rev;
   }, [broadcastBlockVotes]);
