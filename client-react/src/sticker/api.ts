@@ -37,6 +37,28 @@ export interface StickerTarget {
   src: string;
   /** Where the sticker turned out to be, or null while still unresolved. */
   location: { lat: number; lng: number } | null;
+  /**
+   * The whole bound selection in canonical `w=` form (selection/serialize.ts) —
+   * one waypoint for a point vote, several for a route.
+   *
+   * Null while unresolved, and also null for codes bound before this existed,
+   * which only ever recorded a point. `location` still carries those, so a
+   * caller must treat this as the better answer rather than the only one.
+   */
+  waypoints: string | null;
+}
+
+/** Everything a cast vote tells us about what a code should mean from now on. */
+export interface StickerBinding {
+  /** The map the vote landed on — NOT necessarily the map that was printed. */
+  mapSlug: string;
+  /** The vote type actually cast. */
+  voteType: string;
+  /** Canonical `w=` selection. */
+  w: string;
+  /** First waypoint, kept so per-pole location queries work on every row. */
+  lat: number;
+  lng: number;
 }
 
 /** The code in a `/s/<code>` path, or null for any other path. Pure, so the
@@ -66,25 +88,37 @@ export async function fetchStickerTarget(code: string): Promise<StickerTarget | 
 }
 
 /**
- * Pin a sticker to where it turned out to be.
+ * Bind a code to the proposal it turned out to mean.
  *
  * Called once the scan's first vote has actually landed, not when the browser
  * hands over a location: a shared location is a claim, a cast vote is a
- * commitment, and only the second one should be allowed to fix a sticker's
- * identity for everyone who scans it afterwards. Fire-and-forget — the vote is
- * already recorded, and failing to pin the sticker only costs the next scanner
- * one location prompt.
+ * commitment, and only the second one should be allowed to fix a code's meaning
+ * for everyone who scans it afterwards.
+ *
+ * What is sent is the whole vote — map, vote type and the full selection — not
+ * just a pin. A scanner can change map or vote type between scanning and
+ * casting, and when they do they are making a decision, not a mistake.
+ *
+ * Fire-and-forget: the vote is already recorded, and failing to bind only costs
+ * the next scanner one location prompt.
  */
 export async function resolveSticker(
   code: string,
-  point: { lat: number; lng: number },
+  binding: StickerBinding,
   voterId: string | null,
 ): Promise<void> {
   try {
     await fetch(`${CONFIG.apiUrl}/stickers/${encodeURIComponent(code)}/resolve`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lat: point.lat, lng: point.lng, voter_id: voterId }),
+      body: JSON.stringify({
+        lat: binding.lat,
+        lng: binding.lng,
+        map_slug: binding.mapSlug,
+        vote_type: binding.voteType,
+        w: binding.w,
+        voter_id: voterId,
+      }),
       keepalive: true,
     });
   } catch {

@@ -352,6 +352,30 @@ def init_db():
                     created_at TIMESTAMP DEFAULT NOW()
                 )
             """)
+            # What the code resolved TO. The original columns could only record
+            # a point, which is half a proposal: a route-based vote is an
+            # ordered list of waypoints, and a voter can change map or vote type
+            # between scanning and casting. These carry the whole thing.
+            #
+            # Added by ALTER rather than folded into the CREATE above, because
+            # the table already exists in prod with rows on it.
+            #
+            #   resolved_map_slug   the map the vote actually landed on, which
+            #                       need NOT be the map that was printed
+            #   resolved_vote_type  the vote type actually cast
+            #   resolved_w          the canonical `w=` selection (see
+            #                       client selection/serialize.ts) — one
+            #                       waypoint for a point vote, several for a
+            #                       route, forced-corridor tokens included
+            for column, ddl in (
+                ("resolved_map_slug", "TEXT"),
+                ("resolved_vote_type", "TEXT"),
+                ("resolved_w", "TEXT"),
+            ):
+                cursor.execute(
+                    f"ALTER TABLE sticker_codes ADD COLUMN IF NOT EXISTS {column} {ddl}"
+                )
+
             # "Which of this campaign's stickers have found a home?" is the
             # question the whole table exists to answer, so it gets the index.
             cursor.execute(
@@ -1371,38 +1395,44 @@ def get_sticker(code: str, count_scan: bool = False) -> Optional[dict]:
         return None
     try:
         with get_cursor() as cursor:
+            columns = """code, map_slug, vote_type, headline, src_tag,
+                         lat, lon, resolved_at,
+                         resolved_map_slug, resolved_vote_type, resolved_w"""
             if count_scan:
                 cursor.execute(
-                    """UPDATE sticker_codes
-                       SET scans = scans + 1,
-                           first_scan_at = COALESCE(first_scan_at, NOW()),
-                           last_scan_at = NOW()
-                       WHERE code = %s
-                       RETURNING code, map_slug, vote_type, headline, src_tag,
-                                 lat, lon, resolved_at""",
+                    f"""UPDATE sticker_codes
+                        SET scans = scans + 1,
+                            first_scan_at = COALESCE(first_scan_at, NOW()),
+                            last_scan_at = NOW()
+                        WHERE code = %s
+                        RETURNING {columns}""",
                     (norm,),
                 )
             else:
                 cursor.execute(
-                    """SELECT code, map_slug, vote_type, headline, src_tag,
-                              lat, lon, resolved_at
-                       FROM sticker_codes WHERE code = %s""",
-                    (norm,),
+                    f"SELECT {columns} FROM sticker_codes WHERE code = %s", (norm,)
                 )
             row = cursor.fetchone()
             if not row:
                 return None
+            resolved = row[7] is not None
             return {
                 "code": row[0],
-                "mapSlug": row[1],
-                "voteType": row[2],
+                # Once resolved, the vote that was actually cast wins over what
+                # was printed. A scanner who changed map or picked a different
+                # vote type was making a decision, not a mistake, and every
+                # later scan should land on the thing they decided.
+                "mapSlug": (row[8] if resolved and row[8] else row[1]),
+                "voteType": (row[9] if resolved and row[9] else row[2]),
                 "headline": row[3],
                 "src": row[4],
                 # Absent rather than null when unresolved: the client's only
                 # question is "do I know where this sticker is yet?".
                 "location": ({"lat": row[5], "lng": row[6]}
-                             if row[7] is not None and row[5] is not None
-                             else None),
+                             if resolved and row[5] is not None else None),
+                # The whole selection, canonical `w=` form. Null for rows
+                # resolved before this column existed — the point still works.
+                "waypoints": (row[10] if resolved else None),
             }
     except Exception as e:
         logger.error(f"[DB] get_sticker '{code}' failed: {e}")
@@ -1410,18 +1440,27 @@ def get_sticker(code: str, count_scan: bool = False) -> Optional[dict]:
 
 
 def resolve_sticker(code: str, lat: float, lon: float,
-                    device_id: Optional[str] = None) -> Optional[dict]:
-    """Pin a sticker to the place it turned out to be, once.
+                    device_id: Optional[str] = None,
+                    map_slug: Optional[str] = None,
+                    vote_type: Optional[str] = None,
+                    w: Optional[str] = None) -> Optional[dict]:
+    """Bind a code to the proposal it turned out to mean, once.
 
     Called after the first scanner actually casts a vote — not when they merely
     share their location, because a shared location is a claim and a cast vote
-    is a commitment. From then on the sticker opens straight to this spot.
+    is a commitment. From then on the code opens straight to that proposal.
+
+    What gets bound is the whole vote, not a pin: the map it landed on (which
+    may not be the map that was printed, since the scanner can change map before
+    voting), the vote type actually cast, and the full ordered selection. `lat`
+    and `lon` stay as the first waypoint so the existing "where are the poles?"
+    queries keep working on rows written either side of this change.
 
     Write-once, enforced in the WHERE clause rather than by reading first: two
-    people scanning the same fresh sticker within a second of each other would
-    both see it unresolved, and the loser of that race must not overwrite the
-    winner. Returns the location now on the row — the existing one if we lost,
-    which is exactly what the caller should honour.
+    people scanning the same fresh code within a second of each other would both
+    see it unresolved, and the loser of that race must not overwrite the winner.
+    Returns what is now on the row — the existing binding if we lost, which is
+    exactly what the caller should honour.
     """
     if not DATABASE_URL:
         return None
@@ -1434,22 +1473,30 @@ def resolve_sticker(code: str, lat: float, lon: float,
         with get_cursor() as cursor:
             cursor.execute(
                 """UPDATE sticker_codes
-                   SET lat = %s, lon = %s, resolved_at = NOW(), resolved_by = %s
+                   SET lat = %s, lon = %s, resolved_at = NOW(), resolved_by = %s,
+                       resolved_map_slug = %s, resolved_vote_type = %s,
+                       resolved_w = %s
                    WHERE code = %s AND resolved_at IS NULL""",
-                (lat, lon, (device_id or None), norm),
+                (lat, lon, (device_id or None), (map_slug or None),
+                 (vote_type or None), (w or None), norm),
             )
             claimed = cursor.rowcount == 1
             cursor.execute(
-                "SELECT lat, lon FROM sticker_codes WHERE code = %s", (norm,)
+                """SELECT lat, lon, resolved_map_slug, resolved_vote_type, resolved_w
+                   FROM sticker_codes WHERE code = %s""",
+                (norm,),
             )
             row = cursor.fetchone()
             if not row or row[0] is None:
                 return None
             logger.info(
-                f"[STICKER] resolve code={norm} lat={row[0]:.6f} lon={row[1]:.6f} "
-                f"{'claimed' if claimed else 'already-resolved'}"
+                f"[STICKER] resolve code={norm} map={row[2]} vt={row[3]!r} "
+                f"w={row[4]} {'claimed' if claimed else 'already-resolved'}"
             )
-            return {"lat": row[0], "lng": row[1], "claimed": claimed}
+            return {
+                "lat": row[0], "lng": row[1], "claimed": claimed,
+                "mapSlug": row[2], "voteType": row[3], "waypoints": row[4],
+            }
     except Exception as e:
         logger.error(f"[DB] resolve_sticker '{code}' failed: {e}")
         return None

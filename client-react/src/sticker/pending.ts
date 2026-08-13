@@ -16,8 +16,41 @@
 
 const CODE_PATTERN = /^[a-zA-Z0-9]{4,12}$/;
 
+/**
+ * The code outlives the page, because the visit does.
+ *
+ * A scanner can change map before voting — the vote-type they want may only
+ * exist on another map, and the switcher is right there. Switching maps is a
+ * real navigation, so a module variable alone is gone by the time they cast and
+ * the code silently never binds. sessionStorage is exactly the right lifetime:
+ * it survives navigation within the tab and dies with it, which is the same
+ * span as "this visit".
+ */
+const STORAGE_KEY = "cityedit.pendingSticker";
+
 let pending: string | null = null;
 let captured = false;
+
+function remember(code: string | null): void {
+  pending = code;
+  try {
+    if (code) window.sessionStorage.setItem(STORAGE_KEY, code);
+    else window.sessionStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // Private mode / storage disabled. Same-map binding still works off the
+    // module variable; only the cross-map case is lost, which is better than
+    // throwing on the boot path.
+  }
+}
+
+function recall(): string | null {
+  try {
+    const code = window.sessionStorage.getItem(STORAGE_KEY);
+    return code && CODE_PATTERN.test(code) ? code : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface PendingCapture {
   /** The code, or null when absent or malformed. */
@@ -49,9 +82,17 @@ export function readPendingSticker(search: string): PendingCapture {
 export function capturePendingSticker(): void {
   if (typeof window === "undefined" || captured) return;
   captured = true;
-  if (!window.location.search.includes("stk=")) return;
+
+  if (!window.location.search.includes("stk=")) {
+    // No `stk` in the URL is not the same as no pending code: on the second and
+    // later pages of a visit it was stripped from the address bar long ago and
+    // only the stored copy is left.
+    pending = recall();
+    return;
+  }
+
   const { code, search } = readPendingSticker(window.location.search);
-  pending = code;
+  remember(code);
   try {
     window.history.replaceState(
       null, "", window.location.pathname + search + window.location.hash
@@ -63,16 +104,22 @@ export function capturePendingSticker(): void {
 
 /**
  * Take the pending code, clearing it. Single-use on purpose: the first vote of
- * the visit is the one that decides where the sticker lives, and a later vote
+ * the visit is the one that decides what the code means, and a later vote
  * somewhere else must not be able to drag it there.
  */
 export function takePendingSticker(): string | null {
   const code = pending;
-  pending = null;
+  remember(null);
   return code;
 }
 
-/** Whether this visit still owes a sticker its location. */
+/** Whether this visit still owes a code its proposal. */
 export function hasPendingSticker(): boolean {
   return pending !== null;
+}
+
+/** Drop any pending code without spending it. Tests and the reset path. */
+export function clearPendingSticker(): void {
+  captured = false;
+  remember(null);
 }

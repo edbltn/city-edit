@@ -1246,6 +1246,54 @@ def map_auth(slug):
 
 # ── WebSocket (delta-based, per-map) ─────────────────────────────────────────
 
+def _ws_handle_inbound(ws, slug: str, sub, raw) -> None:
+    """Handle one client→server WS message. Never raises into the pump loop.
+
+    Two messages exist:
+
+      {"type":"hello","bin":1}     late fallback for announcing binary
+                                   support. The handshake `?bin=1` is the
+                                   real mechanism (it can't race the first
+                                   flush); this exists so capability can be
+                                   changed mid-connection.
+      {"type":"sync","since":N}    repair: send back everything that changed
+                                   after revision N as ONE coalesced SYNC
+                                   frame. The client fires this on foreground
+                                   and on reconnect — the two moments it knows
+                                   it may have missed deltas but has no delta
+                                   arriving to notice the gap with. Before
+                                   this, a backgrounded tab stayed stale until
+                                   the NEXT vote tripped gap detection, and
+                                   then paid a full ~57 KB refetch.
+    """
+    try:
+        if isinstance(raw, bytes):
+            return  # no binary client→server messages in frame version 1
+        msg = json.loads(raw)
+    except (ValueError, TypeError):
+        return
+    kind = msg.get("type")
+    if kind == "hello":
+        sub.binary = bool(msg.get("bin"))
+        return
+    if kind == "sync":
+        try:
+            since = int(msg.get("since") or 0)
+        except (TypeError, ValueError):
+            since = 0
+        try:
+            frame = vote_store.build_sync_frame(redis_client, slug, since)
+        except Exception as e:
+            logger.warning(f"[WS] sync build failed for {slug}: {e}")
+            return
+        # A client that can't read binary gets told to refetch — the same
+        # answer TRUNCATED gives, and the path it already implements.
+        if not sub.binary:
+            ws.send(json.dumps({"type": "resync", "reason": "no-binary"}))
+            return
+        ws.send(frame)
+
+
 @sock.route("/ws")
 def ws(ws):
     """Push a single map's vote deltas to a client in real time.
@@ -1269,17 +1317,33 @@ def ws(ws):
             pass
         return
 
-    sub = delta_hub.subscribe(slug)
+    # Binary capability rides in the HANDSHAKE, not in a hello message. The
+    # inbound pump below only drains once per q.get timeout, so a hello sent
+    # right after connect can lose the race with the first flush and get JSON
+    # back — harmless (the client reads both) but sloppy, and it would make
+    # "which encoding did this client get" depend on timing. The query string
+    # is known before the first byte is sent, the same way `map` and `token`
+    # already are.
+    sub = delta_hub.subscribe(slug, binary=request.args.get("bin") == "1")
     try:
         rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)
-        ws.send(json.dumps({"type": "init", "rev": rev, "map": slug}))
+        # `bin` echoes back what the server decided, so the client can tell
+        # whether to expect frames. An old server omits it and keeps sending
+        # JSON, which the client still applies.
+        ws.send(json.dumps({"type": "init", "rev": rev, "map": slug,
+                            "bin": 1 if sub.binary else 0}))
 
         last_push = time.time()
         KEEPALIVE = 30
         while True:
-            # Pump inbound frames so a client close is noticed promptly.
+            # Pump inbound frames: a client close must be noticed promptly, and
+            # this is also where the two client→server messages arrive —
+            # {"type":"hello","bin":1} (binary capability) and
+            # {"type":"sync","since":<rev>} (repair after a backgrounded tab).
             try:
-                ws.receive(timeout=0)
+                inbound = ws.receive(timeout=0)
+                if inbound:
+                    _ws_handle_inbound(ws, slug, sub, inbound)
             except Exception as e:
                 s = str(e).lower()
                 if "timed out" not in s and "no data" not in s and "connection closed" not in s:
@@ -2312,8 +2376,23 @@ def sticker_resolve(code):
         lon = float(data["lng"] if "lng" in data else data["lon"])
     except (KeyError, TypeError, ValueError):
         return jsonify({"error": "lat and lng are required"}), 400
+
+    # The rest of the binding. All optional: a client from before this change
+    # posts only a point, and that still resolves the code to a place.
+    map_slug = re.sub(r"[^a-zA-Z0-9_-]", "", str(data.get("map_slug") or ""))[:64]
+    vote_type = str(data.get("vote_type") or "")[:120]
+    # `w` is the canonical selection string. Kept as text rather than parsed
+    # into columns: the client owns that grammar (selection/serialize.ts) and it
+    # already carries route waypoints and forced-corridor tokens the server has
+    # no reason to understand. Character-class it so nothing but a selection can
+    # be stored, and bound it so a hostile caller cannot post a novel.
+    w = str(data.get("w") or "")[:400]
+    if w and not re.fullmatch(r"[0-9.,;\-a-fA-F]*", w):
+        w = ""
+
     device_id, _ip_hash = _resolve_user(data)
-    resolved = resolve_sticker(code, lat, lon, device_id)
+    resolved = resolve_sticker(code, lat, lon, device_id,
+                               map_slug=map_slug, vote_type=vote_type, w=w)
     if not resolved:
         return jsonify({"error": "Unknown sticker code or bad coordinates"}), 404
     return jsonify(resolved)

@@ -29,27 +29,42 @@ import {
 } from "./voteStore";
 
 /**
- * Pin the sticker this visit was scanned from to the place the vote landed.
+ * Bind the code this visit was scanned from to the proposal the vote landed on.
  *
  * Only fires for a real cast: an unvote (direction 0) is someone taking a vote
- * back, which is no evidence at all about where a sticker lives.
+ * back, which is no evidence at all about what a code means.
  *
- * The point comes from the URL rather than from the cast's edge ids, because
- * the URL is the canonical serialization of the selection (selection/serialize.ts)
- * and is therefore exactly the coordinate a future scan will deep-link to. Take
- * it at cast time, not at boot: the scanner may well have dragged the pin from
- * where their phone thought they were onto the corner they actually mean, and
- * that corrected spot is the better answer for everyone who scans next.
+ * The selection comes from the URL rather than from the cast's edge ids,
+ * because the URL is its canonical serialization (selection/serialize.ts) and
+ * is therefore exactly what a future scan will deep-link to. The WHOLE `w` is
+ * taken, not its first waypoint: a route vote is an ordered list, and keeping
+ * only the head would quietly demote a corridor proposal to a pin on its start.
+ *
+ * Map and vote type are read live rather than from what was printed. A scanner
+ * can change either before casting, and when they do they are making a
+ * decision — the code should mean what they decided.
+ *
+ * Read at cast time, not at boot: the scanner may well have dragged the pin
+ * from where their phone thought they were onto the corner they actually mean.
  */
-function pinPendingSticker(targetDir: VoteDirection | 0): void {
+function pinPendingSticker(targetDir: VoteDirection | 0, label: string): void {
   if (targetDir === 0 || !hasPendingSticker()) return;
-  const parsed = selectionFromParams(new URLSearchParams(window.location.search));
+  const params = new URLSearchParams(window.location.search);
+  const parsed = selectionFromParams(params);
   const point = parsed?.waypoints[0]?.coords;
-  if (!point) return;
+  const w = params.get("w");
+  if (!point || !w) return;
   const code = takePendingSticker();
   if (!code) return;
-  dlog("sticker", `pinning ${code} to`, point);
-  void resolveSticker(code, point, getVoterId());
+  const binding = {
+    mapSlug: getMapSlug(),
+    voteType: label,
+    w,
+    lat: point.lat,
+    lng: point.lng,
+  };
+  dlog("sticker", `binding ${code} to`, binding);
+  void resolveSticker(code, binding, getVoterId());
 }
 
 /** Detail of the `optimistic-vote` window event GraphLayer listens for. */
@@ -286,10 +301,10 @@ export async function castVotes(params: {
       setVotes(mode, cleared, label, 0);
     }
 
-    // If this visit came from a scanned sticker that had never been placed,
-    // THIS is the moment it gets a location — a cast vote, not a shared
-    // coordinate, is what earns a sticker its spot on the map.
-    pinPendingSticker(targetDir);
+    // If this visit came from a scanned code that had never been bound, THIS is
+    // the moment it acquires a meaning — a cast vote, not a shared coordinate,
+    // is what earns a code its proposal.
+    pinPendingSticker(targetDir, label);
 
     return { ok: true, targetDir, changedEdges: changedEdges.filter((e) => !declined.has(e)) };
   } catch (err) {

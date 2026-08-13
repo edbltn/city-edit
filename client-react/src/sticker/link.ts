@@ -36,10 +36,17 @@ export function stickerMapUrl(
   point: { lat: number; lng: number },
   opts: StickerLinkOptions = {},
 ): string {
-  const params = selectionToParams({
-    waypoints: [{ coords: point, id: "sticker" }],
-    voteType: target.voteType,
-  });
+  // A bound code carries its whole selection, which is the only form that can
+  // express a route — a route proposal is an ordered list of waypoints, and
+  // rebuilding one from a single point would silently turn it into a pin on its
+  // start. Codes bound before that was recorded have only the point, so fall
+  // back to it rather than dropping them.
+  const params = target.waypoints
+    ? new URLSearchParams({ w: target.waypoints, vt: target.voteType })
+    : selectionToParams({
+        waypoints: [{ coords: point, id: "sticker" }],
+        voteType: target.voteType,
+      });
   params.set("z", String(SCAN_ZOOM));
   params.set("lat", point.lat.toFixed(5));
   params.set("lng", point.lng.toFixed(5));

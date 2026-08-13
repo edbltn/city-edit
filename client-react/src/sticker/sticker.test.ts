@@ -11,6 +11,7 @@ const TARGET: StickerTarget = {
   headline: "FIX THIS INTERSECTION.",
   src: "stk-fix",
   location: null,
+  waypoints: null,
 };
 
 const POINT = { lat: 40.75612, lng: -73.98693 };
@@ -45,6 +46,34 @@ describe("stickerMapUrl", () => {
     expect(p.get("z")).toBe("18");
     expect(p.get("lat")).toBe("40.75612");
     expect(p.get("lng")).toBe("-73.98693");
+  });
+
+  it("replays a bound ROUTE with every waypoint intact", () => {
+    // The whole point of storing `w` rather than a pin: rebuilding a corridor
+    // from its first coordinate would silently demote it to a point vote.
+    const route = "40.756120,-73.986930;40.758400,-73.984100;40.760900,-73.981700";
+    const bound = {
+      ...TARGET,
+      voteType: "Add bike lane",
+      mapSlug: "nyc-bikes",
+      waypoints: route,
+    };
+    const p = params(stickerMapUrl(bound, POINT));
+    expect(p.get("w")).toBe(route);
+    expect(p.get("vt")).toBe("Add bike lane");
+  });
+
+  it("follows a binding onto a different map than the one printed", () => {
+    // The scanner changed map before voting. That was a decision, not a
+    // mistake, so every later scan should land where they decided.
+    const bound = { ...TARGET, mapSlug: "nyc-bikes", waypoints: "40.1,-73.9" };
+    const url = new URL(stickerMapUrl(bound, POINT), "https://cityedit.org");
+    expect(url.pathname).toBe("/m/nyc-bikes");
+  });
+
+  it("falls back to the point for codes bound before `w` was recorded", () => {
+    const p = params(stickerMapUrl({ ...TARGET, waypoints: null }, POINT));
+    expect(p.get("w")).toBe("40.756120,-73.986930");
   });
 });
 
