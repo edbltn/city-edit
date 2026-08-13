@@ -56,6 +56,7 @@ from pathlib import Path
 import cairosvg
 import cv2
 import numpy as np
+import pymupdf
 import zxingcpp
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -98,6 +99,63 @@ def read_zxing(img: np.ndarray) -> str | None:
 def read_opencv(img: np.ndarray) -> str | None:
     text, _pts, _straight = cv2.QRCodeDetector().detectAndDecode(img)
     return text or None
+
+
+def check_pdf(rows: list[dict]) -> list[str]:
+    """Decode every sticker out of the finished PDF, in its own grid cell.
+
+    This is the last artefact in the chain and the only one anybody sends to a
+    printer, so it gets checked as a printed page rather than as a drawing: each
+    page is rasterised at 300 DPI — exactly what the RIP receives — and every
+    grid cell is cropped and decoded on its own.
+
+    Checking the cell, not just the page, is the point. A first pass had every
+    sticker decoding perfectly and every page in the wrong order, because the
+    PDF was assembled from a filename sort ("press+cross-3" sorts before
+    "wait+fix-1"). Sheet-level checks cannot see that; cell-level ones cannot
+    miss it.
+    """
+    problems = []
+    for stock_key in sorted({r["stock"] for r in rows}):
+        stock = sheet_mod.STOCKS[stock_key]
+        pdf = OUT / stock_key / f"cityedit-stickers-{stock_key}in.pdf"
+        if not pdf.exists():
+            problems.append(f"{pdf.name}: missing")
+            continue
+
+        want: dict[int, dict[tuple[int, int], str]] = {}
+        for r in rows:
+            if r["stock"] == stock_key:
+                want.setdefault(int(r["sheet"]), {})[
+                    (int(r["col"]), int(r["row"]))] = r["url"]
+
+        doc = pymupdf.open(pdf)
+        if doc.page_count != len(want):
+            problems.append(
+                f"{pdf.name}: {doc.page_count} pages, manifest has {len(want)} sheets")
+        for pno, page in enumerate(doc):
+            box = page.rect
+            if abs(box.width - 612) > 0.5 or abs(box.height - 792) > 0.5:
+                problems.append(
+                    f"{pdf.name} p{pno + 1}: {box.width:.0f}x{box.height:.0f} pt, "
+                    f"not US Letter — it would print scaled")
+            pix = page.get_pixmap(dpi=300)
+            img = np.frombuffer(pix.samples, np.uint8).reshape(
+                pix.height, pix.width, pix.n)
+            grey = cv2.cvtColor(
+                img, cv2.COLOR_RGB2GRAY if pix.n == 3 else cv2.COLOR_RGBA2GRAY)
+            half = int(stock.die / 2 * 300 * 1.06)
+            for (col, row), url in sorted(want.get(pno, {}).items()):
+                cx, cy = stock.centre(col, row)
+                x, y = int(cx * 300), int(cy * 300)
+                crop = grey[max(0, y - half):y + half, max(0, x - half):x + half]
+                res = zxingcpp.read_barcode(crop)
+                got = res.text if res else None
+                if got != url:
+                    problems.append(
+                        f"{pdf.name} p{pno + 1} cell ({col},{row}): expected "
+                        f"{url}, got {got}")
+    return problems
 
 
 def load_run() -> list[dict]:
@@ -158,9 +216,20 @@ def main():
         if bad:
             failed += 1
 
+    pdf_problems = check_pdf(rows)
+    print(f"  {'FAIL' if pdf_problems else 'ok  '} finished PDF: every sticker "
+          f"decodes at 300 DPI from its own grid cell, pages US Letter")
+    for msg in pdf_problems[:8]:
+        print(f"        {msg}")
+    if len(pdf_problems) > 8:
+        print(f"        … and {len(pdf_problems) - 8} more")
+
     print()
-    if failed:
-        print(f"{failed} capture size(s) failed", file=sys.stderr)
+    if failed or pdf_problems:
+        if failed:
+            print(f"{failed} capture size(s) failed", file=sys.stderr)
+        if pdf_problems:
+            print(f"{len(pdf_problems)} problem(s) in the finished PDF", file=sys.stderr)
         return 1
     painted = sum(1 for r in rows if r.get("art"))
     isos = sum(1 for r in rows if (r.get("style") or "flat") == "iso")

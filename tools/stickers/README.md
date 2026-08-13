@@ -12,8 +12,21 @@ python3 -m venv env && uv pip install --python ./env/bin/python -r requirements.
 ./env/bin/python verify_scan.py                      # read them back
 ```
 
-Everything lands in `out/<stock>/` (gitignored — the build is deterministic, so
-it is always exactly reproducible from this directory).
+The thing to print is the packet:
+
+```
+out/2.5/cityedit-stickers-2.5in.pdf     3 pages, 36 stickers
+out/3/cityedit-stickers-3in.pdf         3 pages, 18 stickers
+```
+
+Vector all the way through — the pages are the SVG masters, not the PNGs — and
+every page is asserted to be exactly **612 x 792 pt (US Letter)** at build time.
+That check is not ceremony: cairosvg measures in CSS pixels and writes points,
+so the first attempt produced a 459 pt page, which every print dialog would have
+"fit to page" without comment and the die would have missed by 25%.
+
+Everything else lands in `out/<stock>/` (gitignored — the build is
+deterministic, so it is always exactly reproducible from this directory).
 
 **Two messages to a sheet**, split down the middle: a sheet of twelve identical
 stickers was the wrong unit, because you do not go out to fix one thing twelve

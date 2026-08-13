@@ -9,6 +9,7 @@ Build the City Edit sticker sheets.
 
 Writes, into out/<stock>/:
 
+    cityedit-stickers-<stock>in.pdf THE PACKET — every sheet, one Letter PDF
     <message>-<sheet>.svg           vector master, text already outlined
     <message>-<sheet>.png           the file you actually print, 300 DPI
     <message>-<sheet>-proof.png     with --proof: die outlines, on plain paper
@@ -42,6 +43,7 @@ import sys
 from pathlib import Path
 
 import cairosvg
+from pypdf import PdfWriter
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -227,7 +229,12 @@ def paint(rows, spec: qrart_bridge.ArtSpec, *, dry_run: bool) -> int:
 
 
 def write_sheets(stock, rows, out: Path, *, proof: bool) -> list[Path]:
+    """Render every sheet. Returns the SVG masters IN SHEET ORDER — the PDF is
+    assembled from this list, and sorting it by filename instead would page the
+    packet alphabetically ("press+cross-3" before "wait+fix-1"), so the manifest
+    would name a sheet number the PDF does not have at that page."""
     written = []
+    svgs: list[tuple[int, Path]] = []
     by_sheet = {}
     for r in rows:
         by_sheet.setdefault((r.get("pair") or r["message"], r["sheet"]), []).append(r)
@@ -255,6 +262,7 @@ def write_sheets(stock, rows, out: Path, *, proof: bool) -> list[Path]:
                          output_height=int(sheet_mod.PAGE_H * DPI),
                          background_color=PROOF_PAPER)
         written += [out / f"{stem}.svg", out / f"{stem}.png"]
+        svgs.append((n, out / f"{stem}.svg"))
 
         if proof:
             pv = sheet_svg(stock, placements, proof=True)
@@ -264,7 +272,59 @@ def write_sheets(stock, rows, out: Path, *, proof: bool) -> list[Path]:
                              output_height=int(sheet_mod.PAGE_H * DPI))
             written.append(out / f"{stem}-proof.png")
 
-    return written
+    return [path for _n, path in sorted(svgs)]
+
+
+#: US Letter in POINTS. The PDF has to be exactly this or the printer scales it,
+#: and a die-cut grid does not survive being scaled — every sticker creeps
+#: further off its circle towards the edges of the page.
+PAGE_PT = (8.5 * 72, 11 * 72)
+
+#: cairosvg measures `output_width` in CSS pixels and writes PDF in points,
+#: converting at its `dpi` (96 by default). Asking for 612 "px" therefore
+#: produced a 459 pt page — a 75% sheet, which every print dialog would then
+#: happily "fit to page" and nobody would notice until the die missed. Ask in
+#: px, and let the assertion below check the points we actually got.
+PX_PER_PT = 96 / 72
+
+
+def write_pdf(stock, sheet_svgs: list[Path], out: Path) -> Path:
+    """Every sheet of a stock, joined into one print-ready PDF.
+
+    Vector all the way through — the pages are the SVG masters, not the PNGs —
+    so the type stays outlines and the code stays hard-edged at any zoom the
+    print shop's RIP happens to use.
+
+    The page box is asserted rather than assumed. A PDF that is a hair off
+    Letter gets silently scaled to fit by every print dialog there is, and
+    scaling is the one thing this artwork cannot take.
+    """
+    writer = PdfWriter()
+    for svg_path in sheet_svgs:
+        pdf_bytes = cairosvg.svg2pdf(
+            bytestring=svg_path.read_bytes(),
+            output_width=PAGE_PT[0] * PX_PER_PT,
+            output_height=PAGE_PT[1] * PX_PER_PT,
+        )
+        tmp = out / f".{svg_path.stem}.pdf"
+        tmp.write_bytes(pdf_bytes)
+        writer.append(str(tmp))
+        tmp.unlink()
+
+    path = out / f'cityedit-stickers-{stock.key}in.pdf'
+    with path.open("wb") as fh:
+        writer.write(fh)
+
+    # Verify the page box on the file we actually wrote.
+    from pypdf import PdfReader
+    for i, page in enumerate(PdfReader(str(path)).pages):
+        w, h = float(page.mediabox.width), float(page.mediabox.height)
+        if abs(w - PAGE_PT[0]) > 0.5 or abs(h - PAGE_PT[1]) > 0.5:
+            raise ValueError(
+                f"{path.name} page {i + 1} is {w:.1f}x{h:.1f} pt, not "
+                f"{PAGE_PT[0]:.0f}x{PAGE_PT[1]:.0f} — it would print scaled"
+            )
+    return path
 
 
 def write_manifest(rows, out: Path) -> Path:
@@ -503,7 +563,8 @@ def main():
             candidates=args.art_candidates, seed=args.art_seed,
         ), dry_run=args.art_dry_run)
 
-    write_sheets(stock, rows, out, proof=args.proof)
+    sheet_svgs = write_sheets(stock, rows, out, proof=args.proof)
+    pdf = write_pdf(stock, sheet_svgs, out)
     write_manifest(rows, out)
     write_seed(rows, out)
     contact_sheet(stock, keys, rows, out)
@@ -524,7 +585,8 @@ def main():
         print(f'  {s.display:26s} {" / ".join(m["lines"]):28s} '
               f'{m["type_pt"]:5.1f}pt  {m["qr_modules"]}mod '
               f'{m["module_mm"]:.2f}mm  → {s.vote_type} ({s.kind})')
-    print(f"\n  → {out}")
+    print(f"\n  packet: {pdf}")
+    print(f"  → {out}")
     return 0
 
 
