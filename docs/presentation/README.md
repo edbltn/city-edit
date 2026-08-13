@@ -4,6 +4,8 @@ Nine slides for talking through City Edit's front end. Art on the right, a
 short scannable note on the left — bold words are the keywords to land on.
 
 - **`story/city-edit-story.pdf`** — the deck, 16:9, one panel per page.
+- **`story/city-edit-story.pptx`** — the same panels as full-bleed PowerPoint slides
+  (`uv run --with python-pptx python tools/presentation/make_pptx.py`, after `render.sh`).
 - **`story/*.svg`** — the panels (vector, 1600×900); **`story/png/*.png`** at 2×.
 - **`story/deck.html`** — the page-per-panel wrapper used to print the PDF.
 

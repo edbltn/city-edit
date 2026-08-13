@@ -127,8 +127,8 @@ def slide_sync():
     return add("05-vote-sync", "Vote sync", "".join(flow) + code +
         lines(TEXT_X, [
             "Casts get sent to Flask via a **POST**",
-            "Then Flask atomically publishes the **delta**",
-            "to **Redis** and obtains a **revision**",
+            "Then Flask writes it, claims a **revision**,",
+            "and publishes one **delta** to Redis",
             "Then all **Flask instances** subscribe to Redis",
             "and get the revision and delta",
             "Then they synchronize to each **client tab**",
