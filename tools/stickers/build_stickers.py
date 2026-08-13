@@ -275,7 +275,12 @@ def write_manifest(rows, out: Path) -> Path:
         w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
         for r in rows:
-            w.writerow({c: r.get(c) or "" for c in cols})
+            # `is None`, not `or ""` — sheet 0, column 0 and row 0 are all
+            # falsy, and blanking them turned the top-left sticker of every
+            # first sheet into a row with no grid position. The manifest exists
+            # to say which disc is in which cell; a hole there is the bug it is
+            # supposed to catch.
+            w.writerow({c: ("" if r.get(c) is None else r[c]) for c in cols})
     return path
 
 
