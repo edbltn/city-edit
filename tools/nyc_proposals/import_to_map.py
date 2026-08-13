@@ -97,6 +97,27 @@ def looks_like_project(title: str) -> bool:
     return (bool(title) and not SKIP_TITLE.search(title)
             and bool(PROJECT_TITLE.search(title)))
 
+
+# DOT's states for work that is still a proposal. Deliberately an allowlist:
+# this map is about what a street *could* become, so a project that has reached
+# Installation, Complete or Past Project has stopped being a proposal and
+# belongs to the built city instead. A denylist would import every state DOT
+# invents next, and the failure direction matters — importing a finished
+# project puts a change on the map that is already on the ground.
+ACTIVE_STATES = {"planning", "data collection & feedback"}
+
+
+def is_active_project(proj: dict) -> bool:
+    """Whether DOT still calls this project a proposal.
+
+    Unknown states (an unparseable page, a name DOT hasn't used before) count
+    as inactive. The 2026-08-12 audit of the first 60 imports is the evidence:
+    all 25 it kept were Planning or Data Collection & Feedback, and all 35 it
+    removed were something else — including every one of the five whose state
+    wouldn't parse. Skipping what we can't read reproduces that call exactly.
+    """
+    return (proj.get("state") or "").strip().lower() in ACTIVE_STATES
+
 # First matching rule wins. kind is the vote type's point_type: 'route' labels
 # surface as corridor (RBTP) proposals and MUST be cast on a corridor's edges;
 # 'point' labels surface as pins (PBTP) and are cast on the snapped point.
@@ -208,6 +229,11 @@ def borough_of(text: str) -> str:
 def plan_project(base: str, slug: str, proj: dict) -> dict | None:
     title = (proj.get("title") or "").strip()
     if proj.get("error") or not looks_like_project(title):
+        return None
+    # Gated here so every caller inherits it, including a bulk re-import. Note
+    # a projects file scraped before fetch_latest recorded `state` carries none,
+    # and so plans as nothing — re-fetch rather than loosening this.
+    if not is_active_project(proj):
         return None
     desc = (proj.get("description") or "").strip()
     text = f"{title}. {desc}"

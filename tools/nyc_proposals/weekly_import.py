@@ -32,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from fetch_latest import fetch_dotprojects
-from import_to_map import cast_entry, plan_project, voter_id
+from import_to_map import cast_entry, is_active_project, plan_project, voter_id
 
 BASE_URL = os.environ.get("BASE_URL", "https://cityedit.org")
 MAP_SLUG = os.environ.get("MAP_SLUG", "nyc-proposals")
@@ -101,6 +101,15 @@ def main() -> int:
         if not title or title in seen:
             continue
         seen.add(title)
+        # Reported separately from `filtered` with the state that caused it:
+        # this gate is an allowlist, so if DOT ever renames a state the imports
+        # stop dead, and the only way to notice is to see the skips.
+        if not is_active_project(proj):
+            stats["skipped-not-a-proposal"] = stats.get(
+                "skipped-not-a-proposal", 0) + 1
+            print(f"[WEEKLY] {'skip:' + (proj.get('state') or 'unknown'):>20}"
+                  f"  {(proj.get('title') or proj['url'])[:60]}", flush=True)
+            continue
         entry = plan_project(BASE_URL, MAP_SLUG, proj)
         if not entry:
             stats["filtered"] = stats.get("filtered", 0) + 1

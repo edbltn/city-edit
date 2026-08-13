@@ -77,6 +77,26 @@ def classify(url: str) -> str:
     return "project-home"  # bare slugs like /grand-concourse are project homepages
 
 
+def project_state(html: str) -> str:
+    """DOT's own status for a project page, or "" when the page doesn't say.
+
+    Each page ships a Drupal analytics blob naming the project's state in its
+    taxonomy — "Planning", "Data Collection & Feedback", "Past Project",
+    "Complete", "Installation". It's the only machine-readable statement of
+    whether a project is still a proposal or already built, which the prose
+    only implies ("Construction crews wrapped up work"). Callers treat an
+    unreadable state as unknown rather than active; see is_active_project.
+    """
+    m = re.search(r"window\.dataLayer\.push\((\{.*?\})\);", html, re.S)
+    if not m:
+        return ""
+    try:
+        taxonomy = (json.loads(m.group(1)).get("entityTaxonomy") or {})
+    except (json.JSONDecodeError, AttributeError):
+        return ""
+    return " / ".join((taxonomy.get("state") or {}).values())
+
+
 class PageMeta(HTMLParser):
     """Pull <title>, meta description, and PDF links out of a project page."""
 
@@ -131,6 +151,7 @@ def fetch_dotprojects(since: str, limit: int, fetch_pages: bool) -> list[dict]:
             entry["title"] = re.sub(r"\s*\|\s*Projects.*$", "", meta.title.strip())
             entry["description"] = meta.description
             entry["pdfs"] = sorted(set(meta.pdfs))
+            entry["state"] = project_state(html)
     return changed
 
 
