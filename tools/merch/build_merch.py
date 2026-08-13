@@ -27,6 +27,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+import back  # noqa: E402
 import iso  # noqa: E402
 import qr_tee  # noqa: E402
 from palette import (  # noqa: E402
@@ -50,6 +51,13 @@ PRODUCTS = [
         # Amber only on black: the accent is tuned for a dark surface and goes
         # muddy on white, where the greyscale ladder already carries the design.
         "ways": [("black", BLACK | {"letter_ink": ACCENT}), ("white", WHITE)],
+    },
+    {
+        "name": "tee-isoback",
+        "title": "Isometric Grid — back",
+        "size_in": "12 × 15 in",
+        "fn": back.tee_back_isogrid,
+        "ways": [("black", BLACK), ("white", WHITE)],
     },
     {
         "name": "tee-one-note",
