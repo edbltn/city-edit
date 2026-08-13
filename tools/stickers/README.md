@@ -184,6 +184,42 @@ Both are circles on 8.5×11 carrier sheets, so the art is not cropped — it is
 *registered*. `sheet.py` carries the grid and re-derives that it closes exactly
 on a Letter sheet; the build refuses to run if it does not.
 
+### The 2.5" grid is measured, not from a catalogue
+
+It shipped wrong once. Methdic publishes Avery-template compatibility rather
+than a dimensioned drawing, so the first version used the generic "12-up 2.5
+circle" layout — and every axis was out by about 0.03":
+
+| | generic | real | error |
+|---|---|---|---|
+| left margin | 0.250 | 0.280 | −0.030 |
+| h gap | 0.250 | 0.220 | +0.030 |
+| top margin | 0.406 | 0.368 | +0.038 |
+| v gap | 0.0625 | 0.088 | −0.026 |
+
+`validate()` could not catch it, because a wrong grid closes on the sheet just
+as neatly as a right one. And the errors compound in *opposite* directions —
+too much top margin with too little row gap, too little side margin with too
+much column gap — so the sheet splays rather than shifting, and no printer
+offset can dial it out.
+
+`check_die.py` measures the die off a photo of a blank sheet and compares:
+
+```bash
+./env/bin/python check_die.py --stock 2.5 --photo ../../data/sticker.jpg   --overlay /tmp/align.png
+```
+
+It only trusts a photo that passes two independent checks — the sheet's aspect
+must match Letter, and the measured die must match the stock's nominal diameter
+— so a bad photograph cannot "correct" a good grid. It is strict on **gaps**
+(pitch errors accumulate and cannot be corrected) and advisory on **margins**
+(a uniform shift, and the thing a photo measures worst — the sheet edge in a
+product shot is a drawn line, so ±0.02" is the floor).
+
+**The 3" grid is still the catalogue layout** (OnlineLabels OL2279), not a
+measurement, so it carries the same risk. Photograph a blank sheet and run
+`check_die.py --stock 3` before a long run.
+
 **Print at 100%.** Any "fit to page" or "shrink oversized pages" setting
 rescales by a percent or two — invisible in a photo, fatal on a die-cut grid,
 with every sticker creeping further off its circle towards the edges of the
