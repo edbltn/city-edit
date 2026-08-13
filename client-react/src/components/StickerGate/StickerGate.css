@@ -3,13 +3,24 @@
    ==========================================================================
    Built to be read one-handed, outdoors, at a kerb, by someone who has already
    decided. It borrows the sticker's own restraint: the printed line, an amber
-   rule, one button. The panel is narrow and the type is large because the
-   screen is small and the light is bad.
+   rule, one button.
+
+   ONE TYPE SIZE. Everything below the headline — the prompt, the button, the
+   skip link — is set at --gate-text. A screen with four elements does not need
+   a typographic hierarchy; it needs the headline to be the headline and
+   everything else to be quiet and identical. Sizing them apart was making the
+   skip link read as fine print, which it is not: it is one of the two ways
+   through this screen and both of them work.
 
    No theme is loaded here — ThemeProvider lives under the map subtree, and a
    scan never reaches it — so this uses the :root palette defaults only. */
 
 .sticker-gate {
+  --gate-text: var(--font-size-sm);
+  /* One number for the button box, so the <button> and the <a> that replaces it
+     in the denied state cannot disagree about their height. */
+  --gate-button-height: 52px;
+
   position: fixed;
   inset: 0;
   z-index: var(--z-modal);
@@ -20,6 +31,7 @@
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-main);
+  font-size: var(--gate-text);
 }
 
 .sticker-gate-spinner {
@@ -37,9 +49,10 @@
   text-align: center;
 }
 
-/* The line, set the way the sticker sets it: mono capitals, tracked, stacked.
-   Sized in vw with a ceiling so it fills a phone without wrapping oddly on a
-   desktop tab. */
+/* The headline is the one exception to the single size: it is the line off the
+   sticker, echoed back so the screen obviously belongs to the object in the
+   visitor's hand. Sized in vw with a ceiling so it fills a phone without
+   wrapping oddly on a desktop tab. */
 .sticker-gate-line {
   margin: 0;
   font-size: clamp(28px, 8.5vw, 40px);
@@ -53,14 +66,14 @@
 /* The sticker's amber band, flattened out. The only colour on the screen. */
 .sticker-gate-rule {
   height: 3px;
-  margin: var(--space-5) auto var(--space-5);
+  margin: var(--space-5) auto;
   width: 64px;
   background: var(--accent);
 }
 
 .sticker-gate-note {
   margin: 0 0 var(--space-4);
-  font-size: var(--font-size-sm);
+  font-size: var(--gate-text);
   line-height: 1.5;
   opacity: 0.75;
 }
@@ -70,18 +83,29 @@
   opacity: 1;
 }
 
+/* The button is a fixed box rather than padding plus a minimum, because the
+   denied state swaps the <button> for an <a> and the two elements do not agree
+   about default box sizing, line box, or appearance. Stating height, line-height
+   and box-sizing outright is what stops the anchor rendering fatter than the
+   button it replaced. */
 .sticker-gate-button {
-  display: block;
-  min-height: 52px;
-  padding: var(--space-3) var(--space-4);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: var(--gate-button-height);
+  padding: 0 var(--space-4);
   border: none;
+  border-radius: 0;
+  appearance: none;
   font-family: var(--font-main);
-  font-size: var(--font-size-md);
+  font-size: var(--gate-text);
+  line-height: 1;
   letter-spacing: 0.04em;
   color: var(--on-accent);
   background: var(--accent);
   text-decoration: none;
-  line-height: 28px;
   cursor: pointer;
 }
 
@@ -95,7 +119,7 @@
   padding: var(--space-2);
   border: none;
   font-family: var(--font-main);
-  font-size: var(--font-size-xs);
+  font-size: var(--gate-text);
   color: var(--ink);
   background: none;
   text-decoration: none;

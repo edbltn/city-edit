@@ -56,18 +56,25 @@ export function stickerMapUrl(
 }
 
 /**
- * The map URL for a scan we could not place — the browser refused location, or
- * the device could not get a fix.
+ * The map URL for a scan with no location yet — the visitor skipped the prompt,
+ * the browser refused, or the device could not get a fix.
  *
- * Still worth opening: the vote type is preselected and the map is live, so the
- * scanner can drop the pin on the corner themselves. It carries no `?stk=`,
- * because a hand-placed pin is a guess about where the *user* is, not evidence
- * about where the *sticker* is, and pinning a sticker to a guess would be worse
- * than leaving it unresolved for the next person.
+ * The vote type is preselected and the map is live, so the scanner places the
+ * selection themselves. It carries `?stk=` exactly like the located path: the
+ * binding is earned by the CAST, and a vote someone placed by hand is no less a
+ * commitment than one placed over a GPS fix — arguably more, since they looked
+ * at the map and chose the spot.
+ *
+ * (This used to withhold the code, on the theory that a hand-placed pin says
+ * where the user guessed rather than where the sticker is. That was wrong in
+ * practice: it meant the single most deliberate way to use a sticker was the one
+ * way that never bound it, so a code could be scanned and voted from all day and
+ * still ask the next person for a location.)
  */
 export function stickerFallbackUrl(target: StickerTarget): string {
   const params = new URLSearchParams();
   params.set("vt", target.voteType);
   params.set("src", target.src);
+  params.set("stk", target.code);
   return `/m/${target.mapSlug}?${params.toString()}`;
 }

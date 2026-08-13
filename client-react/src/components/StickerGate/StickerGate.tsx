@@ -18,9 +18,11 @@
 // screen obviously belongs to the object in their hand, what the tap will do,
 // and the button. Nothing about the project, no sign-up, no explainer.
 //
-// Refusing is a first-class outcome, not an error. The map still opens with the
-// vote type ready and the pin left to them; the sticker simply stays unresolved
-// for the next person, which is the correct thing to record — see link.ts.
+// Skipping is a first-class outcome, not an error. The map opens with the vote
+// type ready and the selection left to them — and it still binds the code when
+// they cast, because the binding is earned by the VOTE, not by how the spot was
+// chosen. Someone who places it by hand looked at the map and picked; that is
+// the most deliberate way to use a sticker, not the least.
 
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -129,25 +131,18 @@ export function StickerGate({ code }: { code: string }) {
         {phase.at === "denied" ? (
           <>
             <p className="sticker-gate-note">{phase.reason}</p>
-            <p className="sticker-gate-note">
-              Open the map and drop the pin on the spot yourself.
-            </p>
+            {/* One way out, not two. Offering "try again" next to "open the
+                map" asks someone who has just declined a permission to make the
+                same decision twice, and the map is where they were going. */}
             <a className="sticker-gate-button" href={stickerFallbackUrl(target)}>
               Open the map
             </a>
-            <button
-              type="button"
-              className="sticker-gate-secondary"
-              onClick={() => share(target)}
-            >
-              Try location again
-            </button>
           </>
         ) : (
           <>
             <p className="sticker-gate-note">
-              Share your location and this becomes a vote for{" "}
-              <b>{target.voteType.toLowerCase()}</b> right where you're standing.
+              Share your location to vote for{" "}
+              <b>{target.voteType.toLowerCase()}</b> right where you are standing.
             </p>
             <button
               type="button"
@@ -158,7 +153,7 @@ export function StickerGate({ code }: { code: string }) {
               {phase.at === "locating" ? "Finding you…" : "Share my location"}
             </button>
             <a className="sticker-gate-secondary" href={stickerFallbackUrl(target)}>
-              Skip — I'll place it myself
+              Skip, I will place it myself.
             </a>
           </>
         )}

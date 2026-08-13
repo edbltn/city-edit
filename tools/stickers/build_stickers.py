@@ -90,44 +90,101 @@ def sheet_svg(stock, placements, *, proof: bool) -> str:
     )
 
 
-def plan(stock, keys: list[str], copies: int, style: str = "flat",
+def half_split(stock) -> tuple[str, int]:
+    """How to cut a sheet in two: ("rows"|"cols", how many of them per half).
+
+    Derived rather than configured, because only one axis of each grid divides
+    evenly. The 12-up is 3 across by 4 down, so it splits into a top half and a
+    bottom half of two rows each. The 6-up is 2 across by 3 down — three rows
+    will not halve — so it splits down the middle into a left and a right
+    column. Either way each half is exactly half the sheet, and the boundary
+    falls on a straight line the person peeling them can see.
+    """
+    if stock.down % 2 == 0:
+        return "rows", stock.down // 2
+    if stock.across % 2 == 0:
+        return "cols", stock.across // 2
+    raise ValueError(
+        f'{stock.key}": a {stock.across}x{stock.down} grid has no even axis, '
+        f"so it cannot carry two messages in equal halves"
+    )
+
+
+def pair_up(keys: list[str]) -> list[tuple[str, str | None]]:
+    """Two messages to a sheet, in the order given.
+
+    An odd message out gets a sheet to itself rather than half a sheet and a
+    gap: a half-blank sheet wastes the labels, which are the expensive part.
+    """
+    return [(keys[i], keys[i + 1] if i + 1 < len(keys) else None)
+            for i in range(0, len(keys), 2)]
+
+
+def plan(stock, keys: list[str], sheets: int, style: str = "flat",
          way: str = "dark") -> list[dict]:
     """Mint every sticker in the run and assign it a sheet + grid cell.
 
-    One message per sheet: a sheet is a stack of the same complaint, which is
-    how they get used — you go out to fix one thing at a time. The index a code
-    is minted at is global per message and starts at 0, so re-running with a
-    larger --copies extends the run instead of reshuffling it.
+    TWO messages to a sheet, split down the middle (see half_split). A sheet of
+    twelve identical stickers was the wrong unit: you do not go out to fix one
+    thing twelve times, you go out with a couple of complaints and whichever
+    poles you pass. Half a sheet of each means one sheet in a pocket covers two
+    kinds of problem.
+
+    The index a code is minted at is per message and starts at 0, so asking for
+    more sheets EXTENDS the run rather than reshuffling it — codes already
+    printed keep their identity.
     """
+    axis, span = half_split(stock)
+    per_half = stock.per_sheet // 2
+
     rows = []
-    for key in keys:
-        s = campaign.BY_KEY[key]
-        run = codes_mod.mint_run(key, copies, stock.key)
-        for i, code in enumerate(run):
-            rows.append({
-                "stock": stock.key,
-                "message": key,
-                "line": s.display,
-                "vote_type": s.vote_type,
-                "kind": s.kind,
-                "src": s.src,
-                "code": code,
-                "url": codes_mod.url_for(code),
-                "sheet": i // stock.per_sheet,
-                "col": (i % stock.per_sheet) % stock.across,
-                "row": (i % stock.per_sheet) // stock.across,
-                # Filled in by paint() when --art is on; empty means the plain
-                # vector code, which is what every sticker gets by default.
-                "art": None,
-                #: "flat" (the drawn module grid) or "iso" (the isometric city).
-                #: Recorded per sticker so verify_scan re-renders exactly what
-                #: was printed rather than assuming the default.
-                "style": style,
-                #: "light" (dark ink on bare stock) or "dark" (the app's
-                #: terminal palette, printed). Recorded per sticker so
-                #: verify_scan re-renders what was printed.
-                "colourway": way,
-            })
+    for pair_no, (a, b) in enumerate(pair_up(keys)):
+        # An unpaired message fills the whole sheet rather than half of one.
+        halves = [(a, 0), (b, 1)] if b else [(a, 0), (a, 1)]
+        for key, half in halves:
+            s = campaign.BY_KEY[key]
+            # Where this half's codes start in the message's own mint sequence.
+            # Zero for a paired message, which owns one half. For the unpaired
+            # case the SAME message fills both halves, so the second half has to
+            # start after the first or the two would be the same twelve codes —
+            # and two stickers with one identity share a pole.
+            start = 0 if b else half * per_half * sheets
+            run = codes_mod.mint_run(key, per_half * sheets, stock.key, start=start)
+            for i, code in enumerate(run):
+                sheet_no, slot = divmod(i, per_half)
+                if axis == "rows":
+                    row = half * span + slot // stock.across
+                    col = slot % stock.across
+                else:
+                    col = half * span + slot % span
+                    row = slot // span
+                rows.append({
+                    "stock": stock.key,
+                    "message": key,
+                    "line": s.display,
+                    "vote_type": s.vote_type,
+                    "kind": s.kind,
+                    "src": s.src,
+                    "code": code,
+                    "url": codes_mod.url_for(code),
+                    #: Sheets are numbered across the whole run, and named after
+                    #: the pair they carry, so a printed sheet says what is on it.
+                    "sheet": pair_no * sheets + sheet_no,
+                    "pair": f"{a}+{b}" if b else a,
+                    "col": col,
+                    "row": row,
+                    # Filled in by paint() when --art is on; empty means the plain
+                    # vector code, which is what every sticker gets by default.
+                    "art": None,
+                    #: "flat" (the drawn module grid) or "iso" (the isometric city).
+                    #: Recorded per sticker so verify_scan re-renders exactly what
+                    #: was printed rather than assuming the default.
+                    "style": style,
+                    #: "light" (dark ink on bare stock) or "dark" (the app's
+                    #: terminal palette, printed). Recorded per sticker so
+                    #: verify_scan re-renders what was printed.
+                    "colourway": way,
+                })
     return rows
 
 
@@ -173,14 +230,14 @@ def write_sheets(stock, rows, out: Path, *, proof: bool) -> list[Path]:
     written = []
     by_sheet = {}
     for r in rows:
-        by_sheet.setdefault((r["message"], r["sheet"]), []).append(r)
+        by_sheet.setdefault((r.get("pair") or r["message"], r["sheet"]), []).append(r)
 
-    for (message, n), group in sorted(by_sheet.items()):
+    for (pair, n), group in sorted(by_sheet.items()):
         placements = [(r["col"], r["row"], r["line"], r["url"],
                        Path(r["art"]) if r.get("art") else None,
                        r.get("style") or "flat",
                        r.get("colourway") or "dark") for r in group]
-        stem = f'{message}-{n + 1}'
+        stem = f'{pair}-{n + 1}'
 
         svg = sheet_svg(stock, placements, proof=False)
         (out / f"{stem}.svg").write_text(svg)
@@ -213,7 +270,7 @@ def write_sheets(stock, rows, out: Path, *, proof: bool) -> list[Path]:
 def write_manifest(rows, out: Path) -> Path:
     path = out / "manifest.csv"
     cols = ["stock", "message", "line", "vote_type", "kind", "src", "code",
-            "url", "sheet", "col", "row", "art", "style", "colourway"]
+            "url", "sheet", "pair", "col", "row", "art", "style", "colourway"]
     with path.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
@@ -287,7 +344,7 @@ def contact_sheet(stock, keys: list[str], rows, out: Path) -> Path:
           </figcaption>
         </figure>""")
 
-    sheets = len({(r["message"], r["sheet"]) for r in rows})
+    sheets = len({(r.get("pair"), r["sheet"]) for r in rows})
     path = out / "contact-sheet.html"
     path.write_text(f"""<!doctype html>
 <meta charset="utf-8"><title>City Edit stickers — {stock.die}"</title>
@@ -350,8 +407,9 @@ def main():
                     help='which label stock (default: 2.5")')
     ap.add_argument("--messages", help="comma-separated message keys")
     ap.add_argument("--all", action="store_true", help="every message in the line")
-    ap.add_argument("--copies", type=int, default=None,
-                    help="stickers per message (default: one full sheet)")
+    ap.add_argument("--sheets", type=int, default=1,
+                    help="sheets per PAIR of messages (default: 1). Each sheet "
+                         "carries two messages, half the sheet each")
     ap.add_argument("--proof", action="store_true",
                     help="also write registration proofs with die outlines")
     ap.add_argument("--clean", action="store_true", help="wipe out/ first")
@@ -414,7 +472,7 @@ def main():
     else:
         keys = campaign.STARTERS
 
-    copies = args.copies or stock.per_sheet
+    sheets = max(1, args.sheets)
 
     out = OUT / stock.key
     if args.clean and out.exists():
@@ -427,7 +485,7 @@ def main():
         if stray.is_file():
             stray.unlink()
 
-    rows = plan(stock, keys, copies, args.style, args.colourway)
+    rows = plan(stock, keys, sheets, args.style, args.colourway)
 
     if args.art or args.art_dry_run:
         if not args.art:
@@ -447,12 +505,13 @@ def main():
 
     (out / "run.json").write_text(json.dumps({
         "stock": stock.key, "asin": stock.asin, "campaign": codes_mod.CAMPAIGN,
-        "messages": keys, "copies": copies, "stickers": len(rows),
-        "sheets": len({(r["message"], r["sheet"]) for r in rows}),
+        "messages": keys, "sheetsPerPair": sheets, "stickers": len(rows),
+        "sheets": len({(r.get("pair"), r["sheet"]) for r in rows}),
     }, indent=2) + "\n")
 
     print(f'{stock.die}" — {len(rows)} stickers, '
-          f'{len({(r["message"], r["sheet"]) for r in rows})} sheet(s)')
+          f'{len({(r.get("pair"), r["sheet"]) for r in rows})} sheet(s), '
+          f'two messages per sheet')
     for key in keys:
         s = campaign.BY_KEY[key]
         url = codes_mod.url_for(codes_mod.mint(key, 0, stock.key))

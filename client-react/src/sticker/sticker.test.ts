@@ -85,11 +85,16 @@ describe("stickerFallbackUrl", () => {
     expect(url.searchParams.get("src")).toBe("stk-fix");
   });
 
-  it("never pins the sticker: a hand-placed pin says where the USER guessed, "
-    + "not where the sticker is", () => {
-    const p = params(stickerFallbackUrl(TARGET));
-    expect(p.get("stk")).toBeNull();
-    expect(p.get("w")).toBeNull();
+  it("still carries the code, so a hand-placed vote binds like any other", () => {
+    // This is the regression that matters: withholding `stk` here meant the most
+    // deliberate way to use a sticker — look at the map, pick the spot — was the
+    // one way that never bound it, so a code could be voted from all day and
+    // still ask the next person for a location.
+    expect(params(stickerFallbackUrl(TARGET)).get("stk")).toBe("xupkb");
+  });
+
+  it("carries no selection: the visitor places it, we do not guess", () => {
+    expect(params(stickerFallbackUrl(TARGET)).get("w")).toBeNull();
   });
 });
 

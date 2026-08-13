@@ -152,11 +152,13 @@ TRACKING = 0.02          # em, on the line. Kept small: inside a circle the
                          # binding constraint is the CHORD, so every em of
                          # tracking is paid for directly in type size.
 LEADING = 1.00           # × type size
-WEIGHT = 700             # the variable font's maximum. Free, in the only sense
-                         # that matters here: Red Hat Mono is monospaced, so its
-                         # advance is identical at every weight — a bolder cut
-                         # sets at exactly the same size and simply puts more
-                         # ink on the paper.
+WEIGHT = 400             # regular, not the bold this used to be. Weight is free
+                         # either way — Red Hat Mono is monospaced, so its
+                         # advance is identical at every cut and the line sets at
+                         # exactly the same size — so this is purely how it
+                         # looks, and the lighter cut reads better: white on
+                         # black already thickens optically, and the bold was
+                         # closing up the counters at sticker scale.
 #: The city's diamond width, × die. It is a square stood on its corner — see
 #: isoqr.square_k — so it is as tall as it is wide, and every step up is paid
 #: for directly in type size. Unlike the flat code it does NOT buy module pitch

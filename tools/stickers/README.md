@@ -15,6 +15,14 @@ python3 -m venv env && uv pip install --python ./env/bin/python -r requirements.
 Everything lands in `out/<stock>/` (gitignored — the build is deterministic, so
 it is always exactly reproducible from this directory).
 
+**Two messages to a sheet**, split down the middle: a sheet of twelve identical
+stickers was the wrong unit, because you do not go out to fix one thing twelve
+times — you go out with a couple of complaints and whichever poles you pass. The
+12-up splits into a top and bottom half of two rows each; the 6-up has an odd
+number of rows so it splits into a left and a right column instead. Either way
+each half is exactly half the sheet and the boundary is a straight line you can
+see while peeling. `--sheets N` prints N sheets per pair.
+
 ## What a scan does
 
 A sticker is a code on a pole. It knows what it wants — one vote type on the
@@ -27,14 +35,19 @@ someone puts it somewhere.
 2. **They share it.** The map opens at that spot with the vote type
    preselected, ready to cast.
 3. **They vote.** *That* is when the sticker gets pinned — a shared location is a
-   claim, a cast vote is a commitment. The code now IS that place.
+   claim, a cast vote is a commitment. The code now IS that place, whether the
+   vote was a single pin or a whole route, and whether the spot came from GPS or
+   was placed by hand.
 4. **Every scan after that** goes straight to the vote at that location. Nobody
    is ever asked for their location twice for the same sticker.
 
-Refusing location is a supported ending, not an error: the map still opens with
-the vote type ready and the pin left to the visitor, and the sticker stays
-unresolved for the next person — because a hand-placed pin says where the *user*
-guessed, not where the *sticker* is.
+Skipping the prompt is a supported ending, not an error: the map opens with the
+vote type ready and the selection left to the visitor, and it **still binds the
+code when they cast**. The binding is earned by the vote, not by how the spot
+was chosen — someone who looks at the map and picks the corner is being more
+deliberate than a GPS fix, not less. (This used to withhold the binding on that
+path, which meant the most considered way to use a sticker was the one way that
+never bound it.)
 
 The pin is write-once and the race is settled in SQL, so two people scanning a
 fresh sticker at the same moment cannot fight over where it lives.
