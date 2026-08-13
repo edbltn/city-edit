@@ -20,15 +20,15 @@ from typo import face, size_to_fit, text
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "stickers"))
 
-import isoqr  # noqa: E402
+import cityscape  # noqa: E402
 
-# 11 × 11 in. The composition is near-square, and a taller canvas would just be
-# empty print area that the uploader scales the artwork down to fill.
-W, H = 3300, 3300
-# Wider than the flat code it replaced. A diamond reads smaller than its
-# bounding box — the corners are empty — so matching the old square's width
-# would have left it looking like an afterthought under the type.
-QR_SIZE = 1850
+# 11 × 13 in. Was square when the code was a small flat panel; the district
+# around it is far taller than that was, and squeezing it back into a square
+# canvas clipped the headline off the top.
+W, H = 3300, 3900
+# The scene, not the code — the code is about 38% of this. Wide, because the
+# district fading out around it is most of what you see.
+QR_SIZE = 2950
 
 HEART = "@"                 # stands in for the mark inside a monospaced line
 LINE = "I @ THIS CITY"
@@ -110,8 +110,7 @@ def tee_one_note(ink: str, ground: str, *,
     # it — its light half IS the garment — so on a black shirt this is a city
     # of pale towers rather than a white sticker, which is both less ink and
     # much more the thing the shirt is about.
-    tones = isoqr.tones_for(ground, ink)
-    qr_body, qr_w, qr_h, _pitch = isoqr.block_for_width(url, tones, QR_SIZE)
+    qr_body, qr_w, qr_h = cityscape.block_for_width(url, ground, ink, QR_SIZE)
 
     # Measure the whole column, then centre it. Laying out from a fixed top
     # leaves the slack at the bottom, which reads as a design that ran out.

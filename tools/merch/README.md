@@ -23,9 +23,16 @@ Two designs, two colourways each. That is the whole catalogue.
 | 02 | **One Note**, front — `I ♥ THIS CITY / BUT I HAVE ONE NOTE` above the same isometric code | white on black · black on white | 3300 × 3300 (11 × 11 in) |
 | — | **PLS FIX**, back — two words over the code as a city. **Both shirts wear it.** | white on black · black on white | 3600 × 4500 (12 × 15 in) |
 
-Every code in the line is the isometric one. It needs no light panel behind it —
+Every code in the line is the isometric one, and each stands in a wider city
+that fades out around it (`cityscape.py`). It needs no light panel behind it —
 its light half *is* the garment — so a black shirt gets a city of pale towers
-rather than a white sticker, which is less ink and much more the point.
+dissolving into black rather than a white sticker.
+
+⚠️ **The gap between the code and the first building is the quiet zone.** A QR
+cannot be found without it. `MARGIN` and `SPAN` in `cityscape.py` were swept
+against a decode of the finished art on both garments *and* across eight capture
+widths — do that again if you touch them, because the failure mode is "reads
+fine on screen, not off a shirt".
 
 **One code per shirt, not per print.** A One Note shirt carries the code on both
 faces and they are the *same* code: two would bind to two different proposals,
@@ -52,7 +59,8 @@ tones will read off.
 - `typo.py` — Red Hat Mono as vector outlines, so no print shop needs the font
   installed. The variable font is vendored in `fonts/` under the OFL
 - `iso.py` — design 01 front. The projection, the volumes, the standing letters
-- `back.py` — design 01 back. Wraps `tools/stickers/isoqr.py` in the entreaty
+- `back.py` — the PLS FIX back, worn by both shirts
+- `cityscape.py` — the district that fades out around a code
 - `qr_tee.py` — design 02. The heart, the type, the code
 - `tee_codes.py` — one code per shirt, minted deterministically
 - `build_merch.py` — the four SKUs and the proof sheet
