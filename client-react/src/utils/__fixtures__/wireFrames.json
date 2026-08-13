@@ -1,0 +1,148 @@
+[
+  {
+    "name": "empty",
+    "hex": "ce010100070600",
+    "frame": {
+      "kind": 1,
+      "rev": 7,
+      "baseRev": 6,
+      "truncated": false,
+      "groups": []
+    }
+  },
+  {
+    "name": "single_vote",
+    "hex": "ce0101002928012900e3ca041350726f7465637465642062696b65206c616e65039f10030001030008010201b10e0300",
+    "frame": {
+      "kind": 1,
+      "rev": 41,
+      "baseRev": 40,
+      "truncated": false,
+      "groups": [
+        {
+          "rev": 41,
+          "mode": 0,
+          "vtId": 75107,
+          "label": "Protected bike lane",
+          "edges": {
+            "2079": [
+              3,
+              0
+            ],
+            "2080": [
+              3,
+              0
+            ],
+            "2088": [
+              1,
+              2
+            ]
+          },
+          "blocks": {
+            "1841": [
+              3,
+              0
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "two_groups",
+    "hex": "ce0101002b29022a000f1350726f7465637465642062696b65206c616e6501050100010201002b02b5c5040e576964656e207369646577616c6b0109000400",
+    "frame": {
+      "kind": 1,
+      "rev": 43,
+      "baseRev": 41,
+      "truncated": false,
+      "groups": [
+        {
+          "rev": 42,
+          "mode": 0,
+          "vtId": 15,
+          "label": "Protected bike lane",
+          "edges": {
+            "5": [
+              1,
+              0
+            ]
+          },
+          "blocks": {
+            "2": [
+              1,
+              0
+            ]
+          }
+        },
+        {
+          "rev": 43,
+          "mode": 2,
+          "vtId": 74421,
+          "label": "Widen sidewalk",
+          "edges": {
+            "9": [
+              0,
+              4
+            ]
+          },
+          "blocks": {}
+        }
+      ]
+    }
+  },
+  {
+    "name": "sync_truncated",
+    "hex": "ce01020178640178030108416464207472656502000100cfaec9018080040200",
+    "frame": {
+      "kind": 2,
+      "rev": 120,
+      "baseRev": 100,
+      "truncated": true,
+      "groups": [
+        {
+          "rev": 120,
+          "mode": 3,
+          "vtId": 1,
+          "label": "Add tree",
+          "edges": {
+            "0": [
+              1,
+              0
+            ],
+            "3299151": [
+              65536,
+              2
+            ]
+          },
+          "blocks": {}
+        }
+      ]
+    }
+  },
+  {
+    "name": "unicode_label",
+    "hex": "ce0101000100010101031442c3a4756d652070666c616e7a656e20f09f8cb30100010000",
+    "frame": {
+      "kind": 1,
+      "rev": 1,
+      "baseRev": 0,
+      "truncated": false,
+      "groups": [
+        {
+          "rev": 1,
+          "mode": 1,
+          "vtId": 3,
+          "label": "Bäume pflanzen 🌳",
+          "edges": {
+            "0": [
+              1,
+              0
+            ]
+          },
+          "blocks": {}
+        }
+      ]
+    }
+  }
+]

@@ -282,7 +282,7 @@ interface GraphLayerProps {
 
 export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, hoverProposalPoint = null, onWaypointMatch, onIndicatorClick, onRouteProposalClick, clusterExploderRef, onRemoveProposal, onRemoveSelected, onClearRoute, onRouteProposalRemove, routeProposalAtRef, suppressHover = false, pathEdgeIds = null, onProposalDrop, onPinnedResolve }: GraphLayerProps) {
   const map = useMap();
-  const { subscribeToDelta } = useWebSocketContext();
+  const { subscribeToDelta, subscribeToSync, subscribeToOpen, requestSync } = useWebSocketContext();
   const { setSnapFn, setResolveVoteEdgeId, setResolveTopLabelForPath, setCurrentSnap, isDraggingRef: graphDraggingRef, snapToGraph, setDragging } = useGraphSnap();
   const { setBlockMaterializer, setCorridorSegmentResolver, notifyCorridorsChanged } = useRoute();
   // Ghost-pin drag (the dotted-trail + ghost-kite mechanism the path-drag uses).
@@ -2288,6 +2288,68 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     });
     return unsubscribe;
   }, [subscribeToDelta, themeMode, applyDeltaToGraphData]);
+
+  // Sync packets — the repair for a backgrounded tab.
+  //
+  // A hidden tab still holds its WebSocket, but a throttled/suspended one
+  // misses deltas, and gap detection above only fires when the NEXT delta
+  // arrives. So on foreground (and on every socket open) we ask the server
+  // what changed since our last applied revision. The reply carries only the
+  // (edge|block, vote type) cells that actually moved — a kilobyte or so —
+  // instead of the ~57 KB whole-city /api/graph-votes body a refetch pulls.
+  //
+  // The counts are absolute SETs, so applying them is idempotent: a cell we
+  // already had is a no-op, and one we missed lands at the server's truth.
+  // TRUNCATED means the server could NOT prove its log covered our gap, and
+  // then we do exactly what we did before this existed — one full refetch.
+  useEffect(() => {
+    const unsubscribeSync = subscribeToSync((sync) => {
+      if (sync.truncated) {
+        dwarn("votes", `sync truncated (have rev ${lastRevRef.current}) — full refetch`);
+        fetchVotesRef.current();
+        return;
+      }
+      if (!graphDataRef.current?.edge_votes) return;  // initial load will cover it
+      if (sync.baseRev > lastRevRef.current) {
+        // The server's window starts past where we are: it can't bridge us.
+        dwarn("votes", `sync starts at rev ${sync.baseRev}, we have `
+          + `${lastRevRef.current} — full refetch`);
+        fetchVotesRef.current();
+        return;
+      }
+      const applied = sync.deltas.filter((d) => d.m === themeMode);
+      for (const d of applied) applyDeltaToGraphData(d);
+      // The frame is authoritative for the whole (baseRev, rev] window, so
+      // land on its head even when a group was filtered out by mode — the
+      // per-delta rev bookkeeping inside applyDeltaToGraphData only tracks
+      // what it applied.
+      lastRevRef.current = Math.max(lastRevRef.current, sync.rev);
+      if (applied.length > 0) {
+        dlog("votes", `sync applied ${applied.length} group(s) → rev ${sync.rev}`);
+        refreshHeatmapDisplayRef.current();
+        requestProposalsRecomputeRef.current();
+      }
+    });
+
+    // Ask for a catch-up whenever we might have missed deltas: the tab coming
+    // back to the foreground, and every socket open (a reconnect drops
+    // whatever was published while it was down). lastRev 0 means votes haven't
+    // loaded yet — the initial fetch covers that case.
+    const askForSync = () => {
+      if (lastRevRef.current > 0) requestSync(lastRevRef.current);
+    };
+    const onVisibility = () => { if (!document.hidden) askForSync(); };
+    const unsubscribeOpen = subscribeToOpen(askForSync);
+    document.addEventListener("visibilitychange", onVisibility);
+    // bfcache restore doesn't fire visibilitychange in every browser.
+    window.addEventListener("pageshow", askForSync);
+    return () => {
+      unsubscribeSync();
+      unsubscribeOpen();
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", askForSync);
+    };
+  }, [subscribeToSync, subscribeToOpen, requestSync, themeMode, applyDeltaToGraphData]);
 
   // Optimistic vote — apply this user's vote transition (prevDir → newDir)
   // immediately on cast so the heatmap and top-proposal counts update before the

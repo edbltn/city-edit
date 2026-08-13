@@ -83,6 +83,110 @@ def channel_key(slug: str) -> str:
 def revision_key(slug: str) -> str:
     return f"vote_rev:{slug}"
 
+
+def delta_log_key(slug: str) -> str:
+    return f"deltalog:{slug}"
+
+
+# ── Recent-delta log (backs the WS sync packet) ────────────────────────────
+# A backgrounded tab misses deltas. Before this, the only repair was a full
+# /api/graph-votes refetch (~57 KB on nyc-bikes, whole-city, through the
+# debounced snapshot cache). The log keeps the last few minutes of deltas so a
+# foregrounding client can be repaired with only the cells that actually
+# changed — usually well under a kilobyte.
+#
+# Shape: a Redis SORTED SET scored by revision, so a client that asks "what
+# changed after rev N" costs one ZRANGEBYSCORE returning only the entries it
+# needs, not a decode of the whole log. Members are base64 of the canonical
+# binary frame (the app's Redis client runs decode_responses=True, so raw
+# bytes can't ride in a value).
+#
+# Memory: the median cast on nyc-bikes is 89 edges ≈ 0.9 KB base64, so a full
+# log is ~120 KB per map, ~2.5 MB across every map on the instance. Memorystore
+# is 1 GB with allkeys-lru and evicting the vote hashes themselves is the
+# failure that matters, so the log is bounded BOTH ways: SYNC_LOG_MAX entries
+# and SYNC_LOG_TTL seconds. It is pure cache — losing it costs a client one
+# full refetch, which is exactly today's behaviour.
+
+SYNC_LOG_MAX = 128     # entries retained per map
+SYNC_LOG_TTL = 900     # seconds; a tab backgrounded longer just refetches
+
+
+def append_delta_log(redis_client, slug: str, rev: int, frame_b64: str) -> None:
+    """Record one delta's encoded frame under its revision. Best effort — the
+    log is a cache, and a vote must never fail because the log did."""
+    try:
+        key = delta_log_key(slug)
+        pipe = redis_client.pipeline()
+        pipe.zadd(key, {frame_b64: rev})
+        pipe.zremrangebyrank(key, 0, -(SYNC_LOG_MAX + 1))
+        pipe.expire(key, SYNC_LOG_TTL)
+        pipe.execute()
+    except Exception as e:
+        logger.warning(f"[SYNCLOG] append failed for {slug}: {e}")
+
+
+def read_delta_log(redis_client, slug: str, since: int) -> tuple[list, int | None]:
+    """Return (entries newer than `since`, oldest revision still logged).
+
+    `oldest` is None when the log is empty — the caller uses it to decide
+    whether the log can actually cover the client's gap."""
+    key = delta_log_key(slug)
+    entries = redis_client.zrangebyscore(key, f"({since}", "+inf")
+    head = redis_client.zrange(key, 0, 0, withscores=True)
+    oldest = int(head[0][1]) if head else None
+    return entries, oldest
+
+
+def build_sync_frame(redis_client, slug: str, since: int) -> bytes:
+    """Encode the SYNC frame that carries a client from rev `since` to head.
+
+    Coalesced: one group per (mode, vote type), counts merged last-write-wins.
+    That is lossless because the counts are absolute post-write values — the
+    same argument DeltaHub already makes for coalescing its flush window.
+
+    Sets the TRUNCATED flag whenever the log cannot PROVE it covers
+    (since, head]. Every delta claims exactly one revision (INCR then publish),
+    so full coverage means exactly head - since logged entries in that range.
+    Anything less means a revision moved without publishing a delta — a
+    hydration, a resnap, a manual `INCR vote_rev:<slug>` — and those change
+    counts the log can't describe. The client answers TRUNCATED with the full
+    /api/graph-votes refetch it does today, so the sync packet is strictly an
+    improvement: it repairs the common case cheaply and degrades to the old
+    path rather than to a wrong heatmap."""
+    import base64
+
+    import wire_codec
+
+    head = int(redis_client.get(revision_key(slug)) or 0)
+    # A client ahead of the server (its own optimistic cast raced this read)
+    # has nothing to catch up on. Don't report that as a gap.
+    if since >= head:
+        return wire_codec.encode_frame(
+            wire_codec.Frame(wire_codec.KIND_SYNC, head, head, []))
+
+    entries, oldest = read_delta_log(redis_client, slug, since)
+    expected = head - since
+    truncated = (
+        len(entries) != expected                       # a rev with no delta
+        or oldest is None                              # log empty / evicted
+        or oldest > since + 1                          # log starts too late
+    )
+    groups = []
+    if not truncated:
+        try:
+            for e in entries:
+                frame = wire_codec.decode_frame(base64.b64decode(e))
+                groups.extend(frame.groups)
+            groups = wire_codec.coalesce(groups)
+        except Exception as ex:
+            logger.warning(f"[SYNCLOG] undecodable entry for {slug}: {ex}")
+            truncated, groups = True, []
+    base = since if not truncated else head
+    return wire_codec.encode_frame(
+        wire_codec.Frame(wire_codec.KIND_SYNC, head, base, groups,
+                         truncated=truncated))
+
 # ── Mode enum ──────────────────────────────────────────────────────────────
 
 MODE_IDS: dict[str, int] = {
@@ -286,6 +390,20 @@ def publish_delta(
     if block_counts is not None:
         delta["blockCounts"] = {str(b): counts for b, counts in block_counts.items()}
     redis_client.publish(channel_key(slug), json.dumps(delta))
+    # Record the same delta in the sync log, in the SAME call that publishes
+    # it, so the log can never drift from the stream it is meant to replay.
+    # Best effort: encoding or Redis trouble must not fail a vote.
+    if vt_counts:
+        try:
+            import base64
+            import wire_codec
+            group = wire_codec.group_from_delta(delta, mode)
+            frame = wire_codec.Frame(wire_codec.KIND_DELTA, rev, rev - 1, [group])
+            append_delta_log(
+                redis_client, slug,
+                rev, base64.b64encode(wire_codec.encode_frame(frame)).decode("ascii"))
+        except Exception as e:
+            logger.warning(f"[SYNCLOG] could not log delta rev {rev} for {slug}: {e}")
     return rev
 
 

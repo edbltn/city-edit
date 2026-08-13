@@ -31,6 +31,8 @@ import queue
 import threading
 import time
 
+import vote_store
+
 logger = logging.getLogger(__name__)
 
 FLUSH_INTERVAL = 0.1   # seconds between merged flushes per map
@@ -38,14 +40,41 @@ HOLE_GRACE = 0.3       # how long to hold a batch that leaves a rev hole
 QUEUE_MAX = 256        # merged payloads a client may lag before resync
 
 
+def _encode_binary(buf: list) -> bytes | None:
+    """Merged flush → one binary DELTA frame, or None if it can't be encoded.
+
+    Falling back to None (and therefore to the JSON payload) rather than
+    raising keeps a malformed delta from taking down the whole flush for every
+    binary client on the map."""
+    import wire_codec
+
+    try:
+        groups = []
+        for d in buf:
+            mode = vote_store.mode_to_int(d.get("m", "walk"))
+            groups.append(wire_codec.group_from_delta(d, mode))
+        revs = [g.rev for g in groups]
+        return wire_codec.encode_frame(wire_codec.Frame(
+            wire_codec.KIND_DELTA, max(revs), min(revs) - 1, groups))
+    except Exception as e:
+        logger.warning(f"[DELTAHUB] binary encode failed, sending JSON: {e}")
+        return None
+
+
 class Subscriber:
-    """One connected WebSocket client: its payload queue + overflow signal."""
+    """One connected WebSocket client: its payload queue + overflow signal.
 
-    __slots__ = ("q", "overflowed")
+    `binary` records whether this client announced binary-frame support in its
+    WS hello. Each flush builds BOTH payloads once (see _flush) and every
+    subscriber takes the one it can read, so the hub keeps its O(1)-encodes-
+    per-flush property while old and new clients share the same map."""
 
-    def __init__(self):
+    __slots__ = ("q", "overflowed", "binary")
+
+    def __init__(self, binary: bool = False):
         self.q: queue.Queue = queue.Queue(maxsize=QUEUE_MAX)
         self.overflowed = threading.Event()
+        self.binary = binary
 
 
 class DeltaHub:
@@ -64,8 +93,8 @@ class DeltaHub:
 
     # ── Subscription (called by WS handlers) ────────────────────────────────
 
-    def subscribe(self, slug: str) -> Subscriber:
-        sub = Subscriber()
+    def subscribe(self, slug: str, binary: bool = False) -> Subscriber:
+        sub = Subscriber(binary)
         with self._lock:
             self._subs.setdefault(slug, set()).add(sub)
             self._ensure_thread()
@@ -151,12 +180,21 @@ class DeltaHub:
                 self._buf[slug] = []
                 self._last_flushed[slug] = max(
                     buf[-1].get("rev", 0), last or 0)
+                subs = self._subs.get(slug, ())
                 payload = json.dumps(
                     {"type": "deltas", "rev": buf[-1].get("rev", 0),
                      "items": buf})
-                for sub in self._subs.get(slug, ()):
+                # Encode the binary twin ONCE per flush, and only if someone
+                # can read it. One group per source delta (no coalescing), so
+                # a binary client sees the same per-revision stream — and the
+                # same gap detection — a JSON client does.
+                bin_payload = (_encode_binary(buf)
+                               if any(s.binary for s in subs) else None)
+                for sub in subs:
                     try:
-                        sub.q.put_nowait(payload)
+                        sub.q.put_nowait(
+                            bin_payload if (sub.binary and bin_payload is not None)
+                            else payload)
                     except queue.Full:
                         # Too far behind to catch up delta-by-delta: signal the
                         # WS handler to drop the socket; reconnect + the

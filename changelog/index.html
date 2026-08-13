@@ -29,6 +29,27 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-13-ws-binary-vote-frames.html">
+    <div class="date">2026-08-13</div>
+    <h2>A binary vote frame, and a sync packet for backgrounded tabs</h2>
+    <p>The WebSocket vote stream was JSON, and a median 89-edge route cast spent
+    <strong>3,316 bytes</strong> saying about 150 numbers — every edge id sent twice, every one
+    quoted as a decimal string. It is now a canonical binary frame at <strong>508 bytes</strong>,
+    because a route's edge ids are near-consecutive (median gap: 6) and so they sort and
+    <strong>delta-varint</strong> encode, with the vote type hoisted out of every cell. The width
+    discipline is the lesson from this codec's predecessor, where a 16-bit
+    <code>vote_type_id</code> overflowed into the direction bit and recorded upvotes as downvotes:
+    growable fields are <em>varints</em>, which are self-delimiting and cannot bleed into a
+    neighbour, and they are paid for once per group rather than once per cell. The second half is
+    new — a <strong>sync packet</strong> the client asks for on foreground and reconnect, carrying
+    only the cells that moved while it was hidden, and marked TRUNCATED unless the server's log can
+    <em>prove</em> it covers the gap. That repair used to be a whole-city
+    <code>/api/graph-votes</code> refetch: <strong>1.78 MB</strong> on nyc-bikes, measured against
+    prod. And the fuzz test earned its keep three times — non-canonical varints, cell ids that
+    collapsed into each other, and a lossy UTF-8 decode that would have invented a phantom vote
+    type, each one a corrupted frame that decoded <em>successfully</em> into something different.</p>
+  </a>
+
   <a class="entry" href="./2026-08-12-proposal-labels.html">
     <div class="date">2026-08-12</div>
     <h2>Words on the map: a text tier for top proposals</h2>
