@@ -313,6 +313,35 @@ def lines(x, lines_, size=25, leading=46, mid=450, title=None):
     return "".join(out)
 
 
+def codeblock(x, y, code_lines, size=19, leading=30, pad=26):
+    """A literal payload in its own hairline box. Bold marks the fields worth
+       pointing at; the rest is structure. Returns (svg, width, height)."""
+    w = max(len(l.replace("**", "")) for l in code_lines) * size * 0.6 + pad * 2
+    h = len(code_lines) * leading + pad * 1.5
+    out = [f'<rect x="{x}" y="{y}" width="{w:.1f}" height="{h:.1f}" fill="none" '
+           f'stroke="{INK}" stroke-opacity="0.26"/>']
+    for i, l in enumerate(code_lines):
+        out.append(rich(x + pad, y + pad + 10 + i * leading, l, size, dim=0.5))
+    return "".join(out), w, h
+
+
+def hop(x, y, label, size=16, h=40):
+    """One box in a flow diagram. Returns (svg, width)."""
+    w = len(label) * size * 0.6 + 30
+    svg = (f'<rect x="{x}" y="{y}" width="{w:.1f}" height="{h}" fill="none" '
+           f'stroke="{INK}" stroke-opacity="0.4"/>'
+           + rich(x + w / 2, y + h / 2 + 6, label, size, dim=0.85, anchor="middle"))
+    return svg, w
+
+
+def hop_arrow(x, y, length=32):
+    return (f'<g opacity="0.35">'
+            f'<line x1="{x:.1f}" y1="{y:.1f}" x2="{x + length - 9:.1f}" y2="{y:.1f}" '
+            f'stroke="{INK}" stroke-width="1.4"/>'
+            f'<path d="M {x + length:.1f} {y:.1f} L {x + length - 10:.1f} {y - 5:.1f} '
+            f'L {x + length - 10:.1f} {y + 5:.1f} Z" fill="{INK}"/></g>')
+
+
 # ---------------------------------------------------------------------------
 # Panel assembly
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # Presentation assets
 
-Eight slides for talking through City Edit's front end. Art on the right, a
+Nine slides for talking through City Edit's front end. Art on the right, a
 short scannable note on the left — bold words are the keywords to land on.
 
 - **`story/city-edit-story.pdf`** — the deck, 16:9, one panel per page.
@@ -26,10 +26,11 @@ Everything drawn is the app's own asset, not an approximation:
 | `02-waypoint-start` | one start kite | the `?w=` params and snapping lat/lng onto the walk graph |
 | `03-waypoint-route` | start + end + route | **OSRM** foot profile with Multilevel Dijkstra |
 | `04-waypoint-mid` | mid pulled out of the line | drag-to-insert, tap-to-delete, start/end derived from the list |
-| `05-graph-to-blocks` | an X intersection: graph ghosted under 4 street blocks + 1 junction block | the clustering rules |
-| `06-block-heat` | the same blocks, lit | signed differential, log normalization, zero is invisible |
-| `07-top-proposal-point` | the square pin on the junction | PBTP: per-block winner, floor, spacing |
-| `08-top-proposal-route` | a heated corridor with its diamond + 5 waypoints | RBTP: peeling, budget, ghost waypoints |
+| `05-vote-sync` | the delta payload + its hop chain | what a cast does: optimistic apply, POST, revision bump, one Redis publish, set-not-increment counts, resync on a missed rev |
+| `06-graph-to-blocks` | an X intersection: graph ghosted under 4 street blocks + 1 junction block | the clustering rules |
+| `07-block-heat` | the same blocks, lit | signed differential, log normalization, zero is invisible |
+| `08-top-proposal-point` | the square pin on the junction | PBTP: per-block winner, floor, spacing |
+| `09-top-proposal-route` | a heated corridor with its diamond + 5 waypoints | RBTP: peeling, budget, ghost waypoints |
 
 Copy is plain mono at one size per slide — bold for keywords, the start/end
 colours for the words "start" and "end". `build.py` fails the build if a line

@@ -13,8 +13,8 @@ from pathlib import Path
 
 from deck import (
     END, INK, PAPER, SEL, START, W, H, Scene,
-    at, block_heat, block_selected, fit_into, kite, line, lines, panel,
-    path_d, poly_d, proposal_icon, selection_line, tick,
+    at, block_heat, block_selected, codeblock, fit_into, hop, hop_arrow, kite,
+    line, lines, panel, path_d, poly_d, proposal_icon, selection_line, tick,
 )
 
 OUT = Path(__file__).resolve().parent.parent.parent / "docs/presentation/story"
@@ -91,7 +91,46 @@ def slides_selection():
 
 
 # ===========================================================================
-# 05–07 — An X intersection: graph → blocks → heat → the point proposal
+# 05 — What a cast does: one delta, fanned out over the socket
+# ===========================================================================
+def slide_sync():
+    payload = [
+        "{",
+        '  "type": "delta",   "**rev**": 8241,',
+        '  "m": "walkways",   "vt": 37,',
+        '  "dir": 1,          "reversed": false,',
+        '  "vtLabel": "Add bike lane",',
+        '  "**edges**": [10432, 10433],',
+        '  "**vtCounts**":    { "10432": [12, 1] },',
+        '  "**blockCounts**": { "884": [9, 1] }',
+        "}",
+    ]
+    code, cw, ch = codeblock(ART[0] + 20, 456, payload)
+
+    flow = []
+    x = ART[0] + 20
+    for i, label in enumerate(["device", "Flask", "Redis", "every client"]):
+        box, bw = hop(x, 356, label)
+        flow.append(box)
+        x += bw
+        if i < 3:
+            flow.append(hop_arrow(x + 8, 376))
+            x += 48
+
+    return add("05-vote-sync", "Vote sync", "".join(flow) + code +
+        lines(TEXT_X, [
+            "A cast applies locally, then **POSTs**.",
+            "Flask writes it, bumps the **revision**,",
+            "and publishes **one delta** to Redis.",
+            "Every socket gets the same payload.",
+            "Counts are **set, not incremented** —",
+            "an optimistic guess can't drift.",
+            "A missed **rev** asks for a resync.",
+        ]))
+
+
+# ===========================================================================
+# 06–08 — An X intersection: graph → blocks → heat → the point proposal
 # ===========================================================================
 T1, T2 = math.radians(24), math.radians(24 + 78)
 D1 = (math.cos(T1), math.sin(T1))
@@ -171,7 +210,7 @@ HEATS = [0.92, 0.0, 0.46, 0.0, 0.18]   # junction hottest; two arms carry nothin
 
 
 def slides_blocks():
-    add("05-graph-to-blocks", "Graph → blocks",
+    add("06-graph-to-blocks", "Graph → blocks",
         x_scene(lambda i, d: block_selected(d), ghost=0.85) +
         lines(TEXT_X, [
             "One crossing becomes **5 blocks**:",
@@ -181,7 +220,7 @@ def slides_blocks():
             "Each device gets **one vote per block, per type**.",
         ]))
 
-    add("06-block-heat", "Block heat",
+    add("07-block-heat", "Block heat",
         x_scene(lambda i, d: block_heat(d, HEATS[i], 2.0), ghost=0.55) +
         lines(TEXT_X, [
             "Block heat = **(up votes) − (down votes)**.",
@@ -189,7 +228,7 @@ def slides_blocks():
         ]))
 
     pin = proposal_icon((0, 4), "safety", heat=0.92, selected=True, scale=1.7)
-    add("07-top-proposal-point", "Point proposal",
+    add("08-top-proposal-point", "Point proposal",
         x_scene(lambda i, d: block_heat(d, HEATS[i], 2.0), ghost=0.5, extra=pin) +
         lines(TEXT_X, title="Top Point Proposals", lines_=[
             "For each vote type, the **5 highest net**",
@@ -255,7 +294,7 @@ def slide_route_proposal():
     art += proposal_icon(spine[len(spine) // 2 - 1], "walkways", diamond=True,
                          heat=0.95, selected=True, scale=2.3)
 
-    add("08-top-proposal-route", "Route proposal", art +
+    add("09-top-proposal-route", "Route proposal", art +
         lines(TEXT_X, title="Top Route Proposals", lines_=[
             "Start at the **highest vote count edge**.",
             "Grow along the **best neighbor**, both ways.",
@@ -269,6 +308,7 @@ def slide_route_proposal():
 # ===========================================================================
 slide_basemap()
 slides_selection()
+slide_sync()
 slides_blocks()
 slide_route_proposal()
 

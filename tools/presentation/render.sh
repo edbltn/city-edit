@@ -23,6 +23,7 @@ if bad:
     sys.exit("invalid SVG:\n  " + "\n  ".join(bad))
 PY
 
+rm -rf "$OUT/png"
 mkdir -p "$OUT/png"
 for f in "$OUT"/*.svg; do
   n="$(basename "$f" .svg)"
