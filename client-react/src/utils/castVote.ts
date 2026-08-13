@@ -255,7 +255,20 @@ export async function castVotes(params: {
       window.dispatchEvent(new CustomEvent("map-passcode-required", { detail: { slug } }));
       throw new Error("Passcode required");
     }
-    if (!res.ok) throw new Error(`Vote failed: ${res.status}`);
+    if (!res.ok) {
+      // Surface the server's OWN message when it sent one, rather than a bare
+      // status. The vote-type id-space limit is the case this exists for: the
+      // server refuses a NEW vote type whose id would not fit the packed vote
+      // key, and a rolled-back optimistic apply with nothing on screen would
+      // look exactly like the vote having worked and then vanished.
+      const reason = await res.json().catch(() => null);
+      if (reason?.error) {
+        window.dispatchEvent(new CustomEvent("vote-rejected", {
+          detail: { message: reason.error as string },
+        }));
+      }
+      throw new Error(reason?.error || `Vote failed: ${res.status}`);
+    }
 
     const result = await res.json();
     dlog("cast", "server:", {

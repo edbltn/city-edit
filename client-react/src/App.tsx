@@ -35,7 +35,20 @@ function FullScreenLoader() {
 }
 
 function AppContent() {
-  const { error, clearError } = useRoute();
+  const { error, clearError, setError } = useRoute();
+
+  // A vote the server refused with a reason (utils/castVote.ts dispatches this).
+  // Event-driven rather than props, the same way PasscodeGate listens for
+  // "map-passcode-required" — the cast path is deep in the map subtree and has
+  // no route to this toast otherwise.
+  useEffect(() => {
+    const onRejected = (e: Event) => {
+      const message = (e as CustomEvent<{ message?: string }>).detail?.message;
+      if (message) setError(message);
+    };
+    window.addEventListener("vote-rejected", onRejected);
+    return () => window.removeEventListener("vote-rejected", onRejected);
+  }, [setError]);
   // Keep the splash up until BOTH the base map and the vote heatmap have first
   // painted, so the map is never revealed half-loaded (slow on mobile).
   const { isInitialLoading } = useHeatmap();

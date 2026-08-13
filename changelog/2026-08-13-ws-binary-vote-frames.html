@@ -101,6 +101,7 @@
 <a href="#bits">Every field, and what happens at its ceiling</a>
 <a href="#sync">Repairing a backgrounded tab for a kilobyte instead of 1.78 MB</a>
 <a href="#fuzz">Three ways a corrupted frame decoded into a different, valid frame</a>
+<a href="#limit">The 24-bit cliff is still live — and the block layer had no rail</a>
 <a href="#compat">Both encodings, one flush, no per-client cost</a>
     <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
   </nav>
@@ -191,6 +192,33 @@
     </section>
     
 
+    <section class="card" id="limit">
+      <div class="tag">THE GUARD</div>
+      <h2>The 24-bit cliff is still live — and the block layer had no rail</h2>
+      <h3>Symptom</h3>
+      <p>Auditing every path a <code>vote_type_id</code> travels for a lingering 16-bit assumption turned up something worse: no 16-bit assumption survives, but the SAME failure mode does, one field over, unguarded.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>vote_types.id</code> is a Postgres <strong>int4 SERIAL</strong> — it can mint <strong>2,147,483,647</strong>. Three packed layouts carry that id in <strong>24 bits</strong>: the Redis vote field (<code>vote_store.pack</code>, vt at 51..28), the block aggregate field (<code>block_votes.pack_block_field</code>, vt at 47..24) and the client's store key (<code>voteKey.ts</code>). So the database can mint ids <strong>128× larger</strong> than anything downstream can address</li>
+<li>An id past 24 bits does not round or error — <strong>it lands on a direction bit.</strong> At <code>vt = 2**24</code> the vote field's overflow hits <code>DIR_BIT</code> (52) and the block field's hits <em>its</em> direction bit (48). Widening from 16 to 24 in July moved the cliff; it did not remove it</li>
+<li><code>vote_store.pack</code> already raised. <strong><code>block_votes.pack_block_field</code> did not</strong> — it shifted silently, so <code>vt = 16,777,216</code> decoded as vote type 0 with the direction flipped. An upvote aggregated onto the block as a downvote. That is the July bug, exactly, still live on the block layer</li>
+<li>And the failure was doubly quiet: <code>get_or_create_vote_type_id</code> catches everything and <code>return 0</code>s, and a 0 id reads as &quot;untyped vote&quot; downstream. The client then discarded the server's message entirely — <code>throw new Error(`Vote failed: ${res.status}`)</code> — rolled the optimistic apply back, and showed nothing</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong><code>MAX_VOTE_TYPE_ID = 16,777,215</code></strong>, defined in <code>vote_store.py</code> next to the bit layout that sets it, with the full audit table in the comment. Enforced at the <strong>narrowest</strong> real limit, not at the widest field or at the DB column</li>
+<li><strong>The guard is at creation</strong>, in <code>get_or_create_vote_type_id</code>, and sits <em>outside</em> that function's try/except so the generic handler cannot turn a hard limit back into a silent <code>return 0</code>. Ordinary DB trouble still degrades to 0; only the ceiling raises</li>
+<li>It raises a dedicated <code>VoteTypeLimitError</code> whose message names the limit AND the refused label: <em>“Cannot create the vote type “X”: this map service supports at most 16,777,215 distinct vote types and that limit has been reached (id 16,777,216). Existing vote types still work…”</em>. Both request paths — a cast with a free-text suggestion, and map creation with custom types — return it as <strong>507</strong> with <code>vote_type_limit: true</code></li>
+<li><code>pack_block_field</code> now bounds-checks like <code>pack</code> does, so the silent-wrap path is closed as a last line of defence behind the creation guard</li>
+<li><strong>The client stops swallowing it.</strong> <code>castVote.ts</code> reads the server's own message on a failed cast and dispatches <code>vote-rejected</code>; <code>App.tsx</code> feeds it to the existing <code>ErrorToast</code> — the same event-driven route <code>PasscodeGate</code> already uses to reach out of the map subtree</li>
+<li>For scale: the largest id in the registry today is <strong>75,607</strong>, 0.45% of the ceiling. This is a backstop, not a near-term constraint — but so was 65,535, right up until a bulk import walked past it</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/vote_store.py</li>
+<li>server/database.py</li>
+<li>server/block_votes.py</li>
+<li>server/app.py</li>
+<li>client-react/src/utils/castVote.ts</li>
+<li>client-react/src/App.tsx</li></ul>
+    </section>
+    
+
     <section class="card" id="compat">
       <div class="tag">COMPATIBILITY</div>
       <h2>Both encodings, one flush, no per-client cost</h2>
@@ -218,6 +246,8 @@
 <li><strong>Server suite: 180 unit tests pass</strong> (45 new codec tests, 21 new sync tests). <strong>Client: 546 tests pass</strong>, 36 of them new, and <code>npx tsc -b</code> is clean — Vite dev never type-checks, and that has broken a client build unseen before.</li>
 <li><strong>End to end against a live Flask</strong> on :5055 with real Redis and Postgres, driving the real WS handler: (1) a binary client gets a 50-byte binary DELTA frame from a live <code>POST /api/vote</code>; (2) a client that missed one cast is repaired by a 44-byte SYNC frame carrying ONLY the two cells that changed; (3) after a bare <code>INCR vote_rev</code> — the hydration/resnap case — the sync comes back TRUNCATED rather than silently short; (4) a client that never announced binary support gets <code>resync</code> and never receives a binary frame.</li>
 <li><strong>Sizes are measured, not estimated.</strong> <code>server/tools/measure_ws_payload.py</code> pulls real edge ids from real casts in the local prod-shaped Postgres and real block ids from the city's edge→block mapping, so the id gaps — the thing delta-varint encoding lives or dies on — are the real ones. The refetch baseline is a live curl against cityedit.org.</li>
+<li><strong>The guard fires end to end, on a live server.</strong> The local dev sequence was pushed with <code>setval('vote_types_id_seq', 16777215)</code> so the next id would be 16,777,216; a cast with a brand-new label came back <strong>HTTP 507</strong> carrying the full message, left <strong>no vote_types row and no edge_votes row</strong>, and a normal cast on an existing type returned 200 immediately after. Sequence restored and the junk row deleted.</li>
+<li><strong>The boundary is pinned by test, not by comment.</strong> <code>test_vote_type_limit.py</code> (15 tests) asserts MAX_VOTE_TYPE_ID equals the narrowest packed field, that the max id still round-trips through all three layouts inside 2^53, and — computing the packed value WITHOUT the bounds checks — that one past the limit decodes as vote type 0 with the direction flipped, on BOTH the vote field and the block field. It also pins that the WS varint is NOT the narrowest link, so the codec in this same change cannot quietly become the limit.</li>
 <li><strong>Lint is unchanged.</strong> GraphLayer.tsx reports the same 14 pre-existing problems before and after; WebSocketContext.tsx the same 2.</li>
 <li><strong>A concurrent session's work was kept out.</strong> <code>server/app.py</code> also carried an unrelated sticker-binding hunk from another session; the diff and the commit were split hunk-by-hunk so only the two WS hunks are mine.</li></ul>
   </section>
@@ -230,6 +260,7 @@
 <li>Kill and restart Flask while a tab is open. On reconnect the tab should log a sync (or a truncated one followed by one refetch) — before this change it would have stayed stale until the next vote.</li>
 <li><code>redis-cli incr vote_rev:nyc-walkways</code>, then foreground a tab: expect <code>sync truncated … full refetch</code> in the console. That is the safety path working, not a bug.</li>
 <li><code>redis-cli zcard deltalog:nyc-walkways</code> should stay ≤ 128 no matter how much you vote, and <code>redis-cli ttl deltalog:nyc-walkways</code> should be ≤ 900.</li>
+<li>The vote-type guard, if you want to see it: <code>psql</code> the LOCAL db, <code>select setval('vote_types_id_seq', 16777215)</code>, then vote with a label nobody has used. Expect a toast reading “this map service supports at most 16,777,215 distinct vote types”, not a silently vanishing vote. Put the sequence back afterwards.</li>
 <li>Re-run the numbers yourself: <code>cd server &amp;&amp; ./env/bin/python tools/measure_ws_payload.py</code>.</li></ul>
   </section>
 
@@ -238,8 +269,41 @@
     <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
     
         <details>
+          <summary><span class="fname">client-react/src/App.tsx</span>
+            <span class="stat"><span class="d-add">+14</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/App.tsx b/client-react/src/App.tsx</span>
+<span class="d-meta">index 1bb7911..7cf5564 100644</span>
+<span class="d-meta">--- a/client-react/src/App.tsx</span>
+<span class="d-meta">+++ b/client-react/src/App.tsx</span>
+<span class="d-hunk">@@ -35,7 +35,20 @@ function FullScreenLoader() {</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> function AppContent() {</span>
+<span class="d-del">-  const { error, clearError } = useRoute();</span>
+<span class="d-add">+  const { error, clearError, setError } = useRoute();</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // A vote the server refused with a reason (utils/castVote.ts dispatches this).</span>
+<span class="d-add">+  // Event-driven rather than props, the same way PasscodeGate listens for</span>
+<span class="d-add">+  // &quot;map-passcode-required&quot; — the cast path is deep in the map subtree and has</span>
+<span class="d-add">+  // no route to this toast otherwise.</span>
+<span class="d-add">+  useEffect(() =&gt; {</span>
+<span class="d-add">+    const onRejected = (e: Event) =&gt; {</span>
+<span class="d-add">+      const message = (e as CustomEvent&lt;{ message?: string }&gt;).detail?.message;</span>
+<span class="d-add">+      if (message) setError(message);</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+    window.addEventListener(&quot;vote-rejected&quot;, onRejected);</span>
+<span class="d-add">+    return () =&gt; window.removeEventListener(&quot;vote-rejected&quot;, onRejected);</span>
+<span class="d-add">+  }, [setError]);</span>
+<span class="d-ctx">   // Keep the splash up until BOTH the base map and the vote heatmap have first</span>
+<span class="d-ctx">   // painted, so the map is never revealed half-loaded (slow on mobile).</span>
+<span class="d-ctx">   const { isInitialLoading } = useHeatmap();</span></pre>
+        </details>
+        
+        <details>
           <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
-            <span class="stat"><span class="d-add">+63</span> / <span class="d-del">-1</span></span>
+            <span class="stat"><span class="d-add">+69</span> / <span class="d-del">-10</span></span>
           </summary>
           
     <div class="ctx">
@@ -269,10 +333,27 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
-<span class="d-meta">index 40c6f0f..7eee80f 100644</span>
+<span class="d-meta">index 40c6f0f..02f5b00 100644</span>
 <span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
 <span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
-<span class="d-hunk">@@ -282,7 +282,7 @@ interface GraphLayerProps {</span>
+<span class="d-hunk">@@ -37,7 +37,7 @@ import {</span>
+<span class="d-ctx"> import { makeVoteTypeIcon } from &quot;./voteTypeIcon&quot;;</span>
+<span class="d-ctx"> import { suggestionGlyphForLabel } from &quot;../../utils/suggestionIcon&quot;;</span>
+<span class="d-ctx"> import {</span>
+<span class="d-del">-  computeWinnerCandidates, dedupedBlockNetResolver, selectTopProposalsFrom, topLabelForEdges,</span>
+<span class="d-add">+  candidatesForGraph, selectTopProposalsFrom, topLabelForEdges,</span>
+<span class="d-ctx">   TOP_PROPOSALS_PER_TYPE, TOP_PROPOSAL_MIN_SPACING_M, TOP_PROPOSAL_MIN_NET,</span>
+<span class="d-ctx">   ROUTE_PROPOSAL_MIN_NET,</span>
+<span class="d-ctx">   type VoteTypeWinner,</span>
+<span class="d-hunk">@@ -66,7 +66,6 @@ import {</span>
+<span class="d-ctx">   touchedBlockKeys,</span>
+<span class="d-ctx">   adjEdgesOf,</span>
+<span class="d-ctx">   adjShortest,</span>
+<span class="d-del">-  blockKeyOf,</span>
+<span class="d-ctx"> } from &quot;./graphTopology&quot;;</span>
+<span class="d-ctx"> import {</span>
+<span class="d-ctx">   materializeBlocks, selectionVoteRows, selectionCoverage,</span>
+<span class="d-hunk">@@ -282,7 +281,7 @@ interface GraphLayerProps {</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx"> export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWaypoints = EMPTY_WAYPOINTS, dragPoint = null, hoverProposalPoint = null, onWaypointMatch, onIndicatorClick, onRouteProposalClick, clusterExploderRef, onRemoveProposal, onRemoveSelected, onClearRoute, onRouteProposalRemove, routeProposalAtRef, suppressHover = false, pathEdgeIds = null, onProposalDrop, onPinnedResolve }: GraphLayerProps) {</span>
 <span class="d-ctx">   const map = useMap();</span>
@@ -281,7 +362,31 @@
 <span class="d-ctx">   const { setSnapFn, setResolveVoteEdgeId, setResolveTopLabelForPath, setCurrentSnap, isDraggingRef: graphDraggingRef, snapToGraph, setDragging } = useGraphSnap();</span>
 <span class="d-ctx">   const { setBlockMaterializer, setCorridorSegmentResolver, notifyCorridorsChanged } = useRoute();</span>
 <span class="d-ctx">   // Ghost-pin drag (the dotted-trail + ghost-kite mechanism the path-drag uses).</span>
-<span class="d-hunk">@@ -2289,6 +2289,68 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-hunk">@@ -852,18 +851,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     if (!cache || cache.epoch !== epoch) {</span>
+<span class="d-ctx">       cache = {</span>
+<span class="d-ctx">         epoch,</span>
+<span class="d-del">-        candidates: computeWinnerCandidates(</span>
+<span class="d-del">-          data.vote_type_legend ?? [],</span>
+<span class="d-del">-          data.edge_vote_types ?? [],</span>
+<span class="d-add">+        // candidatesForGraph, not computeWinnerCandidates: it supplies the</span>
+<span class="d-add">+        // block-key + deduped-net resolvers, whose omission would silently</span>
+<span class="d-add">+        // demote this ranking to the edge grain. See its doc comment.</span>
+<span class="d-add">+        candidates: candidatesForGraph(</span>
+<span class="d-add">+          data,</span>
+<span class="d-ctx">           TOP_PROPOSALS_PER_TYPE,</span>
+<span class="d-ctx">           isStationNetwork ? undefined : voteTypeKindOf,</span>
+<span class="d-ctx">           // Station networks don&#x27;t badge winners as &quot;top proposals&quot; (every</span>
+<span class="d-ctx">           // station renders its own pin regardless), so the floor stays off.</span>
+<span class="d-ctx">           isStationNetwork ? 0 : topProposalMinNet,</span>
+<span class="d-del">-          // Votes live on edges but count on blocks — by DISTINCT DEVICE, so</span>
+<span class="d-del">-          // the ranking value is the deduped block row, not a sum of edges.</span>
+<span class="d-del">-          (edgeIdx) =&gt; blockKeyOf(data, edgeIdx),</span>
+<span class="d-del">-          dedupedBlockNetResolver(data),</span>
+<span class="d-ctx">         ),</span>
+<span class="d-ctx">       };</span>
+<span class="d-ctx">       pbtpCandidatesRef.current = cache;</span>
+<span class="d-hunk">@@ -2289,6 +2286,68 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
 <span class="d-ctx">     return unsubscribe;</span>
 <span class="d-ctx">   }, [subscribeToDelta, themeMode, applyDeltaToGraphData]);</span>
 <span class="d-ctx"> </span>
@@ -717,6 +822,39 @@
 <span class="d-add">+    }</span>
 <span class="d-add">+  }</span>
 <span class="d-add">+]</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/castVote.ts</span>
+            <span class="stat"><span class="d-add">+14</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/castVote.ts b/client-react/src/utils/castVote.ts</span>
+<span class="d-meta">index 5f59c4e..71f5f1f 100644</span>
+<span class="d-meta">--- a/client-react/src/utils/castVote.ts</span>
+<span class="d-meta">+++ b/client-react/src/utils/castVote.ts</span>
+<span class="d-hunk">@@ -255,7 +255,20 @@ export async function castVotes(params: {</span>
+<span class="d-ctx">       window.dispatchEvent(new CustomEvent(&quot;map-passcode-required&quot;, { detail: { slug } }));</span>
+<span class="d-ctx">       throw new Error(&quot;Passcode required&quot;);</span>
+<span class="d-ctx">     }</span>
+<span class="d-del">-    if (!res.ok) throw new Error(`Vote failed: ${res.status}`);</span>
+<span class="d-add">+    if (!res.ok) {</span>
+<span class="d-add">+      // Surface the server&#x27;s OWN message when it sent one, rather than a bare</span>
+<span class="d-add">+      // status. The vote-type id-space limit is the case this exists for: the</span>
+<span class="d-add">+      // server refuses a NEW vote type whose id would not fit the packed vote</span>
+<span class="d-add">+      // key, and a rolled-back optimistic apply with nothing on screen would</span>
+<span class="d-add">+      // look exactly like the vote having worked and then vanished.</span>
+<span class="d-add">+      const reason = await res.json().catch(() =&gt; null);</span>
+<span class="d-add">+      if (reason?.error) {</span>
+<span class="d-add">+        window.dispatchEvent(new CustomEvent(&quot;vote-rejected&quot;, {</span>
+<span class="d-add">+          detail: { message: reason.error as string },</span>
+<span class="d-add">+        }));</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+      throw new Error(reason?.error || `Vote failed: ${res.status}`);</span>
+<span class="d-add">+    }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     const result = await res.json();</span>
+<span class="d-ctx">     dlog(&quot;cast&quot;, &quot;server:&quot;, {</span></pre>
         </details>
         
         <details>
@@ -1471,6 +1609,106 @@
 <span class="d-add">+export function frameToDeltas(frame: WireFrame): VoteDelta[] {</span>
 <span class="d-add">+  return frame.groups.map(groupToDelta);</span>
 <span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/block_votes.py</span>
+            <span class="stat"><span class="d-add">+22</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+          <pre class="diff"><span class="d-meta">diff --git a/server/block_votes.py b/server/block_votes.py</span>
+<span class="d-meta">index 058fce0..a37f8a2 100644</span>
+<span class="d-meta">--- a/server/block_votes.py</span>
+<span class="d-meta">+++ b/server/block_votes.py</span>
+<span class="d-hunk">@@ -55,8 +55,29 @@ def bagg_key(slug: str, mode: int) -&gt; str:</span>
+<span class="d-ctx"> # packed aggregate field: block_id [0..23] | vt_id [24..47] | dir [48]</span>
+<span class="d-ctx"> # (vt widened to 24 bits alongside vote_store&#x27;s codec — the global vote_types</span>
+<span class="d-ctx"> # SERIAL exceeds 16 bits; server-internal, never crosses the wire packed)</span>
+<span class="d-add">+BLOCK_BITS = 24</span>
+<span class="d-add">+BLOCK_VT_BITS = 24</span>
+<span class="d-add">+BLOCK_DIR_BIT = 48</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> def pack_block_field(block_id: int, vt_id: int, dbit: int) -&gt; int:</span>
+<span class="d-del">-    return (dbit &lt;&lt; 48) | (vt_id &lt;&lt; 24) | block_id</span>
+<span class="d-add">+    &quot;&quot;&quot;Pack a (block, vote type, direction) slot into one integer.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Bounds-checked for the same reason vote_store.pack is. This layout has the</span>
+<span class="d-add">+    identical failure mode one field over: at vt_id = 2**24 the overflow lands</span>
+<span class="d-add">+    exactly on BLOCK_DIR_BIT, so the slot decodes as vote type 0 with the</span>
+<span class="d-add">+    direction flipped — an upvote silently aggregated as a downvote on the block</span>
+<span class="d-add">+    layer. That is the July bug (vt at 16 bits overflowing onto bit 44), just</span>
+<span class="d-add">+    relocated by the widening. Until this raised, it was still live here.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    The real guard is at creation (database.get_or_create_vote_type_id refuses</span>
+<span class="d-add">+    ids past vote_store.MAX_VOTE_TYPE_ID); this is the last line of defence, so</span>
+<span class="d-add">+    a bad id reaches an exception rather than the heatmap.&quot;&quot;&quot;</span>
+<span class="d-add">+    if not 0 &lt;= block_id &lt; (1 &lt;&lt; BLOCK_BITS):</span>
+<span class="d-add">+        raise ValueError(f&quot;block_id {block_id} exceeds {BLOCK_BITS}-bit field&quot;)</span>
+<span class="d-add">+    if not 0 &lt;= vt_id &lt; (1 &lt;&lt; BLOCK_VT_BITS):</span>
+<span class="d-add">+        raise ValueError(f&quot;vote_type_id {vt_id} exceeds {BLOCK_VT_BITS}-bit field&quot;)</span>
+<span class="d-add">+    return (dbit &lt;&lt; BLOCK_DIR_BIT) | (vt_id &lt;&lt; BLOCK_BITS) | block_id</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def unpack_block_field(key: int) -&gt; tuple[int, int, int]:</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/database.py</span>
+            <span class="stat"><span class="d-add">+28</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+          <pre class="diff"><span class="d-meta">diff --git a/server/database.py b/server/database.py</span>
+<span class="d-meta">index 36d79bd..fc9b924 100644</span>
+<span class="d-meta">--- a/server/database.py</span>
+<span class="d-meta">+++ b/server/database.py</span>
+<span class="d-hunk">@@ -704,7 +704,18 @@ def get_or_create_vote_type_id(label: str, point_type: Optional[str] = None) -&gt;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     `point_type` (&#x27;route&#x27; | &#x27;point&#x27;) stamps a NEW row&#x27;s kind and fills a NULL on</span>
+<span class="d-ctx">     an existing row — it never overwrites a kind already on record, so the first</span>
+<span class="d-del">-    authoritative flag (preset seed, map creation, or the creating cast) wins.&quot;&quot;&quot;</span>
+<span class="d-add">+    authoritative flag (preset seed, map creation, or the creating cast) wins.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Raises VoteTypeLimitError when the minted id is past what the packed vote-key</span>
+<span class="d-add">+    layouts can address (vote_store.MAX_VOTE_TYPE_ID). vote_types.id is an int4</span>
+<span class="d-add">+    SERIAL, 128x wider than the 24-bit field the Redis vote key, the block</span>
+<span class="d-add">+    aggregate key and the client&#x27;s store key all carry it in — and an id past</span>
+<span class="d-add">+    that ceiling does not fail, it overflows onto a DIRECTION bit and records</span>
+<span class="d-add">+    upvotes as downvotes. That happened once already at 16 bits. Refusing here</span>
+<span class="d-add">+    means a human sees an error at the moment they name a new type, instead of</span>
+<span class="d-add">+    the votes going quietly the wrong way afterwards.&quot;&quot;&quot;</span>
+<span class="d-add">+    import vote_store  # local: vote_store imports this module lazily too</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     if not DATABASE_URL or not label:</span>
+<span class="d-ctx">         return 0</span>
+<span class="d-ctx">     try:</span>
+<span class="d-hunk">@@ -715,10 +726,25 @@ def get_or_create_vote_type_id(label: str, point_type: Optional[str] = None) -&gt;</span>
+<span class="d-ctx">                 &quot;COALESCE(vote_types.point_type, EXCLUDED.point_type) RETURNING id&quot;,</span>
+<span class="d-ctx">                 (label, normalize_point_type(point_type)),</span>
+<span class="d-ctx">             )</span>
+<span class="d-del">-            return cursor.fetchone()[0]</span>
+<span class="d-add">+            vt_id = cursor.fetchone()[0]</span>
+<span class="d-ctx">     except Exception as e:</span>
+<span class="d-ctx">         logger.error(f&quot;[DB] Failed to get/create vote type &#x27;{label}&#x27;: {e}&quot;)</span>
+<span class="d-ctx">         return 0</span>
+<span class="d-add">+    # Checked OUTSIDE the try so the generic handler above cannot turn a hard</span>
+<span class="d-add">+    # limit into a silent `return 0` — a 0 id reads as &quot;untyped vote&quot; downstream,</span>
+<span class="d-add">+    # which is precisely the quiet wrong answer this guard exists to prevent.</span>
+<span class="d-add">+    if vt_id &gt; vote_store.MAX_VOTE_TYPE_ID:</span>
+<span class="d-add">+        logger.error(</span>
+<span class="d-add">+            f&quot;[DB] vote type &#x27;{label}&#x27; minted id {vt_id}, past the &quot;</span>
+<span class="d-add">+            f&quot;{vote_store.VT_BITS}-bit vote-key limit &quot;</span>
+<span class="d-add">+            f&quot;({vote_store.MAX_VOTE_TYPE_ID})&quot;)</span>
+<span class="d-add">+        raise vote_store.VoteTypeLimitError(</span>
+<span class="d-add">+            f&quot;Cannot create the vote type “{label}”: this map service supports &quot;</span>
+<span class="d-add">+            f&quot;at most {vote_store.MAX_VOTE_TYPE_ID:,} distinct vote types and &quot;</span>
+<span class="d-add">+            f&quot;that limit has been reached (id {vt_id:,}). Existing vote types &quot;</span>
+<span class="d-add">+            f&quot;still work — please pick one of them, and let the maintainers &quot;</span>
+<span class="d-add">+            f&quot;know the vote-type id space needs widening.&quot;)</span>
+<span class="d-add">+    return vt_id</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # ── Aggregates / admin (replaces inline SQL elsewhere) ───────────────────────</span></pre>
         </details>
         
         <details>
@@ -2591,7 +2829,7 @@
         
         <details>
           <summary><span class="fname">server/vote_store.py</span>
-            <span class="stat"><span class="d-add">+118</span> / <span class="d-del">-0</span></span>
+            <span class="stat"><span class="d-add">+146</span> / <span class="d-del">-0</span></span>
           </summary>
           
     <div class="ctx">
@@ -2621,7 +2859,7 @@
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/server/vote_store.py b/server/vote_store.py</span>
-<span class="d-meta">index 518ab7a..b1d256d 100644</span>
+<span class="d-meta">index 518ab7a..e5b76dc 100644</span>
 <span class="d-meta">--- a/server/vote_store.py</span>
 <span class="d-meta">+++ b/server/vote_store.py</span>
 <span class="d-hunk">@@ -83,6 +83,110 @@ def channel_key(slug: str) -&gt; str:</span>
@@ -2735,7 +2973,42 @@
 <span class="d-ctx"> # ── Mode enum ──────────────────────────────────────────────────────────────</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx"> MODE_IDS: dict[str, int] = {</span>
-<span class="d-hunk">@@ -286,6 +390,20 @@ def publish_delta(</span>
+<span class="d-hunk">@@ -170,6 +274,34 @@ DIR_BIT = 52  # direction bit position in the Redis field key</span>
+<span class="d-ctx"> EDGE_BITS = 24</span>
+<span class="d-ctx"> VT_BITS = 24</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# The NARROWEST real ceiling on a vote_type_id anywhere in the system, and the</span>
+<span class="d-add">+# number the creation guard enforces (database.get_or_create_vote_type_id).</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# Audited 2026-08-13, every path a vt id travels:</span>
+<span class="d-add">+#   Redis vote field   pack()                  vt at bits 51..28  -&gt; 24 bits  ← narrowest</span>
+<span class="d-add">+#   Block aggregate    block_votes.pack_block_field  vt at 47..24 -&gt; 24 bits  ← narrowest</span>
+<span class="d-add">+#   Client store key   client-react/src/utils/voteKey.ts VT_BITS  -&gt; 24 bits  ← narrowest</span>
+<span class="d-add">+#   WS binary frame    wire_codec vtId varint                     -&gt; 2^53-1</span>
+<span class="d-add">+#   Sparse HTTP body   {str(id): label} JSON                      -&gt; unbounded</span>
+<span class="d-add">+#   Postgres           vote_types.id is int4 SERIAL               -&gt; 2147483647</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# So Postgres can mint ids 128x larger than the three packed layouts can carry,</span>
+<span class="d-add">+# which is exactly the shape of the July bug: vt was 16 bits, a bulk import</span>
+<span class="d-add">+# pushed the SERIAL past 65535, and the overflow bit landed on the direction bit</span>
+<span class="d-add">+# at 52 — recording those votes as DOWNVOTES, silently. Widening to 24 moved the</span>
+<span class="d-add">+# cliff; it did not remove it. At vt = 2^24 the Redis field&#x27;s overflow lands on</span>
+<span class="d-add">+# bit 52 again, and the block field&#x27;s on ITS direction bit at 48.</span>
+<span class="d-add">+#</span>
+<span class="d-add">+# Hence: refuse the id at CREATION, where a human is present and can be told,</span>
+<span class="d-add">+# rather than at pack time on a vote that has already been accepted. The packers</span>
+<span class="d-add">+# keep their own ValueError as the last line of defence.</span>
+<span class="d-add">+MAX_VOTE_TYPE_ID = (1 &lt;&lt; VT_BITS) - 1  # 16,777,215</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+class VoteTypeLimitError(Exception):</span>
+<span class="d-add">+    &quot;&quot;&quot;A new vote type cannot be created: the id space the packed vote-key</span>
+<span class="d-add">+    layouts can address is exhausted. Carries a user-facing message.&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> # Vote directions (API/app layer): +1 = up, -1 = down, 0 = no vote</span>
+<span class="d-ctx"> UP = 1</span>
+<span class="d-ctx"> DOWN = -1</span>
+<span class="d-hunk">@@ -286,6 +418,20 @@ def publish_delta(</span>
 <span class="d-ctx">     if block_counts is not None:</span>
 <span class="d-ctx">         delta[&quot;blockCounts&quot;] = {str(b): counts for b, counts in block_counts.items()}</span>
 <span class="d-ctx">     redis_client.publish(channel_key(slug), json.dumps(delta))</span>
@@ -3217,7 +3490,7 @@
         
         <details>
           <summary><span class="fname">server/app.py</span>
-            <span class="stat"><span class="d-add">+68</span> / <span class="d-del">-4</span></span>
+            <span class="stat"><span class="d-add">+87</span> / <span class="d-del">-7</span></span>
           </summary>
           
     <div class="ctx">
@@ -3342,7 +3615,43 @@
 <span class="d-add">+                    _ws_handle_inbound(ws, slug, sub, inbound)</span>
 <span class="d-ctx">             except Exception as e:</span>
 <span class="d-ctx">                 s = str(e).lower()</span>
-<span class="d-ctx">                 if &quot;timed out&quot; not in s and &quot;no data&quot; not in s and &quot;connection closed&quot; not in s:</span></pre>
+<span class="d-ctx">                 if &quot;timed out&quot; not in s and &quot;no data&quot; not in s and &quot;connection closed&quot; not in s:</span>
+<span class="d-hunk">@@ -1197,8 +1197,16 @@ def map_create():</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     # Stamp the authored kinds into the global registry now, so a later cast</span>
+<span class="d-ctx">     # (whose selection kind may differ) isn&#x27;t the first to flag these labels.</span>
+<span class="d-del">-    for vt in (custom_vote_types or []):</span>
+<span class="d-del">-        vote_store.get_vote_type_id(vt[&quot;label&quot;].strip(), vt.get(&quot;pointType&quot;))</span>
+<span class="d-add">+    # A custom label that cannot be minted (the 24-bit vote-key id space is</span>
+<span class="d-add">+    # full) is reported to the author rather than swallowed — the map exists,</span>
+<span class="d-add">+    # but they need to know that type will never carry a vote.</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        for vt in (custom_vote_types or []):</span>
+<span class="d-add">+            vote_store.get_vote_type_id(vt[&quot;label&quot;].strip(), vt.get(&quot;pointType&quot;))</span>
+<span class="d-add">+    except vote_store.VoteTypeLimitError as e:</span>
+<span class="d-add">+        logger.error(f&quot;[MAPS] &#x27;{slug}&#x27; created, but a custom vote type was refused: {e}&quot;)</span>
+<span class="d-add">+        return jsonify({&quot;error&quot;: str(e), &quot;vote_type_limit&quot;: True,</span>
+<span class="d-add">+                        &quot;map_created&quot;: True, &quot;slug&quot;: slug}), 507</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     city = get_city(city_id)</span>
+<span class="d-ctx">     if city:</span>
+<span class="d-hunk">@@ -1544,7 +1552,15 @@ def cast_vote():</span>
+<span class="d-ctx">     stripe_acquired = False</span>
+<span class="d-ctx">     lock_wait_s = 0.0</span>
+<span class="d-ctx">     try:</span>
+<span class="d-del">-        vt_id = vote_store.get_vote_type_id(vt_label, vt_point_type) if vt_label else 0</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            vt_id = vote_store.get_vote_type_id(vt_label, vt_point_type) if vt_label else 0</span>
+<span class="d-add">+        except vote_store.VoteTypeLimitError as e:</span>
+<span class="d-add">+            # A NEW free-text suggestion whose id would not fit the packed vote</span>
+<span class="d-add">+            # key. Refuse the cast with the reason: an id past the 24-bit field</span>
+<span class="d-add">+            # overflows onto the direction bit and records the vote as its own</span>
+<span class="d-add">+            # opposite, so accepting it would be worse than declining it.</span>
+<span class="d-add">+            logger.error(f&quot;[VOTE:{slug}] refused new vote type {vt_label!r}: {e}&quot;)</span>
+<span class="d-add">+            return jsonify({&quot;error&quot;: str(e), &quot;vote_type_limit&quot;: True}), 507</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         # Soft per-IP cap: how many OTHER devices this IP already has on each</span>
+<span class="d-ctx">         # edge+type. A brand-new vote from a fresh device is dropped once the IP</span></pre>
         </details>
         
   </section>

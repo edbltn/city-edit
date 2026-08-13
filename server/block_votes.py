@@ -55,8 +55,29 @@ def bagg_key(slug: str, mode: int) -> str:
 # packed aggregate field: block_id [0..23] | vt_id [24..47] | dir [48]
 # (vt widened to 24 bits alongside vote_store's codec — the global vote_types
 # SERIAL exceeds 16 bits; server-internal, never crosses the wire packed)
+BLOCK_BITS = 24
+BLOCK_VT_BITS = 24
+BLOCK_DIR_BIT = 48
+
+
 def pack_block_field(block_id: int, vt_id: int, dbit: int) -> int:
-    return (dbit << 48) | (vt_id << 24) | block_id
+    """Pack a (block, vote type, direction) slot into one integer.
+
+    Bounds-checked for the same reason vote_store.pack is. This layout has the
+    identical failure mode one field over: at vt_id = 2**24 the overflow lands
+    exactly on BLOCK_DIR_BIT, so the slot decodes as vote type 0 with the
+    direction flipped — an upvote silently aggregated as a downvote on the block
+    layer. That is the July bug (vt at 16 bits overflowing onto bit 44), just
+    relocated by the widening. Until this raised, it was still live here.
+
+    The real guard is at creation (database.get_or_create_vote_type_id refuses
+    ids past vote_store.MAX_VOTE_TYPE_ID); this is the last line of defence, so
+    a bad id reaches an exception rather than the heatmap."""
+    if not 0 <= block_id < (1 << BLOCK_BITS):
+        raise ValueError(f"block_id {block_id} exceeds {BLOCK_BITS}-bit field")
+    if not 0 <= vt_id < (1 << BLOCK_VT_BITS):
+        raise ValueError(f"vote_type_id {vt_id} exceeds {BLOCK_VT_BITS}-bit field")
+    return (dbit << BLOCK_DIR_BIT) | (vt_id << BLOCK_BITS) | block_id
 
 
 def unpack_block_field(key: int) -> tuple[int, int, int]:

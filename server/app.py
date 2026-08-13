@@ -1197,8 +1197,16 @@ def map_create():
 
     # Stamp the authored kinds into the global registry now, so a later cast
     # (whose selection kind may differ) isn't the first to flag these labels.
-    for vt in (custom_vote_types or []):
-        vote_store.get_vote_type_id(vt["label"].strip(), vt.get("pointType"))
+    # A custom label that cannot be minted (the 24-bit vote-key id space is
+    # full) is reported to the author rather than swallowed — the map exists,
+    # but they need to know that type will never carry a vote.
+    try:
+        for vt in (custom_vote_types or []):
+            vote_store.get_vote_type_id(vt["label"].strip(), vt.get("pointType"))
+    except vote_store.VoteTypeLimitError as e:
+        logger.error(f"[MAPS] '{slug}' created, but a custom vote type was refused: {e}")
+        return jsonify({"error": str(e), "vote_type_limit": True,
+                        "map_created": True, "slug": slug}), 507
 
     city = get_city(city_id)
     if city:
@@ -1544,7 +1552,15 @@ def cast_vote():
     stripe_acquired = False
     lock_wait_s = 0.0
     try:
-        vt_id = vote_store.get_vote_type_id(vt_label, vt_point_type) if vt_label else 0
+        try:
+            vt_id = vote_store.get_vote_type_id(vt_label, vt_point_type) if vt_label else 0
+        except vote_store.VoteTypeLimitError as e:
+            # A NEW free-text suggestion whose id would not fit the packed vote
+            # key. Refuse the cast with the reason: an id past the 24-bit field
+            # overflows onto the direction bit and records the vote as its own
+            # opposite, so accepting it would be worse than declining it.
+            logger.error(f"[VOTE:{slug}] refused new vote type {vt_label!r}: {e}")
+            return jsonify({"error": str(e), "vote_type_limit": True}), 507
 
         # Soft per-IP cap: how many OTHER devices this IP already has on each
         # edge+type. A brand-new vote from a fresh device is dropped once the IP

@@ -704,7 +704,18 @@ def get_or_create_vote_type_id(label: str, point_type: Optional[str] = None) -> 
 
     `point_type` ('route' | 'point') stamps a NEW row's kind and fills a NULL on
     an existing row — it never overwrites a kind already on record, so the first
-    authoritative flag (preset seed, map creation, or the creating cast) wins."""
+    authoritative flag (preset seed, map creation, or the creating cast) wins.
+
+    Raises VoteTypeLimitError when the minted id is past what the packed vote-key
+    layouts can address (vote_store.MAX_VOTE_TYPE_ID). vote_types.id is an int4
+    SERIAL, 128x wider than the 24-bit field the Redis vote key, the block
+    aggregate key and the client's store key all carry it in — and an id past
+    that ceiling does not fail, it overflows onto a DIRECTION bit and records
+    upvotes as downvotes. That happened once already at 16 bits. Refusing here
+    means a human sees an error at the moment they name a new type, instead of
+    the votes going quietly the wrong way afterwards."""
+    import vote_store  # local: vote_store imports this module lazily too
+
     if not DATABASE_URL or not label:
         return 0
     try:
@@ -715,10 +726,25 @@ def get_or_create_vote_type_id(label: str, point_type: Optional[str] = None) -> 
                 "COALESCE(vote_types.point_type, EXCLUDED.point_type) RETURNING id",
                 (label, normalize_point_type(point_type)),
             )
-            return cursor.fetchone()[0]
+            vt_id = cursor.fetchone()[0]
     except Exception as e:
         logger.error(f"[DB] Failed to get/create vote type '{label}': {e}")
         return 0
+    # Checked OUTSIDE the try so the generic handler above cannot turn a hard
+    # limit into a silent `return 0` — a 0 id reads as "untyped vote" downstream,
+    # which is precisely the quiet wrong answer this guard exists to prevent.
+    if vt_id > vote_store.MAX_VOTE_TYPE_ID:
+        logger.error(
+            f"[DB] vote type '{label}' minted id {vt_id}, past the "
+            f"{vote_store.VT_BITS}-bit vote-key limit "
+            f"({vote_store.MAX_VOTE_TYPE_ID})")
+        raise vote_store.VoteTypeLimitError(
+            f"Cannot create the vote type “{label}”: this map service supports "
+            f"at most {vote_store.MAX_VOTE_TYPE_ID:,} distinct vote types and "
+            f"that limit has been reached (id {vt_id:,}). Existing vote types "
+            f"still work — please pick one of them, and let the maintainers "
+            f"know the vote-type id space needs widening.")
+    return vt_id
 
 
 # ── Aggregates / admin (replaces inline SQL elsewhere) ───────────────────────

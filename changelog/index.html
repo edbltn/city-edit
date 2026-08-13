@@ -47,7 +47,12 @@
     <code>/api/graph-votes</code> refetch: <strong>1.78 MB</strong> on nyc-bikes, measured against
     prod. And the fuzz test earned its keep three times — non-canonical varints, cell ids that
     collapsed into each other, and a lossy UTF-8 decode that would have invented a phantom vote
-    type, each one a corrupted frame that decoded <em>successfully</em> into something different.</p>
+    type, each one a corrupted frame that decoded <em>successfully</em> into something different.
+    Auditing the other paths for a lingering 16-bit <code>vt</code> then found the July bug still
+    live one field over: <code>block_votes.pack_block_field</code> wrapped <em>silently</em> at
+    2<sup>24</sup>, turning an upvote into a downvote on the block layer. New vote types are now
+    refused at creation, loudly, at <strong>16,777,215</strong> — the narrowest of the three packed
+    layouts, not the 2.1 billion the Postgres SERIAL can mint.</p>
   </a>
 
   <a class="entry" href="./2026-08-12-proposal-labels.html">

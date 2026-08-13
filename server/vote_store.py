@@ -274,6 +274,34 @@ DIR_BIT = 52  # direction bit position in the Redis field key
 EDGE_BITS = 24
 VT_BITS = 24
 
+# The NARROWEST real ceiling on a vote_type_id anywhere in the system, and the
+# number the creation guard enforces (database.get_or_create_vote_type_id).
+#
+# Audited 2026-08-13, every path a vt id travels:
+#   Redis vote field   pack()                  vt at bits 51..28  -> 24 bits  ← narrowest
+#   Block aggregate    block_votes.pack_block_field  vt at 47..24 -> 24 bits  ← narrowest
+#   Client store key   client-react/src/utils/voteKey.ts VT_BITS  -> 24 bits  ← narrowest
+#   WS binary frame    wire_codec vtId varint                     -> 2^53-1
+#   Sparse HTTP body   {str(id): label} JSON                      -> unbounded
+#   Postgres           vote_types.id is int4 SERIAL               -> 2147483647
+#
+# So Postgres can mint ids 128x larger than the three packed layouts can carry,
+# which is exactly the shape of the July bug: vt was 16 bits, a bulk import
+# pushed the SERIAL past 65535, and the overflow bit landed on the direction bit
+# at 52 — recording those votes as DOWNVOTES, silently. Widening to 24 moved the
+# cliff; it did not remove it. At vt = 2^24 the Redis field's overflow lands on
+# bit 52 again, and the block field's on ITS direction bit at 48.
+#
+# Hence: refuse the id at CREATION, where a human is present and can be told,
+# rather than at pack time on a vote that has already been accepted. The packers
+# keep their own ValueError as the last line of defence.
+MAX_VOTE_TYPE_ID = (1 << VT_BITS) - 1  # 16,777,215
+
+
+class VoteTypeLimitError(Exception):
+    """A new vote type cannot be created: the id space the packed vote-key
+    layouts can address is exhausted. Carries a user-facing message."""
+
 # Vote directions (API/app layer): +1 = up, -1 = down, 0 = no vote
 UP = 1
 DOWN = -1
