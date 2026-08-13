@@ -54,7 +54,7 @@ PRODUCTS = [
     },
     {
         "name": "tee-isoback",
-        "title": "Isometric Grid — back",
+        "title": "PLS FIX — back, both shirts",
         "size_in": "12 × 15 in",
         "fn": back.tee_back_isogrid,
         "ways": [("black", BLACK), ("white", WHITE)],

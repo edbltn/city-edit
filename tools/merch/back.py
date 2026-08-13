@@ -1,21 +1,16 @@
 """
 The Isometric Grid back — a city you can scan.
 
-The front is the wordmark built as a city. The back is the same idea taken
-literally: a QR code drawn as an isometric skyline, where a dark module is a
-tower and a light one is low-rise, so the code and the city are the same object.
+A QR code drawn as an isometric skyline — a dark module is a tower, a light one
+is low-rise — under two words:
 
-The entreaty is split either side of it, because the code is the answer to the
-line above it and the line below tells you how to get it:
-
-    ONE OF THESE
-    BLOCKS IS MINE
+    PLS FIX
     [ the city ]
-    SCAN TO SEE WHICH
 
-That works harder than "scan me". It says what the code is (a city), what the
-wearer's stake in it is (one block), and what scanning buys you (which one) —
-and it is true, because the code resolves to exactly one proposal.
+Two words and a city is the whole back. It reads as a text message to a
+municipality, which is the correct register for a complaint about one crossing,
+and it needs no instruction to scan: a code this size on a person's back is
+self-evidently there to be pointed at.
 
 The projection is `tools/stickers/isoqr.py`, not the front's true 30° isometric.
 Its horizontal squeeze makes the grid a square diamond rather than one 1.73×
@@ -40,12 +35,10 @@ import isoqr  # noqa: E402
 # be decided on how it looks.
 W, H = 3600, 4500
 
-HEADLINE = ["ONE OF THESE", "BLOCKS IS MINE"]
-ENTREATY = "SCAN TO SEE WHICH"
+HEADLINE = "PLS FIX"
 
-HEAD_MEASURE = 2500
-ENTREATY_MEASURE = 2100
-QR_WIDTH = 2850
+HEAD_MEASURE = 2600
+QR_WIDTH = 2900
 
 DEFAULT_URL = "HTTPS://CITYEDIT.ORG/S/K4M9X"
 
@@ -54,38 +47,22 @@ def tee_back_isogrid(ink: str, ground: str, *,
                      url: str | None = None) -> tuple[int, int, str]:
     url = url or DEFAULT_URL
     cap = face(600).cap_height / face(600).upem
-
-    # Both headline lines at ONE size, set by the longer, so the block is a
-    # rectangle of type rather than two lines of unrelated scale.
-    head_size = size_to_fit(HEADLINE[1], HEAD_MEASURE, 600, 0.06)
-    entreaty_size = size_to_fit(ENTREATY, ENTREATY_MEASURE, 400, 0.14)
+    head_size = size_to_fit(HEADLINE, HEAD_MEASURE, 600, 0.08)
 
     # The code is drawn against the garment, so a dark shirt gets light towers.
     tones = isoqr.tones_for(ground, ink)
-    qr_body, qr_w, qr_h, pitch = isoqr.block_for_width(url, tones, QR_WIDTH)
+    qr_body, qr_w, qr_h, _pitch = isoqr.block_for_width(url, tones, QR_WIDTH)
 
-    head_h = head_size * cap + head_size * 1.0
-    gap_qr, gap_entreaty = 300, 300
-    total = head_h + gap_qr + qr_h + gap_entreaty + entreaty_size * cap
+    gap = 260
+    total = head_size * cap + gap + qr_h
     top = (H - total) / 2
 
-    body = []
     y = top + head_size * cap
-    for i, line in enumerate(HEADLINE):
-        if i:
-            y += head_size * 1.0
-        body.append(text(line, W / 2, y, head_size, weight=600, fill=ink,
-                         tracking=0.06, anchor="middle"))
-
-    qr_y = y + gap_qr
-    body.append(
-        f'<g transform="translate({(W - qr_w) / 2:.2f},{qr_y:.2f})">{qr_body}</g>'
-    )
-
-    y = qr_y + qr_h + gap_entreaty + entreaty_size * cap
-    body.append(text(ENTREATY, W / 2, y, entreaty_size, weight=400, fill=ink,
-                     tracking=0.14, anchor="middle"))
-
+    body = [
+        text(HEADLINE, W / 2, y, head_size, weight=600, fill=ink,
+             tracking=0.08, anchor="middle"),
+        f'<g transform="translate({(W - qr_w) / 2:.2f},{y + gap:.2f})">{qr_body}</g>',
+    ]
     return W, H, "".join(body)
 
 

@@ -13,16 +13,22 @@ is also the whole joke, which is why there is no line under the code. It would
 be a second punchline for a shirt that already landed one.
 """
 
-import segno
+import sys
+from pathlib import Path
 
-from palette import is_dark
 from typo import face, size_to_fit, text
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "stickers"))
+
+import isoqr  # noqa: E402
 
 # 11 × 11 in. The composition is near-square, and a taller canvas would just be
 # empty print area that the uploader scales the artwork down to fill.
 W, H = 3300, 3300
-QR_SIZE = 1080
-QR_QUIET = 4                # modules of quiet zone, per the QR spec's minimum
+# Wider than the flat code it replaced. A diamond reads smaller than its
+# bounding box — the corners are empty — so matching the old square's width
+# would have left it looking like an afterthought under the type.
+QR_SIZE = 1850
 
 HEART = "@"                 # stands in for the mark inside a monospaced line
 LINE = "I @ THIS CITY"
@@ -90,48 +96,6 @@ def mono_line(s: str, x: float, baseline: float, size: float, fill: str,
     return "".join(out)
 
 
-def qr_block(url: str, x: float, y: float, size: float, ink: str,
-             panel: bool) -> str:
-    """
-    A scannable code, built for cloth.
-
-    Error correction H (30%): a shirt creases, stretches and takes ink spread,
-    and the code has one job. On a dark garment the modules are knocked out of a
-    light panel rather than printed light-on-dark — decoders have handled
-    inverted codes for years, but "mostly" is not good enough for the one
-    element on the shirt that has to work.
-    """
-    matrix = [list(row) for row in segno.make(url, error="h").matrix]
-    modules = len(matrix)
-    span = modules + QR_QUIET * 2
-    m = size / span
-
-    def rect(cx, cy, w, h):
-        return (f"M{x + cx * m:.2f},{y + cy * m:.2f}h{w * m:.2f}"
-                f"v{h * m:.2f}h{-w * m:.2f}Z")
-
-    # Merge each row's dark runs into one rect apiece — a code is a thousand-odd
-    # modules, and runs cut that to a couple of hundred subpaths.
-    runs = []
-    for r, row in enumerate(matrix):
-        c = 0
-        while c < modules:
-            if row[c]:
-                start = c
-                while c < modules and row[c]:
-                    c += 1
-                runs.append(rect(QR_QUIET + start, QR_QUIET + r, c - start, 1))
-            else:
-                c += 1
-
-    if panel:
-        # One even-odd path: light panel, modules punched clean through it, so
-        # the garment itself is the dark half of the code.
-        return (f'<path fill-rule="evenodd" fill="{ink}" '
-                f'd="{rect(0, 0, span, span)}{"".join(runs)}"/>')
-    return f'<path fill="{ink}" d="{"".join(runs)}"/>'
-
-
 def tee_one_note(ink: str, ground: str, *,
                  url: str | None = None) -> tuple[int, int, str]:
     # Resolved here, not defaulted in the signature, so --qr-url can rebind the
@@ -142,12 +106,19 @@ def tee_one_note(ink: str, ground: str, *,
     head_size = size_to_fit(LINE, LINE_MEASURE, 600, 0.06)
     turn_size = size_to_fit(TURN, TURN_MEASURE, 400, 0.10)
 
+    # The same isometric code the back carries. It needs no light panel behind
+    # it — its light half IS the garment — so on a black shirt this is a city
+    # of pale towers rather than a white sticker, which is both less ink and
+    # much more the thing the shirt is about.
+    tones = isoqr.tones_for(ground, ink)
+    qr_body, qr_w, qr_h, _pitch = isoqr.block_for_width(url, tones, QR_SIZE)
+
     # Measure the whole column, then centre it. Laying out from a fixed top
     # leaves the slack at the bottom, which reads as a design that ran out.
-    gap_turn, gap_qr, gap_url = 250, 230, 130
+    gap_turn, gap_qr, gap_url = 240, 170, 120
     total = (head_size * cap + gap_turn + turn_size * cap + gap_qr
-             + QR_SIZE + gap_url + 64)
-    top = (H - total) / 2 - 40          # bias up; a chest print reads better high
+             + qr_h + gap_url + 64)
+    top = (H - total) / 2 - 30          # bias up; a chest print reads better high
 
     body = []
     y = top + head_size * cap
@@ -160,15 +131,12 @@ def tee_one_note(ink: str, ground: str, *,
 
     qr_y = y + gap_qr
     body.append(
-        qr_block(url, (W - QR_SIZE) / 2, qr_y, QR_SIZE, ink, is_dark(ground))
+        f'<g transform="translate({(W - qr_w) / 2:.2f},{qr_y:.2f})">{qr_body}</g>'
     )
     body.append(
-        text("CITYEDIT.ORG", W / 2, qr_y + QR_SIZE + gap_url, 64, fill=ink,
+        text("CITYEDIT.ORG", W / 2, qr_y + qr_h + gap_url, 64, fill=ink,
              tracking=0.42, anchor="middle", opacity=0.5)
     )
     return W, H, "".join(body)
 
 
-def qr_version(url: str) -> int:
-    """How dense the code is. Longer, lower-case URLs push this up fast."""
-    return segno.make(url, error="h").version

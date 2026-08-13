@@ -20,8 +20,16 @@ Two designs, two colourways each. That is the whole catalogue.
 | | Print | Colourways | Canvas |
 |---|--------|-----------|--------|
 | 01 | **Isometric Grid**, front — the logo grid built as the street plan it always was | amber on black · grey on white | 3300 × 3900 (11 × 13 in) |
-| 01b | **Isometric Grid**, back — the QR *as* an isometric city, `ONE OF THESE BLOCKS IS MINE / SCAN TO SEE WHICH` | white on black · black on white | 3600 × 4500 (12 × 15 in) |
-| 02 | **One Note**, front — `I ♥ THIS CITY / BUT I HAVE ONE NOTE` + a code to one proposal | white on black · black on white | 3300 × 3300 (11 × 11 in) |
+| 02 | **One Note**, front — `I ♥ THIS CITY / BUT I HAVE ONE NOTE` above the same isometric code | white on black · black on white | 3300 × 3300 (11 × 11 in) |
+| — | **PLS FIX**, back — two words over the code as a city. **Both shirts wear it.** | white on black · black on white | 3600 × 4500 (12 × 15 in) |
+
+Every code in the line is the isometric one. It needs no light panel behind it —
+its light half *is* the garment — so a black shirt gets a city of pale towers
+rather than a white sticker, which is less ink and much more the point.
+
+**One code per shirt, not per print.** A One Note shirt carries the code on both
+faces and they are the *same* code: two would bind to two different proposals,
+so the wearer's front and back would be asking for different things.
 
 The back's code is drawn by `tools/stickers/isoqr.py`, not forked into here —
 one isometric-code design in the repo, not two that drift. Its projection is a

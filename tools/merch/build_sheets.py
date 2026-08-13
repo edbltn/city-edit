@@ -67,11 +67,11 @@ WAYS = {
 }
 
 
-def one_note(way, url):
+def one_note_front(way, url):
     return qr_tee.tee_one_note(url=url, **WAYS[way])
 
 
-def iso_back(way, url):
+def pls_fix_back(way, url):
     return back.tee_back_isogrid(url=url, **WAYS[way])
 
 
@@ -80,16 +80,31 @@ def iso_front(way, _url):
     return iso.tee_isogrid(**WAYS[way], **extra)
 
 
-# `coded` marks the prints that carry a QR and therefore need one file per
-# shirt. The isometric FRONT is identical on every shirt, so ten of them is ten
-# copies of one file — and it is the one print in the line that could be screen
-# printed instead, which is much cheaper per unit at this quantity.
-PRINTS = [
-    {"key": "one-note", "fn": one_note, "coded": True,
-     "headline": "I LOVE THIS CITY BUT I HAVE ONE NOTE"},
-    {"key": "iso-back", "fn": iso_back, "coded": True,
-     "headline": "ONE OF THESE BLOCKS IS MINE"},
-    {"key": "iso-front", "fn": iso_front, "coded": False, "headline": ""},
+# One code per SHIRT, not per print.
+#
+# The One Note shirt carries a code on both faces, and they must be the SAME
+# code: two codes on one garment would bind to two different proposals, so the
+# wearer's front and back would disagree about what they are asking for. So the
+# code is minted for the shirt and every coded print on it renders that one.
+#
+# `coded` marks the prints that carry it. The isometric FRONT does not — it is
+# identical on every shirt, which also makes it the one print in the line worth
+# screen printing instead at this quantity.
+SKUS = [
+    {"key": "isogrid--black", "way": "black",
+     "headline": "PLS FIX",
+     "prints": [("iso-front", iso_front, False), ("pls-fix-back", pls_fix_back, True)]},
+    {"key": "isogrid--white", "way": "white",
+     "headline": "PLS FIX",
+     "prints": [("iso-front", iso_front, False), ("pls-fix-back", pls_fix_back, True)]},
+    {"key": "one-note--black", "way": "black",
+     "headline": "I LOVE THIS CITY BUT I HAVE ONE NOTE",
+     "prints": [("one-note-front", one_note_front, True),
+                ("pls-fix-back", pls_fix_back, True)]},
+    {"key": "one-note--white", "way": "white",
+     "headline": "I LOVE THIS CITY BUT I HAVE ONE NOTE",
+     "prints": [("one-note-front", one_note_front, True),
+                ("pls-fix-back", pls_fix_back, True)]},
 ]
 
 
@@ -162,51 +177,50 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
 
     manifest, seed_rows, failures = [], [], []
+    sheets: dict[str, list] = {}
 
-    for print_spec in PRINTS:
-        for way, ink_spec in WAYS.items():
-            key = print_spec["key"]
-            n = args.run if print_spec["coded"] else 1
-            codes = (tee_codes.mint_run(f"{key}--{way}", n)
-                     if print_spec["coded"] else [""])
-            ground = ink_spec["ground"]
-            rgba = tuple(int(ground[i:i + 2], 16) for i in (1, 3, 5)) + (255,)
+    for sku in SKUS:
+        way = sku["way"]
+        ground = WAYS[way]["ground"]
+        rgba = tuple(int(ground[i:i + 2], 16) for i in (1, 3, 5)) + (255,)
+        codes = tee_codes.mint_run(sku["key"], args.run)
 
-            items = []
-            for i, code in enumerate(codes):
-                url = tee_codes.url_for(code) if code else None
-                w, h, body = print_spec["fn"](way, url)
+        for shirt_no, code in enumerate(codes, start=1):
+            url = tee_codes.url_for(code)
+            for print_key, fn, coded in sku["prints"]:
+                # An uncoded print is the same file on every shirt — render it
+                # once for the SKU, not ten identical times.
+                if not coded and shirt_no > 1:
+                    continue
+                w, h, body = fn(way, url if coded else None)
                 markup = svg(w, h, body)
-                name = f"{key}--{way}" + (f"--{code.lower()}" if code else "")
+                name = (f"{sku['key']}--{print_key}"
+                        + (f"--{code.lower()}" if coded else ""))
                 path = shirts_dir / f"{name}.png"
                 render_png(markup, w, h, path)
 
-                if code:
+                if coded:
                     if not decodes_to(path, url, rgba):
                         failures.append(name)
-                    seed_rows.append({
-                        "code": code.lower(), "map_slug": SCAN_MAP,
-                        "vote_type": SCAN_VOTE_TYPE,
-                        "headline": print_spec["headline"],
-                        "src_tag": f"tee-{key}",
-                    })
+                    sheets.setdefault(f"{sku['key']}--{print_key}", []).append(
+                        (markup, ink_box(path)))
                 manifest.append({
-                    "print": key, "colourway": way, "index": i + 1,
-                    "code": code, "url": url or "",
+                    "sku": sku["key"], "shirt": shirt_no, "print": print_key,
+                    "code": code if coded else "", "url": url if coded else "",
                     "size_in": f"{w / DPI:.1f}x{h / DPI:.1f}",
                     "file": f"shirts/{name}.png",
                 })
-                items.append((markup, ink_box(path)))
 
-            # Ten copies of an uncoded print is ten of one file; no sheet.
-            if print_spec["coded"]:
-                length = gang_sheet(
-                    items, sheets_dir / f"{key}--{way}.pdf",
-                    sheets_dir / f"{key}--{way}.proof.png")
-                print(f"  {key}--{way}: {n} shirts, sheet {SHEET_W_IN:.0f}×{length:.1f} in")
-            else:
-                print(f"  {key}--{way}: 1 file, printed {args.run}× "
-                      f"(no code — identical on every shirt)")
+            seed_rows.append({
+                "code": code.lower(), "map_slug": SCAN_MAP,
+                "vote_type": SCAN_VOTE_TYPE, "headline": sku["headline"],
+                "src_tag": f"tee-{sku['key'].split('--')[0]}",
+            })
+
+    for name, items in sorted(sheets.items()):
+        length = gang_sheet(items, sheets_dir / f"{name}.pdf",
+                            sheets_dir / f"{name}.proof.png")
+        print(f"  {name:<32} {len(items):>3} up   sheet {SHEET_W_IN:.0f}×{length:.1f} in")
 
     with (OUT / "manifest.csv").open("w", newline="") as f:
         wtr = csv.DictWriter(f, fieldnames=list(manifest[0].keys()))
@@ -215,7 +229,8 @@ def main():
     (OUT / "seed_tees.sql").write_text(tee_codes.seed_sql(seed_rows))
 
     coded = len(seed_rows)
-    print(f"\n{coded} unique codes, all decoded back from their own artwork: "
+    print(f"\n{coded} shirts, {coded} unique codes, every coded print decoded "
+          f"back from its own artwork: "
           f"{'OK' if not failures else 'FAILED ' + ', '.join(failures)}")
     print(f"→ {OUT}")
     if failures:
