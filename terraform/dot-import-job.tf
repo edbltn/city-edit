@@ -99,6 +99,15 @@ resource "google_cloud_scheduler_job" "dot_import" {
   time_zone = "America/New_York"
   region    = var.region
 
+  # PAUSED 2026-08-13. The import re-casts any project page whose sitemap
+  # lastmod falls in its window and has no notion of a project being finished,
+  # so it would resurrect proposals the 2026-08-12 nyc-proposals audit removed
+  # as Past/Complete — re-registering their citations on the way. Resume once
+  # weekly_import.py skips projects in a completed DOT state; until then the
+  # map is better stale than wrong. Paused here rather than with `gcloud
+  # scheduler jobs pause`, which the next apply would silently undo.
+  paused = true
+
   retry_config {
     retry_count = 1
   }
