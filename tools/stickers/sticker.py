@@ -108,15 +108,19 @@ COLOURWAYS = {
         "field": "#0d0d0d",
         "ink": "#f4f5f0",       # a warm off-white; pure white on black flares
         "accent": "#E0A23A",    # --accent, at the value it was tuned for
-        # The code sits on a light chip rather than being knocked out of the
-        # black. Inverted codes are a real compatibility risk, not a theoretical
-        # one: measured here, zxing reads a light-on-dark code and OpenCV cannot
-        # read one AT ALL, at any size. Phone cameras mostly cope — but "mostly"
-        # is not good enough for the one element on the sticker that has to
-        # work, which is exactly the call tools/merch/qr_tee.py made for the
-        # same reason on dark garments.
-        "code_panel": "#f4f5f0",
-        "code_ink": "#0d0d0d",
+        # The code is knocked straight out of the black — no light chip. That
+        # is a deliberate trade, taken with the numbers in hand: an inverted
+        # code is read perfectly by zxing, the decoder lineage behind most phone
+        # scanners, and NOT AT ALL by OpenCV, at any size. Chipped, both read it.
+        # The chip was also costing real estate — it has to cover the quiet zone
+        # too, so the layout reserved the whole square and the type shrank.
+        #
+        # If a field report ever shows scans failing on some app, this is the
+        # first thing to put back: set code_panel to the ink and code_ink to the
+        # paper. tools/merch/qr_tee.py made the opposite call for dark garments
+        # and explains why it is defensible either way.
+        "code_panel": None,
+        "code_ink": None,        # falls through to `ink` — light on black
     },
 }
 

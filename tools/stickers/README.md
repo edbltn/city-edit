@@ -230,14 +230,27 @@ band, a warm off-white for the type.
 
 Two things follow from it, and both are measured rather than assumed.
 
-**The code sits on a light chip, not knocked out of the black.** Inverted codes
-are a real compatibility risk: measured here, zxing reads a light-on-dark code
-and **OpenCV cannot read one at all**, at any size. Phone cameras mostly cope,
-but "mostly" is not good enough for the one element on the sticker that has to
-work — which is exactly the call `tools/merch/qr_tee.py` made for dark garments.
-With the chip, both decoders read it. It costs type size (14.9 pt against the
-light colourway's 17.8), because the chip has to cover the quiet zone too and
-the layout reserves the whole thing.
+**The code is knocked straight out of the black.** No light chip — the sticker
+is genuinely white on black. That is a trade taken with the numbers in hand:
+
+| | zxing | OpenCV | type |
+|---|---|---|---|
+| inverted (shipping) | **100%** | **0%** | 20.2 pt |
+| on a light chip | 100% | ~100% | 17.0 pt |
+
+zxing is the decoder lineage behind most phone scanners and reads every code at
+every capture width; OpenCV cannot read an inverted code at all, at any size,
+including a plain segno code before our artwork touches it. So a `0/N` OpenCV
+column in `verify_scan.py` is the expected reading here, not a regression.
+
+The chip also cost real estate — it has to cover the quiet zone, so the layout
+reserved the whole square and the type shrank. Dropping it took the line from
+17.0 pt to 20.2.
+
+**If a field report shows scans failing in some app, this is the first thing to
+put back**: set `code_panel` to the ink and `code_ink` to the paper in
+`COLOURWAYS["dark"]`. `tools/merch/qr_tee.py` made the opposite call for dark
+garments and explains why it is defensible either way.
 
 **It costs ink.** The field is no longer bare stock, so a 2.5" disc is a full
 flood of near-black. On the 3" laser stock that is free; on the 2.5" **matte

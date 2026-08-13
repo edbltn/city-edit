@@ -30,11 +30,17 @@ zxing-cpp is the gate. It is the lineage most phone scanners are built on, and
 it reads every code here.
 
 OpenCV's detector is reported alongside it and deliberately does NOT fail the
-run. It rejects a handful of these codes at any resolution — including the raw
-segno output, before our artwork touches it — so it is measuring its own
-detector rather than the sticker. It is still worth printing: a change that
-suddenly drops OpenCV's agreement from "most" to "none" is a signal that
-something happened to the art, even if the gate is still green.
+run, because it cannot read two things this design uses on purpose:
+
+  * an INVERTED code (light modules on a dark field), which is what the default
+    dark colourway prints — measured, OpenCV reads zero of those at any size,
+    including a plain segno code before our artwork touches it;
+  * the isometric city, likewise zero.
+
+So a `0/N` opencv column is the EXPECTED reading for the default build and not a
+regression. It stays in the output because it is still a useful tripwire on the
+light colourway's flat code, where it should read ~100% — a drop there would
+mean something happened to the art.
 
 `--px` sets how many pixels wide the sticker is in the simulated capture, which
 is the only thing that decides decodability: a 29-module code needs roughly
@@ -142,7 +148,9 @@ def main():
         status = "ok  " if not bad else "FAIL"
         print(f"  {status} {px:>4} px across the disc ({ppm:.1f} px/module)  "
               f"zxing {len(rows) - len(bad)}/{len(rows)}  "
-              f"opencv {cv_ok}/{len(rows)} (advisory)")
+              f"opencv {cv_ok}/{len(rows)} (advisory)"
+              + ("  ← expected: OpenCV cannot read inverted/iso codes"
+                 if cv_ok == 0 else ""))
         for r in bad[:6]:
             print(f'        {r["stock"]}" {r["message"]} {r["code"]}')
         if len(bad) > 6:
