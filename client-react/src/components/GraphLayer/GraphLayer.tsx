@@ -36,10 +36,14 @@ import {
 } from "../MapLibreBackground/proposalLabelStyle";
 import { makeVoteTypeIcon } from "./voteTypeIcon";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
-import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, TOP_PROPOSAL_MIN_NET,
-  ROUTE_PROPOSAL_MIN_NET, type VoteTypeWinner } from "./topProposals";
 import {
-  createRouteProposalJob, corridorFromEdgeIds, corridorSliceBetween, routeBlockEdges, isRouteCovered,
+  computeWinnerCandidates, dedupedBlockNetResolver, selectTopProposalsFrom, topLabelForEdges,
+  TOP_PROPOSALS_PER_TYPE, TOP_PROPOSAL_MIN_SPACING_M, TOP_PROPOSAL_MIN_NET,
+  ROUTE_PROPOSAL_MIN_NET,
+  type VoteTypeWinner,
+} from "./topProposals";
+import {
+  createRouteProposalJob, rankRouteProposals, corridorFromEdgeIds, corridorSliceBetween, routeBlockEdges, isRouteCovered,
   routeCoverageRatio, ROUTE_SELECTED_MIN_COVERAGE,
   expandSelectionToUndirected,
   type RouteProposal,
@@ -62,6 +66,7 @@ import {
   touchedBlockKeys,
   adjEdgesOf,
   adjShortest,
+  blockKeyOf,
 } from "./graphTopology";
 import {
   materializeBlocks, selectionVoteRows, selectionCoverage,
@@ -365,6 +370,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
   // Last-seen revision for gap detection
   const lastRevRef = useRef(0);
+
+  // Monotonic counter bumped by EVERY mutation of the in-memory vote state —
+  // full fetches, cached loads, applied WS deltas, and the local optimistic
+  // cast. The server revision alone can't serve as a cache key: the optimistic
+  // cast edits edge_vote_types in place without a rev (the server's delta
+  // corrects it later), so anything keyed on rev would happily serve a stale
+  // derivation of vote data that has already changed under it. The proposal
+  // caches below key off this.
+  const voteEpochRef = useRef(0);
+  const bumpVoteEpoch = () => { voteEpochRef.current++; };
 
   // Deltas received before the initial vote fetch completes
   const pendingDeltasRef = useRef<import("../../types").VoteDelta[]>([]);
@@ -818,26 +833,53 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const refreshHeatmapDisplayRef = useRef(refreshHeatmapDisplay);
   useEffect(() => { refreshHeatmapDisplayRef.current = refreshHeatmapDisplay; }, [refreshHeatmapDisplay]);
 
-  // PBTP winners recompute — the full edge-table scan. Only called from the
-  // batched recompute path (never per vote).
+  // Per-type PBTP candidates for one vote epoch — the O(edges) half of the
+  // selection, which does NOT depend on the legend's visibility toggles (see
+  // topProposals.computeWinnerCandidates). Cached so a toggle re-picks pins
+  // from a few dozen candidates instead of rescanning three million edges.
+  const pbtpCandidatesRef = useRef<{ epoch: number; candidates: VoteTypeWinner[] } | null>(null);
+
+  // PBTP winners recompute — the full edge-table scan on a new vote epoch, a
+  // few-dozen-item re-selection when only the legend changed.
   const recomputeTopProposals = useCallback(() => {
     const data = graphDataRef.current;
     if (!data) return;
     const legendLen = data.vote_type_legend?.length ?? 0;
     const legendChanged = legendLen !== lastLegendLenRef.current;
     lastLegendLenRef.current = legendLen;
-    setStableWinners(selectTopProposals(
-      data, tiebreakSaltRef.current, TOP_PROPOSAL_LIMIT,
+    const epoch = voteEpochRef.current;
+    let cache = pbtpCandidatesRef.current;
+    if (!cache || cache.epoch !== epoch) {
+      cache = {
+        epoch,
+        candidates: computeWinnerCandidates(
+          data.vote_type_legend ?? [],
+          data.edge_vote_types ?? [],
+          TOP_PROPOSALS_PER_TYPE,
+          isStationNetwork ? undefined : voteTypeKindOf,
+          // Station networks don't badge winners as "top proposals" (every
+          // station renders its own pin regardless), so the floor stays off.
+          isStationNetwork ? 0 : topProposalMinNet,
+          // Votes live on edges but count on blocks — by DISTINCT DEVICE, so
+          // the ranking value is the deduped block row, not a sum of edges.
+          (edgeIdx) => blockKeyOf(data, edgeIdx),
+          dedupedBlockNetResolver(data),
+        ),
+      };
+      pbtpCandidatesRef.current = cache;
+    }
+    setStableWinners(selectTopProposalsFrom(
+      data, cache.candidates, tiebreakSaltRef.current, TOP_PROPOSAL_LIMIT,
       TOP_PROPOSAL_MIN_SPACING_M,
-      isStationNetwork ? undefined : voteTypeKindOf,
-      // Station networks don't badge winners as "top proposals" (every station
-      // renders its own pin regardless), so the support floor stays off there.
-      isStationNetwork ? 0 : topProposalMinNet,
       // Legend toggles. Applied HERE rather than to the finished list so that
       // hiding types promotes the survivors' runners-up into the freed slots.
       isVoteTypeVisible,
     ), legendChanged);
   }, [setStableWinners, isStationNetwork, voteTypeKindOf, topProposalMinNet]);
+
+  // The candidate scan bakes in kind/floor, so a change to either invalidates it.
+  useEffect(() => { pbtpCandidatesRef.current = null; },
+    [isStationNetwork, voteTypeKindOf, topProposalMinNet]);
 
   const recomputeTopProposalsRef = useRef(recomputeTopProposals);
   useEffect(() => { recomputeTopProposalsRef.current = recomputeTopProposals; }, [recomputeTopProposals]);
@@ -1485,47 +1527,91 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // new recompute cancels any in-flight job (its half-built result would mix
   // vote states); a delta landing mid-job just dirties the sweep again.
   const routeJobTokenRef = useRef<{ cancelled: boolean } | null>(null);
+
+  // Clustered corridors per vote type, for one vote epoch. `step(type)` reads
+  // only that type's nets and the topology — no cross-type state — so a type's
+  // corridors are the same whether its neighbours in the legend are shown or
+  // hidden. Memoizing them turns a visibility toggle from "re-cluster twelve
+  // types" into "re-rank the arrays we already have" (routeProposals.
+  // rankRouteProposals). `eligible` is the job's full type list (computed
+  // WITHOUT the visibility filter) so the fast path can tell "every visible
+  // type is cached" from "one was never clustered".
+  const routeCacheRef = useRef<{
+    epoch: number; eligible: number[] | null; byType: Map<number, RouteProposal[]>;
+  }>({ epoch: -1, eligible: null, byType: new Map() });
+
+  const publishRouteProposals = useCallback((next: RouteProposal[], note: string) => {
+    dlog("proposals", `recompute: ${next.length} corridors ${note}`,
+      next.map((p) => `${p.label}#${p.id}(${p.score})`));
+    debugState("routeProposals", next.length);
+    // Clustering is deterministic, so an unchanged vote state yields an
+    // identical list — keep the previous array to avoid remounting diamonds.
+    setRouteProposals((prev) =>
+      prev.length === next.length
+        && prev.every((p, i2) => p.id === next[i2].id && p.score === next[i2].score)
+        ? prev : next);
+  }, []);
+
   const recomputeRouteProposals = useCallback(() => {
     const topo = topologyRef.current;
     const adj = nodeAdjRef.current;
     const data = graphDataRef.current;
     if (!topo || !adj || !data?.edge_vote_types) return;
+
+    const legend = data.vote_type_legend ?? [];
+    const cache = routeCacheRef.current;
+    if (cache.epoch !== voteEpochRef.current) {
+      cache.epoch = voteEpochRef.current;
+      cache.eligible = null;
+      cache.byType.clear();
+    }
+    const visible = (legendIdx: number) => isVoteTypeVisible(legend[legendIdx] ?? "");
+
     if (routeJobTokenRef.current) routeJobTokenRef.current.cancelled = true;
     const token = { cancelled: false };
     routeJobTokenRef.current = token;
 
     const t0 = performance.now();
+    const visibleCached = () =>
+      (cache.eligible ?? []).filter(visible).map((li) => cache.byType.get(li) ?? []);
+
+    // Fast path — every visible type is already clustered for this vote epoch,
+    // so nothing needs walking. This is the legend-toggle path: hiding a type
+    // (and re-showing one clustered earlier in the session) lands in the same
+    // tick as the click, instead of waiting out an idle callback and a dozen
+    // clustering slices.
+    if (cache.eligible && cache.eligible.filter(visible).every((li) => cache.byType.has(li))) {
+      publishRouteProposals(rankRouteProposals(visibleCached()),
+        `from cache in ${(performance.now() - t0).toFixed(1)}ms`);
+      return;
+    }
+
     // kindOf keeps POINT-kind vote types out of the corridor family (their
     // votes surface as PBTP pins instead) — the mirror of the PBTP filter.
     // The prebuilt block index skips the job's own O(nEdges) rebuild
-    // (GraphLayer already built one for hover/selection).
+    // (GraphLayer already built one for hover/selection). No `isVisible` here:
+    // the job enumerates every eligible type so the cache knows the full set,
+    // and the hidden ones simply never get stepped (below).
     const job = createRouteProposalJob(topo, adj, data, {
       kindOf: voteTypeKindOf, blockIndex: blockIndexRef.current,
-      // Legend toggles — a hidden type is skipped before its clustering runs,
-      // so a filtered map recomputes faster, not slower.
-      isVisible: isVoteTypeVisible,
       // The corridor support floor (>routeProposalMinNet), expressed as the
       // pipeline's minimum path score. A map's topProposalMinNet override wins
       // here too (nyc-proposals sets 0, one authoritative vote per project);
       // absent an override this is the family's own default, NOT the pin floor.
       minRouteScore: routeProposalMinNet + 1,
     });
-    const perType: RouteProposal[][] = [];
+    cache.eligible = job.types;
+    // Only VISIBLE types are clustered, and only the ones not already cached:
+    // a filtered map still recomputes faster, not slower, and re-showing a type
+    // costs that one type rather than all of them.
+    const todo = job.types.filter((li) => visible(li) && !cache.byType.has(li));
     let i = 0;
     let slices = 0;
 
     const finishJob = () => {
-      const next = job.finish(perType);
-      dlog("proposals", `recompute: ${next.length} corridors in ${(performance.now() - t0).toFixed(1)}ms `
-        + `(${job.types.length} types over ${slices} slices)`,
-        next.map((p) => `${p.label}#${p.id}(${p.score})`));
-      debugState("routeProposals", next.length);
-      // Clustering is deterministic, so an unchanged vote state yields an
-      // identical list — keep the previous array to avoid remounting diamonds.
-      setRouteProposals((prev) =>
-        prev.length === next.length
-          && prev.every((p, i2) => p.id === next[i2].id && p.score === next[i2].score)
-          ? prev : next);
+      publishRouteProposals(rankRouteProposals(visibleCached()),
+        `in ${(performance.now() - t0).toFixed(1)}ms `
+        + `(${todo.length}/${job.types.length} types clustered over ${slices} slices)`);
     };
 
     const slice = (deadline?: IdleDeadline) => {
@@ -1535,15 +1621,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       // budget holds (small maps finish in one slice, the NYC bike map
       // spreads its heavy types across several).
       do {
-        if (i >= job.types.length) { finishJob(); return; }
-        perType.push(job.step(job.types[i++]));
-      } while (deadline && deadline.timeRemaining() > 10 && i < job.types.length);
-      if (i >= job.types.length) { finishJob(); return; }
+        if (i >= todo.length) { finishJob(); return; }
+        const legendIdx = todo[i++];
+        cache.byType.set(legendIdx, job.step(legendIdx));
+      } while (deadline && deadline.timeRemaining() > 10 && i < todo.length);
+      if (i >= todo.length) { finishJob(); return; }
       scheduleIdleSlice(slice);
     };
     // The first slice is deferred too, so the caller (often itself an idle
     // callback that just ran the PBTP scan) returns before any heavy type runs.
     scheduleIdleSlice(slice);
+  }, [voteTypeKindOf, routeProposalMinNet, publishRouteProposals]);
+
+  // The clustering bakes in kind and the support floor, so a change to either
+  // invalidates every cached type.
+  useEffect(() => {
+    routeCacheRef.current = { epoch: -1, eligible: null, byType: new Map() };
   }, [voteTypeKindOf, routeProposalMinNet]);
 
   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);
@@ -1610,17 +1703,30 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const requestProposalsRecomputeRef = useRef(requestProposalsRecompute);
   useEffect(() => { requestProposalsRecomputeRef.current = requestProposalsRecompute; }, [requestProposalsRecompute]);
 
-  // Legend visibility toggles (map/voteTypeFilter). Heat is a cheap re-derive
-  // from vote data we already hold, so it repaints on the spot and the checkbox
-  // feels instant; the proposal pins and corridors need the full edge-table scan
-  // and follow on an URGENT recompute — the user is watching for them, so this
-  // must not wait for the minute-cadence sweep.
+  // Legend visibility toggles (map/voteTypeFilter). A toggle changes nothing
+  // about the vote state — it only changes which of it is drawn — so every
+  // surface re-derives from caches held for the current vote epoch and the
+  // whole thing runs SYNCHRONOUSLY, in the same tick as the click:
+  //
+  //   heat  — re-rank each block's visible types (broadcastBlockVotes)
+  //   pins  — re-select from cached PBTP candidates (recomputeTopProposals)
+  //   corridors — re-rank cached per-type clusters (recomputeRouteProposals)
+  //
+  // Deliberately NOT via requestProposalsRecompute: routing this through an
+  // idle callback used to add ~300ms of waiting to work that now takes about a
+  // millisecond, and the recompute it queued rebuilt everything from scratch
+  // (~800ms of clustering) for a change that touches no votes.
+  // publishVoteTypeSupport is skipped for the same reason — the legend's net
+  // counts are unmasked by design, so a visibility toggle cannot move them.
+  // Showing a type never clustered this epoch is the one slow case, and
+  // recomputeRouteProposals still slices that one type through idle time.
   useEffect(() => subscribeVoteTypeFilter(() => {
     dlog("proposals", `vote-type filter: ${getHiddenVoteTypes().size} hidden`);
     const data = graphDataRef.current;
     if (data) broadcastBlockVotes(data, "filter");
     scheduleRedrawRef.current();
-    requestProposalsRecomputeRef.current(true);
+    recomputeTopProposalsRef.current();
+    recomputeRouteProposalsRef.current();
   }), [broadcastBlockVotes]);
 
   // The batched sweep: votes (own casts and WS deltas) mark this flag; every
@@ -1720,6 +1826,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       }
       graphDataRef.current = { ...topologyRef.current!, ...voteData };
       lastRevRef.current = voteData.rev ?? 0;
+      bumpVoteEpoch();
       dlog("votes", `loaded rev ${voteData.rev}: `
         + `${voteData.block_votes?.length ?? 0} block slots, `
         + `legend [${(voteData.vote_type_legend ?? []).join(", ")}]`);
@@ -1789,6 +1896,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       broadcastBlockVotes(data, "delta");
     }
     lastRevRef.current = delta.rev;
+    bumpVoteEpoch();
   }, [broadcastBlockVotes]);
 
   // Load topology + votes on mount, preferring persisted caches.
@@ -2013,6 +2121,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         if (cachedVotes && blocksMatch) {
           graphDataRef.current = { ...topology, ...cachedVotes };
           lastRevRef.current = cachedVotes.rev ?? 0;
+          bumpVoteEpoch();
           setVoteTypeMap(cachedVotes.vote_types);
           // The edge-array install above still proceeds, but don't repaint
           // the cached (older-rev) block heat over the authoritative body if
@@ -2086,6 +2195,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
         graphDataRef.current = { ...topologyRef.current!, ...voteData };
         lastRevRef.current = voteData.rev ?? 0;
+        bumpVoteEpoch();
         setVoteTypeMap(voteData.vote_types);
         // Persist the RAW wire payload: the sparse form is ~50x smaller to
         // structured-clone into IndexedDB than the decoded dense arrays, and
@@ -2198,6 +2308,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 
       const legendLenBefore = data.vote_type_legend?.length ?? 0;
       applyMyVoteChange(data, adj, detail.edgeIds, detail.label, detail.prevDir, detail.newDir);
+      bumpVoteEpoch();
       refreshHeatmapDisplayRef.current();
       // Unlike the WS-delta path (which dirty-marks for the minute sweep),
       // THIS is the local user's own press — the one vote whose effect on the

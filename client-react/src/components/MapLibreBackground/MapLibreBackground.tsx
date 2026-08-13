@@ -19,7 +19,7 @@ import {
   proposalLabelColors,
   type MapStyle,
 } from "../../mapStyles";
-import { makeHeatNormalization } from "../../map/blockHeat";
+import { makeHeatNormalization, type HeatNormalization } from "../../map/blockHeat";
 import {
   createArrivalAnimator,
   type ArrivalAnimator,
@@ -874,7 +874,10 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
     // the normalization it was computed with. Feature-state lives on the SOURCE
     // (tiles pick it up as they load), so once applied it survives every tile
     // (re)load — this is what lets apply() diff instead of rewriting the world.
-    const applied = { current: null as { heat: Map<number, number>; denomKey: string } | null };
+    const applied = {
+      current: null as
+        { heat: Map<number, number>; denomKey: string; norm: HeatNormalization } | null,
+    };
 
     const featureOf = (id: number) => ({ source: "blocks", sourceLayer: "blocks", id });
 
@@ -911,10 +914,24 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         return;
       }
       const { blockDiff, max, maxNeg } = detail;
+      const prev = applied.current;
       // Signed differential → ramp position, one log denominator per arm
       // (docs/algorithms/05-heat-coloring.md).
-      const { heatOf: signedHeat, denomKey } = makeHeatNormalization(max, maxNeg);
-      const prev = applied.current;
+      //
+      // A LEGEND TOGGLE KEEPS THE SCALE IT FOUND. Hiding a vote type doesn't
+      // change anyone's votes, only which of them each block is ranked by, so
+      // the observed ceilings wobble (hiding the type that held the strongest
+      // opposition moved the negative ceiling from 93 to 80 on the NYC bike
+      // map) — and a moved ceiling means every lit block's heat moves, i.e. a
+      // full rewrite of ~42k feature-states, ~250ms of render, to change the
+      // handful of blocks the filter actually touched. Pinning the scale keeps
+      // the toggle a diff. It also reads better: the surviving proposals are
+      // measured against the same ruler as before, so what you're comparing is
+      // their support, not a rescale.
+      const { heatOf: signedHeat, denomKey } = detail.source === "filter" && prev
+        ? prev.norm
+        : makeHeatNormalization(max, maxNeg);
+      const norm: HeatNormalization = { heatOf: signedHeat, denomKey };
       // Full rewrite only on the first apply and when a normalization
       // ceiling moved (every lit block's heat changes then — rare). Otherwise
       // write just the blocks whose heat actually changed: a vote touches a
@@ -983,7 +1000,7 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         (window as unknown as { __perf?: { mark: (l: string) => void } }).__perf
           ?.mark("first-heat-apply");
       }
-      applied.current = { heat: next, denomKey };
+      applied.current = { heat: next, denomKey, norm };
       dlog("blocks", `heat apply (${full ? "full" : "diff"}): ${writes} writes, ${next.size} lit`
         + (animate ? `, ${changes.length} arriving (${arrival.size} in flight)` : ""));
       debugState("blockHeatNonzero", next.size);
