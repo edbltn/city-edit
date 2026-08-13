@@ -27,6 +27,7 @@ import json
 import re
 import sys
 import time
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -97,6 +98,22 @@ def project_state(html: str) -> str:
     return " / ".join((taxonomy.get("state") or {}).values())
 
 
+# A project's sub-pages are plain Drupal pages carrying no taxonomy of their
+# own; only the project home does. Each one links back to it from its project
+# menu, which is how a sub-page's state is recovered.
+PROJECT_HOME_RE = re.compile(
+    r'project-link-wrap\s+project_home.*?href="([^"]+)"', re.S)
+
+
+def project_home_url(html: str, page_url: str) -> str:
+    """The project home this page belongs to, or "" if it is one itself."""
+    m = PROJECT_HOME_RE.search(html)
+    if not m:
+        return ""
+    home = urllib.parse.urljoin(page_url, m.group(1))
+    return "" if home.rstrip("/") == page_url.rstrip("/") else home
+
+
 class PageMeta(HTMLParser):
     """Pull <title>, meta description, and PDF links out of a project page."""
 
@@ -139,6 +156,7 @@ def fetch_dotprojects(since: str, limit: int, fetch_pages: bool) -> list[dict]:
     )[:limit]
 
     if fetch_pages:
+        home_states: dict[str, str] = {}  # one fetch per project home, not per child
         for entry in changed:
             time.sleep(REQUEST_DELAY_S)
             try:
@@ -152,6 +170,23 @@ def fetch_dotprojects(since: str, limit: int, fetch_pages: bool) -> list[dict]:
             entry["description"] = meta.description
             entry["pdfs"] = sorted(set(meta.pdfs))
             entry["state"] = project_state(html)
+            entry["state_source"] = entry["url"] if entry["state"] else ""
+            if not entry["state"]:
+                # Inherit the project home's state: a sub-page is part of the
+                # same project, and reading only its own (absent) taxonomy
+                # would make every sub-page look like an unknown.
+                home = project_home_url(html, entry["url"])
+                if home:
+                    if home not in home_states:
+                        time.sleep(REQUEST_DELAY_S)
+                        try:
+                            home_html = http_get(home).decode(
+                                "utf-8", errors="replace")
+                            home_states[home] = project_state(home_html)
+                        except Exception:
+                            home_states[home] = ""
+                    entry["state"] = home_states[home]
+                    entry["state_source"] = home if entry["state"] else ""
     return changed
 
 
