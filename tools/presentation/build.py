@@ -44,7 +44,14 @@ def slide_basemap():
              "**Leaflet** for the map: panning, zoom, markers.",
              "**CARTO** raster tiles for the map layer.",
              "Labels are a separate layer, drawn on top.",
-         ])]
+         ]),
+         # This is the only slide that redistributes real basemap imagery, and
+         # CARTO's terms require the credit to travel WITH the tiles — the app
+         # carries it in the map corner (client config.ts), so the deck must
+         # too. Same wording, bottom-right of the art, deliberately quiet.
+         f'<text x="{W - 24}" y="{H - 20}" text-anchor="end" font-size="17" '
+         f'fill="{INK}" opacity="0.55">'
+         '© OpenStreetMap contributors © CARTO</text>']
     add("01-basemap", "Basemap", "".join(b))
 
 
