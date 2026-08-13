@@ -28,9 +28,12 @@ import { useWebSocketContext } from "../../context/WebSocketContext";
 import { useGraphSnap, useTheme, useHeatmap, useGhostPin, useRoute } from "../../context";
 import type { GraphData, ProposalMatch } from "../../types";
 import {
-  BLOCK_VOTES_EVENT, BLOCK_SELECT_EVENT, blockIdAtLatLng,
-  type BlockVotesDetail, type BlockSelectDetail,
+  BLOCK_VOTES_EVENT, BLOCK_SELECT_EVENT, PROPOSAL_LABELS_EVENT, blockIdAtLatLng,
+  type BlockVotesDetail, type BlockSelectDetail, type ProposalLabelDetail,
 } from "../MapLibreBackground/MapLibreBackground";
+import {
+  formatProposalCount, proposalLabelText, proposalRevealZoom,
+} from "../MapLibreBackground/proposalLabelStyle";
 import { makeVoteTypeIcon } from "./voteTypeIcon";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import { selectTopProposals, topLabelForEdges, TOP_PROPOSAL_MIN_SPACING_M, TOP_PROPOSAL_MIN_NET,
@@ -3738,6 +3741,85 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   //   - Edge case: an instant client-side route split must inherit the segment's
   //     edge ids (RouteContext.insertWaypointAtSegment), or the on-path highlight
   //     AND the vote target both vanish.
+  // ===========================================================================
+  // PROPOSAL LABELS — the words on the map.
+  //
+  // The pins say that something is wanted somewhere; only text can say WHAT.
+  // The text is drawn by MapLibre rather than bolted onto these divIcons,
+  // because the whole problem with labelling a few dozen proposals is that they
+  // have to get out of each other's way — and out of the way of the place
+  // labels and the pins — and MapLibre already runs a global collision index
+  // that does exactly that. See addProposalLabels in MapLibreBackground.
+  //
+  // Positions are the pins' SETTLED ones — edge midpoint for a square,
+  // rbtpDisplayPos for a diamond — deliberately NOT the transient fan-out
+  // overrides. A fan-out only happens where pins are stacked within 26px, which
+  // is precisely where all but the top-ranked label is being suppressed anyway;
+  // following the animation would re-run placement on every frame of it to
+  // reposition labels nobody can see.
+  useEffect(() => {
+    const topology = topologyRef.current;
+    // Station networks turn EVERY edge into a pseudo-winner sharing one label
+    // ("as though they were top proposals"), with no vote count and no ranking
+    // — thousands of identical words. Those maps name their stations through
+    // the place-label layer instead.
+    if (!topology || isStationNetwork) {
+      window.dispatchEvent(new CustomEvent<ProposalLabelDetail[]>(
+        PROPOSAL_LABELS_EVENT, { detail: [] }));
+      return;
+    }
+
+    // Rank runs WITHIN each family, not across the merged list. A PBTP's
+    // `count` is the net on one hot edge; an RBTP's `score` sums net across a
+    // whole corridor, so it is systematically the larger number — ranking them
+    // together by magnitude would simply put every corridor above every point.
+    // Interleaved after the fact, the two families share the reveal schedule
+    // evenly, and a tie goes to the corridor: its label describes more of what
+    // you are looking at.
+    const points = [...winners]
+      .sort((a, b) => b.count - a.count)
+      .filter((w) => w.edgeIdx < topology.nEdges)
+      .map((w) => {
+        const from = edgeFrom(topology, w.edgeIdx), to = edgeTo(topology, w.edgeIdx);
+        return {
+          key: `e${w.edgeIdx}`,
+          lat: (nodeLat(topology, from) + nodeLat(topology, to)) / 2,
+          lng: (nodeLon(topology, from) + nodeLon(topology, to)) / 2,
+          label: w.label,
+          net: w.count,
+        };
+      });
+    const routes = [...routeProposals]
+      .sort((a, b) => b.score - a.score)
+      .map((p) => {
+        const [lat, lng] = rbtpDisplayPos(topology, p);
+        return { key: `r${p.id}`, lat, lng, label: p.label, net: p.score };
+      });
+
+    const detail: ProposalLabelDetail[] = [];
+    for (let i = 0; i < Math.max(points.length, routes.length); i++) {
+      for (const item of [routes[i], points[i]]) {
+        if (!item) continue;
+        const rank = detail.length;
+        detail.push({
+          key: item.key,
+          lat: item.lat,
+          lng: item.lng,
+          text: proposalLabelText(item.label),
+          count: formatProposalCount(item.net),
+          rank,
+          minz: proposalRevealZoom(rank),
+        });
+      }
+    }
+    dlog("proposals", `labels broadcast: ${detail.length}`
+      + ` (${points.length} point, ${routes.length} route)`);
+    window.dispatchEvent(new CustomEvent<ProposalLabelDetail[]>(
+      PROPOSAL_LABELS_EVENT, { detail }));
+    // topologyRef is settled well before either list is non-empty (both are
+    // computed FROM it), so the lists are the only triggers needed.
+  }, [winners, routeProposals, isStationNetwork]);
+
   // ===========================================================================
   // CLUSTER FAN-OUT — shared by BOTH proposal kinds (PBTP squares and RBTP
   // diamonds). The clusterables list, cluster detection, the grid fan-out, and

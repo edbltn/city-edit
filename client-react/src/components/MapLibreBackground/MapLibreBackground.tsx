@@ -16,6 +16,7 @@ import {
   maplibreLabelTiles,
   heatTip,
   POI_COLORS,
+  proposalLabelColors,
   type MapStyle,
 } from "../../mapStyles";
 import { makeHeatNormalization } from "../../map/blockHeat";
@@ -27,6 +28,20 @@ import {
 import { hottestBlockId } from "./hottestBlock";
 import { registerPlaceIcons, placeIconExpression } from "./placeIcons";
 import { PLACE_LABEL_TEXT_SIZE } from "./placeLabelStyle";
+import {
+  PIN_W,
+  PIN_H,
+  PROPOSAL_LABEL_FILTER,
+  PROPOSAL_LABEL_FONT,
+  PROPOSAL_LABEL_TEXT_SIZE,
+  PROPOSAL_MIN_LEAFLET_ZOOM,
+  PROPOSAL_PUCK_IMAGE,
+  PROPOSAL_PUCK_OFFSET,
+  PROPOSAL_PUCK_SIZE,
+  PROPOSAL_TEXT_MAX_WIDTH,
+  PROPOSAL_TEXT_OFFSET_EM,
+  proposalTextField,
+} from "./proposalLabelStyle";
 
 // Register PMTiles protocol once at module level
 const protocol = new Protocol();
@@ -66,6 +81,28 @@ export interface BlockSelectDetail {
   blockIds: number[];
 }
 export const BLOCK_SELECT_EVENT = "city-edit:block-select";
+
+// Top-proposal labels broadcast by GraphLayer whenever the two proposal lists
+// (PBTP squares, RBTP diamonds) settle. The PINS stay Leaflet's — they are
+// interactive, and MapLibre here is `interactive: false` — but their WORDS are
+// drawn as a GL symbol layer, because the one thing a hand-rolled label on a
+// divIcon cannot do is get out of another label's way. See addProposalLabels.
+export interface ProposalLabelDetail {
+  /** Stable per-proposal key: the PBTP's edge index or the RBTP's id. Used as
+   *  the GeoJSON feature id, so it must not collide between the two families. */
+  key: string;
+  lat: number;
+  lng: number;
+  /** Vote-type label, already uppercased for drawing. */
+  text: string;
+  /** Signed vote count, already formatted ("+412", "+12.4k"). */
+  count: string;
+  /** 0 = strongest. Drives both the reveal zoom and collision priority. */
+  rank: number;
+  /** Leaflet zoom this label may first appear at (proposalRevealZoom(rank)). */
+  minz: number;
+}
+export const PROPOSAL_LABELS_EVENT = "city-edit:proposal-labels";
 
 // ── Block hit-test bridge ───────────────────────────────────────────────────
 // GraphLayer's hover/selection resolver constrains its nearest-edge/node search
@@ -312,6 +349,149 @@ async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise<
   dlog("maplibre", "place labels added", url);
 }
 
+/** Source and layer ids for the proposal label layer. */
+const PROPOSAL_SOURCE = "proposal-labels";
+const PROPOSAL_LAYER = "proposal-labels";
+
+/** An empty payload, so the layer can exist before GraphLayer has anything to
+ *  say — the alternative is adding the layer late and having to re-establish
+ *  its position on top of the stack. */
+const EMPTY_PROPOSALS: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
+
+/**
+ * Register the transparent stand-in for a proposal PIN.
+ *
+ * The pins are Leaflet divIcons floating above the GL canvas, so MapLibre has
+ * no idea they exist and will cheerfully place a deli's name straight through
+ * one. This puts a PIN_W × PIN_H hole in the collision index at each proposal's
+ * location: fully transparent pixels (a zeroed RGBA buffer — collision boxes
+ * come from the image's dimensions, never its contents), positioned by
+ * PROPOSAL_PUCK_OFFSET to coincide exactly with the pin drawn over it.
+ *
+ * It is registered at pixelRatio 1 rather than placeIcons' 2 because there is
+ * nothing to keep crisp; the size is a footprint, not artwork.
+ */
+function registerProposalPuck(map: maplibregl.Map): void {
+  if (map.hasImage(PROPOSAL_PUCK_IMAGE)) return;
+  map.addImage(
+    PROPOSAL_PUCK_IMAGE,
+    { width: PIN_W, height: PIN_H, data: new Uint8Array(PIN_W * PIN_H * 4) },
+    { pixelRatio: 1 },
+  );
+}
+
+/**
+ * Add the top-proposal label layer — the words beside each proposal pin.
+ *
+ * WHY THIS IS A GL LAYER AND NOT TEXT ON THE PIN. A label bolted onto the
+ * divIcon would inherit the pin's zoom scaling and fan-out for free, and would
+ * also overlap every neighbour, every place label and every street name,
+ * because nothing in Leaflet is watching. MapLibre already runs a global
+ * collision index across all symbol layers, so putting the text here means the
+ * decluttering is not ours to write: crowded labels simply do not place.
+ *
+ * WHY IT GOES ON TOP. Placement runs from the TOPMOST symbol layer down, so the
+ * last layer added is the first one placed and wins every contest it enters.
+ * Added after `place-labels`, proposals therefore claim their space first and
+ * the POI names move aside — including around the pucks, so a business name can
+ * no longer land underneath a proposal pin, which it could before this layer
+ * existed.
+ *
+ * WHY IT IS THE VIVID ONE. Place labels are pulled 58% toward grey (POI_MUTE)
+ * to leave the proposals room to be the loudest thing on the map. Until now
+ * that room was spent entirely on pin shapes and glow rings, which can say that
+ * something is wanted somewhere but never what. These labels spend it on the
+ * words instead — full-chroma accent, the same color family the heat wears.
+ */
+function addProposalLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
+  if (map.getSource(PROPOSAL_SOURCE)) return;
+
+  registerProposalPuck(map);
+  map.addSource(PROPOSAL_SOURCE, {
+    type: "geojson",
+    data: EMPTY_PROPOSALS,
+    // Feature ids come from the payload's `key` (edge index / route id), which
+    // is a string; promoteId keeps them addressable without GeoJSON numeric ids.
+    promoteId: "key",
+  });
+
+  const colors = proposalLabelColors(mapStyle);
+
+  map.addLayer({
+    id: PROPOSAL_LAYER,
+    type: "symbol",
+    source: PROPOSAL_SOURCE,
+    // Below the earliest reveal zoom there is nothing this layer could draw, so
+    // skip placing it at all rather than filtering the results away. `minz` is
+    // a LEAFLET zoom; MapLibre's camera runs one lower.
+    minzoom: PROPOSAL_MIN_LEAFLET_ZOOM - 1,
+    filter: PROPOSAL_LABEL_FILTER,
+    layout: {
+      // The invisible pin footprint. `icon-allow-overlap` keeps it from ever
+      // being suppressed — the Leaflet pin is drawn whatever MapLibre decides,
+      // so its footprint must always be reserved — while leaving
+      // `icon-ignore-placement` at false so everything else still avoids it.
+      "icon-image": PROPOSAL_PUCK_IMAGE,
+      "icon-size": PROPOSAL_PUCK_SIZE,
+      "icon-anchor": "bottom",
+      "icon-offset": PROPOSAL_PUCK_OFFSET,
+      "icon-allow-overlap": true,
+      // Text hangs BELOW the tail tip, the one side of the anchor the pin does
+      // not occupy. Deliberately a fixed anchor rather than
+      // `text-variable-anchor`: letting labels hop around their pins to dodge
+      // collisions buys a few more placements and costs the map its composure,
+      // since every pan re-picks the side. A label that is always directly
+      // under its pin is also unambiguously ITS label.
+      "text-anchor": "top",
+      // Clearance below the pin's tail. Derived from the pin geometry and
+      // guarded across the zoom range — see PROPOSAL_TEXT_OFFSET_EM, which also
+      // explains why this cannot be solved with a z-index.
+      "text-offset": PROPOSAL_TEXT_OFFSET_EM,
+      // Without this, a label that cannot place takes the puck down with it and
+      // the pin loses its reserved footprint. With it, a crowded pin keeps its
+      // space and simply goes quiet — the same graceful degradation the place
+      // labels use, and the reason a dense downtown thins to pins rather than
+      // turning into a wall of type.
+      "text-optional": true,
+      "text-field": proposalTextField(colors.count),
+      "text-font": [PROPOSAL_LABEL_FONT],
+      "text-size": PROPOSAL_LABEL_TEXT_SIZE,
+      "text-max-width": PROPOSAL_TEXT_MAX_WIDTH,
+      "text-line-height": 1.15,
+      // Caps need air between the letters to stay readable at this size; this
+      // is also the second half of the tier signal (place labels sit at 0.01).
+      "text-letter-spacing": 0.05,
+      "text-justify": "center",
+      // Tighter than the place labels' 6. Started at 8, on the reasoning that
+      // two labels close enough to read as one paragraph is worse than dropping
+      // one — but padding is charged on EVERY side of a three-line block, so 8
+      // was silencing neighbours that had real room between them. 4 still keeps
+      // a visible gutter and buys back the placements.
+      "text-padding": 4,
+      // Lower sorts first and wins placement, and rank 0 is the strongest
+      // proposal — so when two labels want the same space, the one with more
+      // votes behind it takes it. Ties never happen: rank is a dense sequence.
+      "symbol-sort-key": ["get", "rank"],
+    },
+    paint: {
+      "text-color": colors.label,
+      // Heavier than the place labels' 1.2. This text has to survive both a
+      // saturated heat block underneath it and CARTO's baked-in street names,
+      // which are pixels in a raster and cannot be asked to move.
+      "text-halo-color": colors.halo,
+      // Heavier and HARDER than the place labels' 1.2/0.3. Measured on the NYC
+      // bike map, where the block heat under a label is a dense field of
+      // saturated green and blue: at 1.2 the type dissolved into it, and a
+      // blurred halo only smeared the boundary. A tight 2.0 cuts a clean gap
+      // without the halo starting to read as a bold weight — which matters
+      // because there is no bold cut of the SDF font to be confused with.
+      "text-halo-width": 2.0,
+      "text-halo-blur": 0.2,
+    },
+  });
+  dlog("maplibre", "proposal labels added");
+}
+
 function buildStyle(
   _graphTilesUrl: string,
   blockTilesUrl: string,
@@ -530,7 +710,14 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
         debugState("maplibreLoaded", true);
         onReady?.(true);
         rebindBlockTiles(map);
-        void addPlaceLabels(map, mapStyle);
+        // Order matters and is the whole decluttering scheme: placement runs
+        // from the topmost symbol layer down, so proposals must be added AFTER
+        // the place labels to be placed BEFORE them and win the contested
+        // space. Awaited (addPlaceLabels rasterises its icons first) rather
+        // than fired in parallel, which would race the two addLayer calls.
+        void addPlaceLabels(map, mapStyle).then(() => {
+          if (mapRef.current === map) addProposalLabels(map, mapStyle);
+        });
       });
       debugState("maplibreLoaded", false);
 
@@ -846,6 +1033,58 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
       ml?.off("sourcedata", onSourceData);
       arrival.reset();
       arrivalRef.current = null;
+    };
+  }, []);
+
+  // Draw GraphLayer's top-proposal labels. The proposal lists are recomputed on
+  // a one-minute batch (never per vote), so this runs a handful of times per
+  // session and can afford to rebuild the whole FeatureCollection each time.
+  useEffect(() => {
+    // Proposals routinely settle before the GL style finishes loading, so the
+    // last payload is retained and re-applied once the source exists.
+    const latest = { current: null as ProposalLabelDetail[] | null };
+    // The payload currently in the source. setData on a GeoJSON source fires
+    // `sourcedata` for that same source, so without this the retry below would
+    // re-apply its own write in an unbroken loop.
+    const applied = { current: null as ProposalLabelDetail[] | null };
+
+    const apply = () => {
+      const ml = mapRef.current;
+      const items = latest.current;
+      if (!ml || !items || applied.current === items) return;
+      const source = ml.getSource(PROPOSAL_SOURCE) as maplibregl.GeoJSONSource | undefined;
+      if (!source) return;
+      applied.current = items;
+      source.setData({
+        type: "FeatureCollection",
+        features: items.map((p) => ({
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
+          properties: { key: p.key, text: p.text, count: p.count, rank: p.rank, minz: p.minz },
+        })),
+      });
+      dlog("maplibre", `proposal labels: ${items.length} features`);
+      debugState("proposalLabels", items.length);
+    };
+
+    const onLabels = (e: Event) => {
+      latest.current = (e as CustomEvent<ProposalLabelDetail[]>).detail;
+      apply();
+    };
+
+    // The layer is added asynchronously (after the place icons rasterise), so a
+    // payload arriving first has nowhere to go; this catches it the moment the
+    // source appears. `applied` makes it a no-op every other time.
+    const onSourceData = (e: maplibregl.MapSourceDataEvent) => {
+      if (e.sourceId === PROPOSAL_SOURCE) apply();
+    };
+
+    window.addEventListener(PROPOSAL_LABELS_EVENT, onLabels);
+    const ml = mapRef.current;
+    ml?.on("sourcedata", onSourceData);
+    return () => {
+      window.removeEventListener(PROPOSAL_LABELS_EVENT, onLabels);
+      ml?.off("sourcedata", onSourceData);
     };
   }, []);
 
