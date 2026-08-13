@@ -112,28 +112,28 @@ def slide_sync():
         '  "**blockCounts**": { "884": [9, 1] }',
         "}",
     ]
-    code, cw, ch = codeblock(ART[0] + 20, 456, payload)
+    code, cw, ch = codeblock(ART[0] + 20, 500, payload)
 
     flow = []
     x = ART[0] + 20
     for i, label in enumerate(["device", "Flask", "Redis", "every client"]):
-        box, bw = hop(x, 356, label)
+        box, bw = hop(x, 424, label)
         flow.append(box)
         x += bw
         if i < 3:
-            flow.append(hop_arrow(x + 8, 376))
+            flow.append(hop_arrow(x + 8, 444))
             x += 48
 
     return add("05-vote-sync", "Vote sync", "".join(flow) + code +
         lines(TEXT_X, [
-            "A cast applies locally, then **POSTs**.",
-            "Flask writes it, bumps the **revision**,",
-            "and publishes **one delta** to Redis.",
-            "Every socket gets the same payload.",
-            "Counts are **set, not incremented** —",
-            "an optimistic guess can't drift.",
-            "A missed **rev** asks for a resync.",
-        ]))
+            "Casts get sent to Flask via a **POST**",
+            "Then Flask atomically publishes the **delta**",
+            "to **Redis** and obtains a **revision**",
+            "Then all **Flask instances** subscribe to Redis",
+            "and get the revision and delta",
+            "Then they synchronize to each **client tab**",
+            "via a **websocket** connection",
+        ], size=23, leading=44))
 
 
 # ===========================================================================
