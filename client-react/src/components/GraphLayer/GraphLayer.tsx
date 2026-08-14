@@ -64,6 +64,7 @@ import {
   buildNodeAdj,
   buildBlockIndex,
   touchedBlockKeys,
+  blockKeyOf,
   adjEdgesOf,
   adjShortest,
 } from "./graphTopology";
@@ -89,6 +90,9 @@ import {
   type VoteDirection,
 } from "../../utils/voteStore";
 import { castVotes, voteButtonState } from "../../utils/castVote";
+import {
+  useProposalAudience, describeAudience, MIN_VIEWS_SHOWN,
+} from "../../hooks/useProposalAudience";
 import { dlog, dwarn, derror, debugState, debugProbe } from "../../utils/debugLog";
 import { useVotesVersion } from "../../utils/useVotesVersion";
 import { getVoterId } from "../../utils/voterIdentity";
@@ -3658,6 +3662,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     [pinnedBlocks],
   );
   const pinnedSources = useVoteSources(pinnedSourceEdges);
+
+  // Block ids for the audience count on each interactive card. One person who
+  // opens block A's card and later block B's card of the SAME corridor lands
+  // in two per-block sketches and is unioned back to one by the server.
+  const pinnedViewBlockIds = useMemo(
+    () => proposalBlockIds(topologyRef.current, pinnedBlocks), [pinnedBlocks]);
   const routeSources = useVoteSources(routeEdgeUnion);
 
   // The RBTP the current selection stands for, if any — it becomes the card's
@@ -3668,6 +3678,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // nothing (ROUTE_SELECTED_MIN_COVERAGE), so several corridors can qualify at
   // once — the best-covered one wins the header rather than whichever ranked
   // first.
+  const routeViewBlockIds = useMemo(
+    () => proposalBlockIds(topologyRef.current, routeBlocks), [routeBlocks]);
+
   const coveredRouteProposal = useMemo(() => {
     void isHeatmapLoading;
     const topo = topologyRef.current;
@@ -4767,6 +4780,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           name={pinnedName}
           rows={pinnedVoteTypes}
           topKinds={isStationNetwork ? undefined : pinnedTopKinds}
+          // Only a card that HAS a proposal has an audience. A bare block with
+          // no winner is a place, not a proposal, and nothing is counted on it.
+          viewLabel={pinnedCardWinner?.label ?? null}
+          viewBlockIds={pinnedViewBlockIds}
           interactive
           getAvoidRects={getWaypointAvoidRects}
           edgeId={pinnedVoteEdgeId}
@@ -4889,6 +4906,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           coverageUnit={hasBlocksRef.current ? "block" : "segment"}
           votersPending={!routeUniqueRows}
           topKinds={routeTopKinds}
+          // The corridor's own blocks, not the id — see proposalBlockIds. A
+          // free-drawn route that covers no RBTP has no proposal to count.
+          viewLabel={coveredRouteProposal?.label ?? null}
+          viewBlockIds={routeViewBlockIds}
           interactive
           elevated
           getAvoidRects={getWaypointAvoidRects}
@@ -4931,6 +4952,30 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
 // directional cells (−down / +up) share one width; the net cell gets its own
 // (its value can be negative, so it counts the sign). Exposed as CSS custom
 // properties consumed by .graph-vote-cell / .graph-vote-net.
+/** The block ids behind a set of materialized blocks (each an edge group).
+ *
+ *  This is how a proposal names itself to the audience counter, and it is
+ *  deliberately NOT `RouteProposal.id`: that id is an FNV-1a hash of the
+ *  corridor's sorted path edges, so it rotates every time a vote lengthens or
+ *  reroutes the corridor — the client already treats an id change as the
+ *  SIGNAL that a corridor moved. A counter hung on it would silently reset a
+ *  proposal's audience to zero on the next vote. Block ids are baked artifacts
+ *  and are already the unit the vote system counts in.
+ *
+ *  Negative keys are legitimate: `blockKeyOf` returns `-(edgeId + 2)` on maps
+ *  with no block layer, which still gives every segment a stable id. */
+function proposalBlockIds(
+  topo: GraphTopology | null,
+  blocks: ArrayLike<number>[] | null,
+): number[] | null {
+  if (!topo || !blocks || blocks.length === 0) return null;
+  const out: number[] = [];
+  for (const group of blocks) {
+    if (group.length > 0) out.push(blockKeyOf(topo, group[0]));
+  }
+  return out.length > 0 ? out : null;
+}
+
 function voteColumnWidths(rows: VoteTypeRow[]): CSSProperties {
   let cellChars = 1; // widest unsigned count among all up/down values
   let netChars = 1;  // widest net value, including a leading "−" when negative
@@ -5017,6 +5062,16 @@ interface ProposalCardProps {
    *  sums, which count one route voter once per block. */
   votersPending?: boolean;
   interactive?: boolean;
+  /** The proposal this card is ABOUT, for the audience line: its vote-type
+   *  label and the block ids it spans. Both are needed — the count is scoped
+   *  per type so a bike-lane corridor's readers never show up as the audience
+   *  for a signal-timing pin on the same corner.
+   *
+   *  Left unset on hover cards on purpose. A card the mouse crossed on its way
+   *  somewhere else is not a view, and counting it would make the number
+   *  mostly a record of mouse trajectories. */
+  viewLabel?: string | null;
+  viewBlockIds?: number[] | null;
   /** Lifts the card one z tier above sibling cards (route summary vs transient
    *  hover). Portals mount at different times, so DOM order can't order them. */
   elevated?: boolean;
@@ -5125,6 +5180,7 @@ function CoverageCell({
 function ProposalCard({
   winner, eyebrow = "Top Proposal", screenX, screenY, name, metaText = null, rows, topKinds,
   coverage = null, coverageUnit = "block", votersPending = false,
+  viewLabel = null, viewBlockIds = null,
   interactive = false, elevated = false, getAvoidRects, avoidKey, donateUrlFor, edgeId = null, blocks = null, mode = "", shareUrl = null, streetViewLatLng = null, voteTypes, sources, onVote, onRemove, removeLabel = "Remove this point", onHoverChange, registerEl,
 }: ProposalCardProps) {
   const [copied, setCopied] = useState(false);
@@ -5138,6 +5194,12 @@ function ProposalCard({
   // re-render whenever ANY vote changes — including the same edge being voted
   // from the top-bar banner. The value itself is unused; the subscription is.
   void useVotesVersion();
+
+  // Distinct people who have opened this proposal. Only interactive cards that
+  // are actually expanded on screen count as reading — a minimized card is a
+  // pill with the label on it, which nobody is reading a proposal from.
+  const audience = useProposalAudience(
+    viewLabel, viewBlockIds, interactive && !minimized);
 
   // Anchor the card to the point and flip it into whichever quadrant has room,
   // then clamp so an oversized card never clips a viewport edge. Measured from
@@ -5390,6 +5452,19 @@ function ProposalCard({
                 ?? (rows.length > 0
                   ? `${rows.length} proposal${rows.length !== 1 ? "s" : ""}`
                   : "No votes yet")}
+              {/* The audience, riding the meta line rather than a line of its
+                  own: it stays inside the 106px right-padding that clears the
+                  tool icons, and it reads as one more fact about the selection
+                  instead of announcing itself. Nothing is rendered while the
+                  count is unknown or below the floor — no skeleton, no zero,
+                  no dash. A number that appears only when it has something
+                  true to say is the whole point. */}
+              {audience && audience.n >= MIN_VIEWS_SHOWN && (
+                <span className="graph-tooltip-audience">
+                  <span className="graph-tooltip-audience-sep" aria-hidden="true"> · </span>
+                  {describeAudience(audience)}
+                </span>
+              )}
             </div>
             {rows.length > 0 && (
               <div

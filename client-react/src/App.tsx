@@ -3,7 +3,7 @@ import {
   RouteProvider, WebSocketProvider, GhostPinProvider, GraphSnapProvider,
   ThemeProvider, MapProvider, HeatmapProvider,
 } from "./context";
-import { TopBar, MapView, ErrorToast, EventBanner, Landing, ErrorBoundary } from "./components";
+import { TopBar, MapView, ErrorToast, EventBanner, Landing, ErrorBoundary, CoPresence } from "./components";
 import { PasscodeGate } from "./components/PasscodeGate/PasscodeGate";
 import { useRoute, useHeatmap } from "./context";
 import { isLandingHost, subdomainRedirectUrl } from "./themes";
@@ -73,6 +73,10 @@ function AppContent() {
       {/* Mounted only once the splash is gone: the strip animates itself in, and
           that entrance is wasted behind the full-screen loader. */}
       {!isInitialLoading && <EventBanner />}
+      {/* Renders itself only when there are at least two other people here, so
+          it costs nothing on a quiet map. Mounted behind the splash for the
+          same reason the banner is: its entrance is wasted under the loader. */}
+      {!isInitialLoading && <CoPresence />}
       <PasscodeGate />
       {getCurrentMap()?.staging && (
         <div className="staging-ribbon" aria-hidden>STAGING</div>

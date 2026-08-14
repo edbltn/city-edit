@@ -1918,6 +1918,47 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   margin-bottom: 4px;
 }
 
+/* How many people have opened this proposal. Rides the meta line — inside the
+   right-padding that clears the tool icons, and in the same breath as the
+   block count — because it is one more fact about the selection, not an
+   announcement. A step quieter than the meta text it trails: the fund-chip
+   rule, that the faintest thing on the card should be the thing you find
+   rather than the thing you're shown.
+
+   It fades rather than appears: it arrives seconds after the card, and an
+   unannounced layout change at that distance reads as a glitch. Nothing is
+   ever rendered in its place while it is unknown — no skeleton, no zero, no
+   dash — because a number that only appears when it has something true to say
+   is the whole point of the feature. */
+.graph-indicator-modal-body .graph-tooltip-audience {
+  color: color-mix(in srgb, var(--ink) 45%, transparent);
+  font-variant-numeric: tabular-nums;
+  animation: audience-in 260ms ease-out both;
+}
+
+.graph-tooltip-audience-sep {
+  opacity: 0.6;
+}
+
+@keyframes audience-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* 11px at 45% ink on a phone reads as nothing there at all — the same reason
+   the row links and fund chips lift on touch. */
+@media (hover: none) {
+  .graph-indicator-modal-body .graph-tooltip-audience {
+    color: color-mix(in srgb, var(--ink) 62%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-indicator-modal-body .graph-tooltip-audience {
+    animation: none;
+  }
+}
+
 .graph-indicator-modal-body .graph-tooltip-types {
   margin-top: 4px;
   padding-top: 4px;

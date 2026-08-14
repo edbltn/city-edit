@@ -1,0 +1,100 @@
+/* ==========================================================================
+   Co-presence — who else has this map open right now
+
+   Bottom-left, the one free corner (zoom + attribution both sit bottom-right).
+   Deliberately the quietest fixed element on the map: it is a fact about the
+   room, not a control, and it must never compete with the proposal it is
+   telling you other people are reading.
+   ========================================================================== */
+
+.copresence {
+  position: fixed;
+  bottom: var(--space-5);
+  left: var(--space-5);
+  z-index: 900;                    /* under every card (1100+) and the topbar */
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 10px;
+  border: 1px solid var(--hairline);
+  background: var(--paper);
+  font-family: var(--font-main);
+  font-size: 11px;
+  color: color-mix(in srgb, var(--ink) 70%, transparent);
+  pointer-events: auto;            /* the title needs a hover target */
+  cursor: default;
+  animation: copresence-in 320ms ease-out both;
+}
+
+.copresence-marks {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* One hollow box per person, in the wordmark's own hand: a bare 1.5px stroke,
+   no fill, no radius. Drawn rather than tallied so the row can be counted
+   against the sentence — a number you can check is a number you can believe. */
+.copresence-mark {
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid color-mix(in srgb, var(--ink) 55%, transparent);
+  animation: copresence-mark-in 260ms ease-out both;
+}
+
+/* You. Filled, and first in the row, so the sentence's "other" needs no
+   explaining and the total can't be read as excluding the reader. */
+.copresence-mark.is-you {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.copresence-overflow {
+  margin-left: 2px;
+  font-size: 10px;
+  color: color-mix(in srgb, var(--ink) 45%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+
+.copresence-text {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;   /* the count must not shift the line */
+}
+
+@keyframes copresence-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes copresence-mark-in {
+  from { opacity: 0; transform: scale(0.4); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Phones: the sentence is the first thing to go. The marks alone still say
+   "people are here", and they say it in the width of a thumbnail. */
+@media (max-width: 600px) {
+  .copresence {
+    bottom: var(--space-2);
+    left: var(--space-2);
+    padding: 5px 8px;
+    font-size: 10px;
+  }
+
+  .copresence-text {
+    display: none;
+  }
+
+  /* With the sentence gone the marks carry the whole message, so lift them
+     out of the muted register — 55% ink at 7px on a phone reads as lint. */
+  .copresence-mark {
+    border-color: color-mix(in srgb, var(--ink) 75%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copresence,
+  .copresence-mark {
+    animation: none;
+  }
+}

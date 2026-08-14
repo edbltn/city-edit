@@ -30,6 +30,18 @@ export interface VoteSync {
 
 type SyncListener = (sync: VoteSync) => void;
 
+/** The server's answer to one view report: how many distinct people have
+ *  opened a proposal of this type covering any part of this one, and whether
+ *  the sketch behind it is still small enough to be exact. */
+export interface ViewCount {
+  n: number;
+  exact: boolean;
+}
+
+/** How long to wait for a `views` reply before giving up on it. Generous:
+ *  the server drains inbound once per socket tick, so a second is normal. */
+const VIEW_REPLY_TIMEOUT_MS = 8000;
+
 interface WebSocketContextValue {
   connectionStatus: string;
   subscribeToDelta: (listener: DeltaListener) => () => void;
@@ -40,6 +52,15 @@ interface WebSocketContextValue {
    *  on reconnect — the two moments the tab knows it may have missed deltas
    *  but has no arriving delta to notice the gap with. */
   requestSync: (sinceRev: number) => void;
+  /** Distinct people with this map open and in the foreground, INCLUDING us.
+   *  0 means "we don't know" as well as "nobody" — both render as silence,
+   *  which is the only safe reading of an unknown. */
+  viewerCount: number;
+  /** Report that a proposal card has been read, and get its audience back.
+   *  Resolves null if the socket is down or the reply never lands: a count we
+   *  did not hear is not a count we may guess at. */
+  reportProposalView: (
+    label: string, blockIds: number[]) => Promise<ViewCount | null>;
 }
 
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
@@ -54,6 +75,19 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
   const deltaListenersRef = useRef<Set<DeltaListener>>(new Set());
   const syncListenersRef = useRef<Set<SyncListener>>(new Set());
   const openListenersRef = useRef<Set<() => void>>(new Set());
+
+  // ── Audience state (co-presence + proposal view counts) ───────────────────
+  // Both ride this socket rather than a channel of their own. A second
+  // connection for a viewer count would double the connection count on every
+  // map, and — worse for a feature whose entire product is trustworthiness —
+  // it would let presence and votes disagree about whether a client is still
+  // there.
+  const [viewerCount, setViewerCount] = useState(0);
+  // In-flight `view` reports, keyed by the token echoed back in the reply, so
+  // an answer that lands after the reader has moved to another card is
+  // discarded rather than painted onto the wrong proposal.
+  const pendingViewsRef = useRef<Map<string, (v: ViewCount | null) => void>>(new Map());
+  const viewSeqRef = useRef(0);
 
   const connect = useCallback(() => {
     setConnectionStatus("connecting...");
@@ -76,6 +110,14 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       dlog("ws", "connected", wsUrl);
       setConnectionStatus("connected");
       backoffRef.current = 1000;
+      // A fresh connection is assumed VISIBLE by the server, which is right
+      // for the common case and wrong for a reconnect that happened while the
+      // tab was buried. Correct it immediately rather than let a background
+      // tab stand in someone's room.
+      if (document.hidden) {
+        try { ws.send(JSON.stringify({ type: "here", visible: false })); }
+        catch { /* the onclose path will retry the whole connection */ }
+      }
       // A reconnect is a gap by definition: deltas published while the socket
       // was down were never delivered, and gap detection only fires on the
       // NEXT delta to arrive. Tell subscribers so they can ask for a catch-up.
@@ -141,6 +183,16 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
               cb(delta as VoteDelta);
             }
           }
+        } else if (msg.type === "presence") {
+          // Server-pushed and edge-triggered: it only arrives when the number
+          // actually changed, so a quiet map costs nothing.
+          setViewerCount(typeof msg.n === "number" && msg.n > 0 ? msg.n : 0);
+        } else if (msg.type === "views") {
+          const resolve = pendingViewsRef.current.get(String(msg.k));
+          if (resolve) {
+            pendingViewsRef.current.delete(String(msg.k));
+            resolve({ n: Number(msg.n) || 0, exact: msg.exact !== false });
+          }
         }
         // "init" and "keepalive" are handled silently
       } catch (e) {
@@ -151,6 +203,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     ws.onclose = () => {
       dwarn("ws", `disconnected — reconnecting in ${backoffRef.current}ms`);
       setConnectionStatus("disconnected");
+      // We can no longer see the room, so we must stop claiming to. Leaving
+      // the last count on screen would keep asserting company we have no
+      // evidence for — the one direction this feature cannot be wrong in.
+      setViewerCount(0);
+      for (const resolve of pendingViewsRef.current.values()) resolve(null);
+      pendingViewsRef.current.clear();
       const delay = backoffRef.current;
       backoffRef.current = Math.min(delay * 2, MAX_BACKOFF);
       reconnectTimeoutRef.current = setTimeout(connect, delay);
@@ -198,9 +256,64 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     ws.send(JSON.stringify({ type: "sync", since: sinceRev }));
   }, []);
 
+  // "You are looking at this with N other people" has to mean LOOKING. This
+  // app throttles background tabs hard enough that a buried viewer is doing
+  // nothing at all, and counting them would pad the number with people who
+  // are, truthfully, elsewhere. visibilitychange is not throttled, so one
+  // message on each transition keeps the room honest without a timer.
+  useEffect(() => {
+    const report = () => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      try {
+        ws.send(JSON.stringify({ type: "here", visible: !document.hidden }));
+      } catch { /* reconnect will re-report on open */ }
+      // Hidden means we stop being told the count, so stop showing one.
+      if (document.hidden) setViewerCount(0);
+    };
+    document.addEventListener("visibilitychange", report);
+    // bfcache restore doesn't fire visibilitychange in every browser.
+    window.addEventListener("pageshow", report);
+    return () => {
+      document.removeEventListener("visibilitychange", report);
+      window.removeEventListener("pageshow", report);
+    };
+  }, []);
+
+  const reportProposalView = useCallback(
+    (label: string, blockIds: number[]): Promise<ViewCount | null> => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN
+          || !label || blockIds.length === 0 || document.hidden) {
+        return Promise.resolve(null);
+      }
+      const key = String(++viewSeqRef.current);
+      return new Promise<ViewCount | null>((resolve) => {
+        let done = false;
+        const settle = (v: ViewCount | null) => {
+          if (done) return;
+          done = true;
+          pendingViewsRef.current.delete(key);
+          resolve(v);
+        };
+        pendingViewsRef.current.set(key, settle);
+        setTimeout(() => settle(null), VIEW_REPLY_TIMEOUT_MS);
+        try {
+          ws.send(JSON.stringify(
+            { type: "view", k: key, t: label, b: blockIds }));
+        } catch {
+          settle(null);
+        }
+      });
+    }, []);
+
   const value = useMemo(
-    () => ({ connectionStatus, subscribeToDelta, subscribeToSync, subscribeToOpen, requestSync }),
-    [connectionStatus, subscribeToDelta, subscribeToSync, subscribeToOpen, requestSync],
+    () => ({
+      connectionStatus, subscribeToDelta, subscribeToSync, subscribeToOpen,
+      requestSync, viewerCount, reportProposalView,
+    }),
+    [connectionStatus, subscribeToDelta, subscribeToSync, subscribeToOpen,
+      requestSync, viewerCount, reportProposalView],
   );
 
   return (

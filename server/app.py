@@ -33,6 +33,8 @@ import vote_migration
 import block_votes
 import database
 import delta_hub as delta_hub_mod
+import presence
+import view_counts
 from cities import CITIES, DEFAULT_CITY_ID, get_city, all_cities
 from graph_registry import GraphRegistry, OsrmRegistry, STATION_NETWORKS
 from osrm_router import extract_all_segments
@@ -847,6 +849,26 @@ if os.environ.get("SKIP_WARMUP") != "1":
 delta_hub = delta_hub_mod.DeltaHub(
     lambda: redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True))
 
+# Live co-presence, shared across replicas via Redis (presence.py). It rides
+# the SAME socket the delta hub does — a second channel for a viewer count
+# would double the connection count for a number, and would let presence and
+# votes disagree about whether a client is still there.
+presence_registry = presence.Presence(redis_client)
+
+# Longest vote-type label a `view` message may carry, matched to the vote path.
+VIEW_LABEL_MAX = 128
+# Views are rate-limited by a token bucket: VIEW_BURST at once, refilled at
+# VIEW_REFILL_PER_SEC. This is a WORK bound, not an integrity control — PFADD
+# is idempotent, so no amount of replay can move a count. A flat minimum
+# interval was the first version and it was wrong: closing a point card and
+# opening a route card lands two DIFFERENT, entirely legitimate views inside a
+# second, and the flat rule silently dropped the second one. Dropping a
+# proposal somebody genuinely read is a quiet under-count with no upper bound
+# on how often it happens, which is not a failure worth accepting to save a
+# Redis pipeline.
+VIEW_BURST = 4.0
+VIEW_REFILL_PER_SEC = 0.5
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1264,10 +1286,10 @@ def map_auth(slug):
 
 # ── WebSocket (delta-based, per-map) ─────────────────────────────────────────
 
-def _ws_handle_inbound(ws, slug: str, sub, raw) -> None:
+def _ws_handle_inbound(ws, slug: str, sub, raw, conn=None) -> None:
     """Handle one client→server WS message. Never raises into the pump loop.
 
-    Two messages exist:
+    Four messages exist:
 
       {"type":"hello","bin":1}     late fallback for announcing binary
                                    support. The handshake `?bin=1` is the
@@ -1283,6 +1305,21 @@ def _ws_handle_inbound(ws, slug: str, sub, raw) -> None:
                                    this, a backgrounded tab stayed stale until
                                    the NEXT vote tripped gap detection, and
                                    then paid a full ~57 KB refetch.
+      {"type":"here","visible":B}  this tab became visible / hidden. Presence
+                                   counts people who are LOOKING, and a
+                                   backgrounded tab in this app is throttled
+                                   to a standstill, so a hidden tab leaves the
+                                   room (presence.py). The socket stays open.
+      {"type":"view","t":"label",   a proposal card of type `t` spanning
+                "b":[N,...]}        blocks `b` has been open long enough to
+                                    count as read. Records the viewer into
+                                    every one of those blocks' sketches and
+                                    replies with the union-deduped audience
+                                    (view_counts.py).
+
+    `conn` carries the per-connection state the last two need (the viewer's
+    counting identity and the visibility flag); it is None only in tests that
+    exercise the first two.
     """
     try:
         if isinstance(raw, bytes):
@@ -1293,6 +1330,52 @@ def _ws_handle_inbound(ws, slug: str, sub, raw) -> None:
     kind = msg.get("type")
     if kind == "hello":
         sub.binary = bool(msg.get("bin"))
+        return
+    if kind == "here" and conn is not None:
+        visible = bool(msg.get("visible"))
+        if visible == conn["visible"]:
+            return
+        conn["visible"] = visible
+        if visible:
+            presence_registry.arrive(slug, conn["identity"])
+        else:
+            presence_registry.depart(slug, conn["identity"])
+        # Force the next tick to re-read and re-push: the caller's own
+        # arrival/departure is the one change it can't learn about from a
+        # count it is itself part of.
+        conn["last_presence_sent"] = None
+        return
+    if kind == "view" and conn is not None:
+        label = msg.get("t")
+        blocks = view_counts.normalize_blocks(msg.get("b"))
+        if not isinstance(label, str) or not label or not blocks:
+            return
+        label = label[:VIEW_LABEL_MAX]
+        # A view from a hidden tab is not a view. The client already refuses to
+        # send one, but presence is the server's fact and the client's is only
+        # a claim, so the check lives here too.
+        if not conn["visible"]:
+            return
+        # Token bucket: bursts of real UI activity get through, a firehose
+        # does not. See VIEW_BURST.
+        now = time.time()
+        conn["view_tokens"] = min(
+            VIEW_BURST,
+            conn["view_tokens"] + (now - conn["last_view_at"]) * VIEW_REFILL_PER_SEC)
+        conn["last_view_at"] = now
+        if conn["view_tokens"] < 1.0:
+            return
+        conn["view_tokens"] -= 1.0
+        view_counts.record_view(redis_client, slug, label, blocks, conn["identity"])
+        n, exact = view_counts.count_views(redis_client, slug, label, blocks)
+        try:
+            # `k` echoes the client's own request key so a reply that arrives
+            # after the reader has moved to another card is discarded rather
+            # than painted onto the wrong proposal.
+            ws.send(json.dumps({"type": "views", "k": msg.get("k"),
+                                "n": n, "exact": exact}))
+        except Exception:
+            pass
         return
     if kind == "sync":
         try:
@@ -1343,6 +1426,24 @@ def ws(ws):
     # is known before the first byte is sent, the same way `map` and `token`
     # already are.
     sub = delta_hub.subscribe(slug, binary=request.args.get("bin") == "1")
+
+    # Per-connection state for the two audience features. `identity` is the
+    # COUNTING identity (vote_identity.py) — the hashed IP, NOT device_id. It
+    # is read from the handshake and never from anything the client sends,
+    # which is both the honest choice (a client cannot inflate a count by
+    # claiming to be several people) and the private one (the client is never
+    # asked for an identifier at all).
+    conn = {
+        "identity": get_client_ip(),
+        "visible": True,   # a tab that just opened a socket is looking at it
+        "last_presence_sent": None,
+        "last_view_at": time.time(),
+        "view_tokens": VIEW_BURST,
+    }
+    presence_registry.arrive(slug, conn["identity"])
+    last_heartbeat = time.time()
+    last_presence_poll = 0.0
+
     try:
         rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)
         # `bin` echoes back what the server decided, so the client can tell
@@ -1355,17 +1456,44 @@ def ws(ws):
         KEEPALIVE = 30
         while True:
             # Pump inbound frames: a client close must be noticed promptly, and
-            # this is also where the two client→server messages arrive —
-            # {"type":"hello","bin":1} (binary capability) and
-            # {"type":"sync","since":<rev>} (repair after a backgrounded tab).
+            # this is also where every client→server message arrives —
+            # `hello` (binary capability), `sync` (repair after a backgrounded
+            # tab), `here` (this tab became visible/hidden) and `view` (a
+            # proposal card was read). See _ws_handle_inbound.
             try:
                 inbound = ws.receive(timeout=0)
                 if inbound:
-                    _ws_handle_inbound(ws, slug, sub, inbound)
+                    _ws_handle_inbound(ws, slug, sub, inbound, conn)
             except Exception as e:
                 s = str(e).lower()
                 if "timed out" not in s and "no data" not in s and "connection closed" not in s:
                     logger.warning(f"[WS] receive exception: {e}")
+
+            # Presence maintenance, BEFORE the queue drain: the `continue` on a
+            # successful drain skips the rest of the loop, so anything placed
+            # below it silently stops running on a busy map — which is exactly
+            # when people are most likely to be here together.
+            now = time.time()
+            if conn["visible"] and now - last_heartbeat >= presence.HEARTBEAT_INTERVAL:
+                presence_registry.heartbeat(slug, conn["identity"])
+                last_heartbeat = now
+            # Only a VISIBLE tab is told the count. A hidden one is not in the
+            # set, so `n` would exclude it — and the client renders "n − 1
+            # others" on the assumption that it is counted. Pushing to a hidden
+            # tab therefore both under-reports by one AND leaves a stale strip
+            # on a map nobody is looking at. Silence while hidden; becoming
+            # visible clears last_presence_sent and forces a fresh push.
+            if conn["visible"] and now - last_presence_poll >= presence.PUSH_INTERVAL:
+                last_presence_poll = now
+                n = presence_registry.count(slug)
+                # Edge-triggered: a steady room sends nothing at all.
+                if n != conn["last_presence_sent"]:
+                    conn["last_presence_sent"] = n
+                    try:
+                        ws.send(json.dumps({"type": "presence", "n": n}))
+                        last_push = now
+                    except Exception:
+                        pass
 
             if sub.overflowed.is_set():
                 # This client lagged past its queue bound; a reconnect plus
@@ -1386,6 +1514,8 @@ def ws(ws):
                 last_push = time.time()
     finally:
         delta_hub.unsubscribe(slug, sub)
+        if conn["visible"]:
+            presence_registry.depart(slug, conn["identity"])
 
 
 # ── Routes API ─────────────────────────────────────────────────────────────
