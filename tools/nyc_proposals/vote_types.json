@@ -1,0 +1,35 @@
+[
+  { "label": "Fix dangerous intersection",   "icon": "safety",              "pointType": "point" },
+  { "label": "Add pedestrian signal",        "icon": "traffic-reduction",   "pointType": "point" },
+  { "label": "Fix signal timing",            "icon": "traffic-reduction",   "pointType": "point" },
+  { "label": "Daylight this corner",         "icon": "safety",              "pointType": "point" },
+  { "label": "Add curb extension",           "icon": "walkways",            "pointType": "point" },
+  { "label": "Add raised crosswalk",         "icon": "pedestrian-streets",  "pointType": "point" },
+  { "label": "Add pedestrian refuge island", "icon": "safety",              "pointType": "point" },
+  { "label": "Ban turn on red",              "icon": "traffic-reduction",   "pointType": "point" },
+  { "label": "Add intersection lighting",    "icon": "public-space",        "pointType": "point" },
+  { "label": "Add protected bike lane",      "icon": "safety",              "pointType": "route" },
+  { "label": "Add traffic calming",          "icon": "traffic-reduction",   "pointType": "route" },
+  { "label": "Add crosswalk",                "icon": "pedestrian-streets",  "pointType": "route" },
+  { "label": "Widen sidewalk",               "icon": "walkways",            "pointType": "route" },
+  { "label": "Lower speed limit",            "icon": "traffic-reduction",   "pointType": "route" },
+  { "label": "Add tree",                     "icon": "trees",               "pointType": "point" },
+
+  { "label": "Add bus lane",                 "icon": "transit",             "pointType": "route" },
+  { "label": "Add pedestrian plaza",         "icon": "pedestrian-streets",  "pointType": "point" },
+  { "label": "Street redesign",              "icon": "mapping",             "pointType": "point" },
+
+  { "label": "Add bike lane",                "icon": "bikes",               "pointType": "route" },
+  { "label": "Add bike parking",             "icon": "bikes",               "pointType": "point" },
+  { "label": "Add Citibike station",         "icon": "bikes",               "pointType": "point" },
+
+  { "label": "Improve sidewalk",             "icon": "walkways",            "pointType": "route" },
+  { "label": "Add pedestrian bridge",        "icon": "walkways",            "pointType": "route" },
+  { "label": "Improve accessibility",        "icon": "accessibility",       "pointType": "route" },
+  { "label": "Fix curb cut",                 "icon": "accessibility",       "pointType": "point" },
+  { "label": "Add bench",                    "icon": "public-space",        "pointType": "point" },
+  { "label": "Add bus shelter",              "icon": "transit",             "pointType": "point" },
+
+  { "label": "Add tree-lined street",        "icon": "trees",               "pointType": "route" },
+  { "label": "Add planter boxes",            "icon": "parks",               "pointType": "point" }
+]

@@ -13,9 +13,16 @@ Usage (run with the target DATABASE_URL in the environment / server/.env):
     python manage_vote_types.py list nyc-proposals
     python manage_vote_types.py add nyc-proposals "Add tree" --icon trees --kind point
     python manage_vote_types.py remove nyc-proposals "Add tree"
+    python manage_vote_types.py apply nyc-proposals ../tools/nyc_proposals/vote_types.json
 
 `add` is idempotent by label: re-adding an existing label updates its icon/kind
 rather than duplicating it, so this is safe to re-run from a runbook.
+
+`apply` is the same merge for a whole authored set held in a file — the shape a
+curated map's vocabulary actually has (a dozen-plus entries that belong together
+and want reviewing as one thing). It never removes: labels already on the map but
+absent from the file stay, because votes cast under them still render and the
+picker entry is what keeps them namable.
 
 Two things do NOT happen here, on purpose:
 
@@ -91,6 +98,19 @@ def cmd_list(args: argparse.Namespace) -> None:
     print(f"\n{len(types)} vote type(s) on '{args.slug}'")
 
 
+def _merge(types: list[dict], entry: dict) -> str:
+    """Fold one entry into `types` in place. Returns what happened: "same",
+    "updated" (label present, icon/kind differ) or "added" (appended)."""
+    for i, t in enumerate(types):
+        if t.get("label") == entry["label"]:
+            if t == entry:
+                return "same"
+            types[i] = entry
+            return "updated"
+    types.append(entry)
+    return "added"
+
+
 def cmd_add(args: argparse.Namespace) -> None:
     _require_db()
     kind = normalize_point_type(args.kind)
@@ -98,21 +118,62 @@ def cmd_add(args: argparse.Namespace) -> None:
         sys.exit(f"--kind must be one of {', '.join(VALID_KINDS)}")
     types = _load(args.slug)
     entry = {"label": args.label, "icon": args.icon, "pointType": kind}
+    action = _merge(types, entry)
 
-    for i, t in enumerate(types):
-        if t.get("label") == args.label:
-            if t == entry:
-                print(f"= '{args.label}' already on '{args.slug}', unchanged")
-                return
-            types[i] = entry
-            _save(args.slug, types)
-            print(f"✓ updated '{args.label}' on '{args.slug}' → {kind}, {args.icon}")
-            return
-
-    types.append(entry)
+    if action == "same":
+        print(f"= '{args.label}' already on '{args.slug}', unchanged")
+        return
     _save(args.slug, types)
+    if action == "updated":
+        print(f"✓ updated '{args.label}' on '{args.slug}' → {kind}, {args.icon}")
+        return
     print(f"✓ added '{args.label}' to '{args.slug}' → {kind}, {args.icon} "
           f"({len(types)} types)")
+    print("  Running Flask instances will pick it up within ~a minute.")
+
+
+def cmd_apply(args: argparse.Namespace) -> None:
+    _require_db()
+    try:
+        with open(args.file) as f:
+            desired = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        sys.exit(f"Could not read {args.file}: {e}")
+    if not isinstance(desired, list) or not desired:
+        sys.exit(f"{args.file} must hold a non-empty JSON array of vote types")
+
+    # Validate the WHOLE file before touching the map: a set applied half-way is
+    # a vocabulary nobody authored.
+    entries, seen = [], set()
+    for i, raw in enumerate(desired):
+        label = (raw.get("label") or "").strip() if isinstance(raw, dict) else ""
+        kind = normalize_point_type(raw.get("pointType")) if isinstance(raw, dict) else None
+        icon = (raw.get("icon") or "").strip() if isinstance(raw, dict) else ""
+        if not label or not icon or kind not in VALID_KINDS:
+            sys.exit(f"{args.file}[{i}]: need label, icon and pointType "
+                     f"({' | '.join(VALID_KINDS)})")
+        if label in seen:
+            sys.exit(f"{args.file}[{i}]: duplicate label '{label}'")
+        seen.add(label)
+        entries.append({"label": label, "icon": icon, "pointType": kind})
+
+    types = _load(args.slug)
+    counts = {"added": 0, "updated": 0, "same": 0}
+    for entry in entries:
+        action = _merge(types, entry)
+        counts[action] += 1
+        if action != "same":
+            print(f"  {action:7} {entry['label']}  ({entry['pointType']}, {entry['icon']})")
+    if not counts["added"] and not counts["updated"]:
+        print(f"= '{args.slug}' already matches {args.file}, unchanged")
+        return
+    if args.dry_run:
+        print(f"\n(dry run) {counts['added']} to add, {counts['updated']} to update, "
+              f"{counts['same']} unchanged — nothing written")
+        return
+    _save(args.slug, types)
+    print(f"\n✓ {counts['added']} added, {counts['updated']} updated, "
+          f"{counts['same']} unchanged — '{args.slug}' now has {len(types)} types")
     print("  Running Flask instances will pick it up within ~a minute.")
 
 
@@ -146,6 +207,14 @@ def main() -> None:
     p_add.add_argument("--kind", required=True, choices=VALID_KINDS,
                        help="point (a spot) or route (a corridor)")
     p_add.set_defaults(func=cmd_add)
+
+    p_apply = sub.add_parser(
+        "apply", help="Merge a whole authored set from a JSON file (idempotent)")
+    p_apply.add_argument("slug")
+    p_apply.add_argument("file", help="JSON array of {label, icon, pointType}")
+    p_apply.add_argument("--dry-run", action="store_true",
+                         help="Report the merge; write nothing")
+    p_apply.set_defaults(func=cmd_apply)
 
     p_rm = sub.add_parser("remove", help="Remove a vote type from the picker")
     p_rm.add_argument("slug")

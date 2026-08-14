@@ -6,10 +6,14 @@ import { noAutofillProps } from "../../utils/noAutofill";
 import "./ProposeMapModal.css";
 
 // The app's iconset (public/icons/*.svg) — pickable per custom vote type.
+// Every icon the preset Bikes / Trees / Walkways families use is here, so a
+// proposer can spell a vote type the way those maps already spell it —
+// "pedestrian-streets" (crosswalks) and "community" (community gardens) were
+// missing, which left two of the presets' own icons unreachable from here.
 const ICONS = [
   "walkways", "bikes", "trees", "parks", "transit", "safety", "accessibility",
-  "charging", "traffic-reduction", "public-space", "cafes",
-  "waterfront", "mapping",
+  "charging", "traffic-reduction", "public-space", "pedestrian-streets",
+  "community", "cafes", "waterfront", "mapping",
 ];
 const DEFAULT_ICON = "mapping";
 

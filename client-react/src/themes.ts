@@ -59,7 +59,12 @@ export const THEMES: Record<string, Theme> = {
       { label: "Add bike parking", icon: "bikes", pointType: "point" },
       { label: "Add secure bike parking", icon: "safety", pointType: "point" },
       { label: "Add e-bike charging point", icon: "bikes", pointType: "point" },
-      { label: "Add Citi Bike station", icon: "bikes", pointType: "point" },
+      // The generic label is the one the shared "bikes" preset list carries (it
+      // seeds Philly/D.C. maps too, where the system isn't Citibike); the NYC
+      // brand name is a second entry rather than a rename, so both resolve to an
+      // icon on any map that doesn't list them itself.
+      { label: "Add bike share station", icon: "bikes", pointType: "point" },
+      { label: "Add Citibike station", icon: "bikes", pointType: "point" },
       { label: "Add bike repair station", icon: "bikes", pointType: "point" },
       { label: "Add bike counter", icon: "mapping", pointType: "point" },
       { label: "Fix dangerous intersection", icon: "safety", pointType: "point" },
