@@ -371,6 +371,31 @@ A methodological note worth keeping: a **twelve-code sweep of this scored 100%**
 and the full 108-sticker run found failures at 200 px. Small samples flatter this
 design. Any change here needs the full run, not a spot check.
 
+## Retiring a line
+
+Dropping a message from `campaign.py` retires it from the PRINTABLE set. It does
+not retire the stickers: those are on poles, their codes stay seeded, and they
+keep resolving — because the server answers a scan from the `sticker_codes` row,
+which carries its own headline, map and vote type, and never reads
+`campaign.py`. That separation is what makes the printable set safe to change.
+
+It is also what makes the one real failure silent. Nothing in the build will
+ever mention a retired code again, so nothing in the build can notice if the map
+stops offering the vote type those codes cast — and a missing vote type does not
+404, it falls back, so the sticker keeps scanning and quietly casts something
+its reader never asked for.
+
+`check_legacy.py` is the guard. It asks the DATABASE what is actually out there
+— every seeded code, retired or not — and checks each against the live map:
+
+```bash
+DATABASE_URL=… ./env/bin/python check_legacy.py
+```
+
+It needs a database URL because the public API has no "list every code"
+endpoint, and should not have one. Run it after removing a line, and after any
+change to a map's vote types.
+
 ## Painted codes (qrart)
 
 The plain module grid can be replaced with a diffusion-painted one from

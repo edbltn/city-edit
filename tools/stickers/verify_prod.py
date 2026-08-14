@@ -159,6 +159,15 @@ def main() -> int:
 
     # 4. vocabulary — advisory, and the quiet one: a missing type does not
     #    error, it silently casts something else.
+    #
+    #    This checks the LIVE campaign. Codes for retired messages need the
+    #    DATABASE, which the public API cannot enumerate, so they are checked by
+    #    check_legacy.py instead of here:
+    #    a sticker that has left the printable set is still on a pole, and the
+    #    row it resolves from carries its own headline and vote type. Dropping a
+    #    line from campaign.py must never be able to break a code already out
+    #    there, and the only way to know is to ask the database what it is
+    #    actually serving.
     try:
         with urllib.request.urlopen(
                 urllib.request.Request(f"{base}/api/maps/{MAP_SLUG}", headers=UA),
