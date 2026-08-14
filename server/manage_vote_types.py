@@ -51,9 +51,28 @@ from database import DATABASE_URL, get_cursor, normalize_point_type  # noqa: E40
 VALID_KINDS = ("point", "route")
 
 
+def _target() -> str:
+    """The database this run will edit, as host:port/name — password stripped.
+
+    Printed before every command because the failure this script is most likely
+    to have is not a bad edit, it is a good edit against the wrong database.
+    `load_dotenv()` above silently supplies server/.env's LOCAL url whenever the
+    caller forgets to pass a prod one, and both databases hold maps with the
+    same slugs, so a mistake looks exactly like a success. Naming the target
+    turns that into something you can see in the transcript afterwards.
+    """
+    try:
+        from urllib.parse import urlsplit
+        u = urlsplit(DATABASE_URL)
+        return f"{u.hostname}:{u.port or 5432}{u.path}"
+    except Exception:
+        return "(unparseable DATABASE_URL)"
+
+
 def _require_db() -> None:
     if not DATABASE_URL:
         sys.exit("DATABASE_URL is not set — point it at the target database first.")
+    print(f"· database: {_target()}")
 
 
 def _load(slug: str) -> list[dict]:
@@ -78,11 +97,38 @@ def _load(slug: str) -> list[dict]:
 
 
 def _save(slug: str, types: list[dict]) -> None:
+    """Write the list, then read it straight back and prove it landed.
+
+    An UPDATE that matches no row is not an error in SQL, and neither is one
+    committed to a database that is not the one you meant. Both were how a
+    removal from this map's picker reached a "✓ removed" line and left prod
+    untouched. Nothing here can tell which database is the RIGHT one — that is
+    the operator's call — but it can refuse to claim a write it cannot see.
+    """
     with get_cursor() as cursor:
         cursor.execute(
             "UPDATE maps SET custom_vote_types = %s WHERE slug = %s",
             (json.dumps(types), slug),
         )
+        if cursor.rowcount != 1:
+            sys.exit(f"UPDATE matched {cursor.rowcount} rows for '{slug}' on "
+                     f"{_target()} — nothing was changed.")
+    labels_after = [t.get("label") for t in _load(slug)]
+    if labels_after != [t.get("label") for t in types]:
+        sys.exit(f"Read-back on {_target()} does not match what was written to "
+                 f"'{slug}'. The database now holds: {labels_after}")
+
+
+def _vote_rows(slug: str, label: str) -> int:
+    """How many votes this map still carries under `label`."""
+    with get_cursor() as cursor:
+        cursor.execute(
+            """SELECT COUNT(*) FROM edge_votes ev
+                 JOIN vote_types vt ON vt.id = ev.vote_type_id
+                WHERE ev.map_slug = %s AND vt.label = %s""",
+            (slug, label),
+        )
+        return cursor.fetchone()[0]
 
 
 def cmd_list(args: argparse.Namespace) -> None:
@@ -183,9 +229,20 @@ def cmd_remove(args: argparse.Namespace) -> None:
     kept = [t for t in types if t.get("label") != args.label]
     if len(kept) == len(types):
         sys.exit(f"'{args.label}' is not on '{args.slug}'")
+    rows = _vote_rows(args.slug, args.label)
     _save(args.slug, kept)
-    print(f"✓ removed '{args.label}' from '{args.slug}' ({len(kept)} types left)")
+    print(f"✓ removed '{args.label}' from '{args.slug}' on {_target()} "
+          f"({len(kept)} types left)")
     print("  Votes already cast under that label are untouched and still render.")
+    if rows:
+        # The legend is the picker (VoteTypeSelector / buildVoteTypeLegend), and
+        # it lists a label when the map authored it OR when the label carries
+        # votes here. So taking a voted label out of custom_vote_types does not
+        # take it out of the dropdown — it comes straight back, sourced from the
+        # votes instead. Say so, rather than let it look like a failed removal.
+        print(f"  ⚠ '{args.label}' still has {rows} vote(s) on this map, so the "
+              f"legend will keep listing it. Move or delete those votes to "
+              f"retire the label completely.")
 
 
 def main() -> None:
