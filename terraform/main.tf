@@ -252,7 +252,12 @@ resource "google_cloud_run_service" "osrm" {
         # different (older) dataset; flipping to it would silently swap the
         # routing network out from under the graphs. Update this tag only
         # alongside a deliberate OSRM dataset rebuild.
-        image = "${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper/osrm:cbdf4b3a-d63e-497b-9459-3f0ae0e4901f"
+        # DRIFT FIX (2026-08-12): the tag below had been re-pointed and no longer
+        # resolves to what prod serves — tag cbdf4b3a-… → sha256:6c535a4e…, while
+        # the live revision runs sha256:819e9b77…. Any apply would therefore have
+        # swapped the routing dataset silently, which is exactly what the comment
+        # above warns against. Pin the DIGEST so the tag can never drift again.
+        image = "${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper/osrm@sha256:819e9b7733271603ef4ff1031f99484af2afe76d0a93c6cc0f098bb20e626032"
 
         # osrm-routed binds $PORT (Cloud Run injects 8080); see osrm/Dockerfile.
         ports {
@@ -300,6 +305,16 @@ resource "google_cloud_run_service" "osrm" {
     latest_revision = true
   }
 
+  # gcloud stamps client-name/client-version onto any revision deployed out of
+  # band; terraform then wants to strip them, which would roll a NEW revision of
+  # a service pinned to min=max=1 — i.e. a routing blip for a cosmetic label.
+  lifecycle {
+    ignore_changes = [
+      template[0].metadata[0].annotations["run.googleapis.com/client-name"],
+      template[0].metadata[0].annotations["run.googleapis.com/client-version"],
+    ]
+  }
+
   depends_on = [
     google_project_service.cloud_run,
     google_artifact_registry_repository.app,
@@ -322,14 +337,30 @@ resource "google_cloud_run_service" "app" {
 
   template {
     spec {
-      # Explicit cap (Cloud Run default is 80). Requests are gevent-multiplexed
-      # on one worker; each held-open WebSocket occupies a slot for its
-      # lifetime, so the ceiling is concurrent VIEWERS per instance, not RPS.
-      # 200 × maxScale 8 ≈ 1600 concurrent viewers before saturation.
-      container_concurrency = 200
+      # Requests are gevent-multiplexed on one worker; each held-open WebSocket
+      # occupies a slot for its lifetime, so this is concurrent VIEWERS per
+      # instance, not RPS.
+      #
+      # Measured 2026-08-12 (100-agent swarm vs prod): at 200 the autoscaler
+      # never spilled — instance_count stayed pinned at 1 for the whole run
+      # while vote p95 hit 5.5s and 3 casts shed. CPU peaked at 11%, so the
+      # instance was never CPU-bound; it was serialized behind one worker's
+      # DB pool. 200 is a ceiling the fleet cannot reach before it feels slow.
+      #
+      # 80 makes the autoscaler spill at ~80 concurrent viewers instead, so a
+      # crowd is served by several workers (and several DB pools) in parallel.
+      # Viewer ceiling is now 80 × maxScale 6 = 480 concurrent, which is far
+      # above observed peak traffic; raise maxScale (and max_connections) together
+      # if that ever binds.
+      container_concurrency = 80
 
       containers {
-        image = "${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper/app:latest"
+        # Pinned to the SERVING digest, not :latest. App deploys go out via
+        # gcloud/Cloud Build digest promotion, so a floating :latest here means
+        # an unrelated `terraform apply` silently ships whatever was last built.
+        # (:latest happens to equal this digest today — that is luck, not design.)
+        # Bump this deliberately when promoting a new build.
+        image = "${var.region}-docker.pkg.dev/${var.project_id}/desire-path-mapper/app@sha256:4ff7cca497bc14a1db487089346167b8823455d96422b89d9f7a5c37fdd1b8d5"
 
         env {
           name  = "REDIS_HOST"
@@ -350,6 +381,7 @@ resource "google_cloud_run_service" "app" {
           name  = "SKIP_WARMUP"
           value = "0"
         }
+
 
         # All cities route through the single merged OSRM service. HTTPS target
         # ⇒ osrm_router.py attaches a Cloud Run ID token (audience = this URL).
@@ -395,6 +427,21 @@ resource "google_cloud_run_service" "app" {
           }
         }
 
+        # Postgres pool per instance. The code default is 5, sized in a comment
+        # for db-f1-micro's ~25-connection ceiling — but prod is db-g1-small with
+        # max_connections = 50, so 5 has been leaving the write path throttled
+        # far below what the DB can serve. Measured 2026-08-12: 100 concurrent
+        # voters produced vote p95 5.5s at only 19% DB CPU — queueing on pool
+        # slots, not on the database.
+        # Keep maxScale × DB_POOL_MAX ≤ 50 − headroom (6 × 7 = 42).
+        # NOTE: keep this LAST in the env list — inserting an env block mid-list
+        # makes the provider re-emit every block after it as a remove/add pair,
+        # so a one-line change reads like the secret refs are being dropped.
+        env {
+          name  = "DB_POOL_MAX"
+          value = "7"
+        }
+
         resources {
           # Holds every city walk graph (nyc/sf/chicago/dc/philly + test cities)
           # + station networks resident. The runtime loads prebaked compact
@@ -438,7 +485,12 @@ resource "google_cloud_run_service" "app" {
         # instances are 8Gi/4CPU each and only run under load (minScale stays 1);
         # graph loads from the array artifacts take seconds, so a scale-out
         # instance is useful almost immediately.
-        "autoscaling.knative.dev/maxScale"        = "8"
+        # 8 → 6: each instance opens its own Postgres pool, and prod's
+        # max_connections is 50 (db-g1-small). The invariant is
+        #   maxScale × DB_POOL_MAX ≤ max_connections − headroom
+        # = 6 × 7 = 42, leaving 8 for psql/admin/import jobs. Raising either
+        # side past that needs max_connections raised first or the pool starves.
+        "autoscaling.knative.dev/maxScale"        = "6"
         # Extra CPU during startup so imports + _populate_redis + the background
         # graph prewarm finish quickly (we run at only 2 vCPU steady-state).
         "run.googleapis.com/startup-cpu-boost"    = "true"
