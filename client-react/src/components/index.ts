@@ -3,6 +3,7 @@ export { TopBar } from "./TopBar";
 export { MapView } from "./MapView";
 export { RouteMarker } from "./RouteMarker";
 export { RouteLayer, DesirePathLayer } from "./RouteLayer";
+export { MapNotice } from "./MapNotice";
 export { ErrorToast } from "./ErrorToast";
 export { EventBanner } from "./EventBanner";
 export { GhostPin } from "./GhostPin";

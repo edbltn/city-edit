@@ -1,0 +1,230 @@
+/* ==========================================================================
+   Map notice — shared base for the bottom-centre strips (error toast, event
+   announcement). Palette, slot, stacking, and mobile behaviour live here; the
+   variants below add only their own voice.
+   ========================================================================== */
+
+.map-notice {
+  position: fixed;
+  /* The anchor notice publishes its height, so a second strip stacks above it
+     instead of landing on top. env() keeps us clear of the iOS home bar. */
+  bottom: calc(var(--space-6) + env(safe-area-inset-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-map-notice);
+
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  /* max-content, not shrink-to-fit: `left: 50%` caps a shrink-to-fit box at
+     half the viewport, which wraps the strip onto two lines while the other
+     half of the screen sits empty. */
+  width: max-content;
+  max-width: min(680px, calc(100vw - 2 * var(--space-5)));
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  font-family: var(--font-main);
+  font-size: var(--font-size-2xs);
+  color: var(--ink);
+
+  /* The strip is transparent to the pointer; its controls opt back in. A
+     notice must never be why a proposal card underneath won't take a click —
+     the cards portal to document.body, so DOM order can't be relied on. */
+  pointer-events: none;
+}
+
+.map-notice > * {
+  min-width: 0;
+}
+
+.map-notice button,
+.map-notice a {
+  pointer-events: auto;
+}
+
+/* The anchor owns the bottom of the stack; anything else rides above it. */
+.map-notice:not(.map-notice--anchor) {
+  bottom: calc(
+    var(--space-6) + env(safe-area-inset-bottom, 0px) + var(--map-notice-offset, 0px)
+  );
+}
+
+/* ── Variants ───────────────────────────────────────────────────────────── */
+
+/* Speaks up: an accent rule instead of the hairline. --notice-alert is its own
+   token rather than --accent, which is per-map and could land unreadably close
+   to the paper on a light basemap. */
+.map-notice--alert {
+  border-color: var(--notice-alert);
+  animation: map-notice-up 200ms ease;
+}
+
+/* A quiet aside — hairline only. Let the map settle before it arrives, so it
+   reads as an aside rather than as part of the load. */
+.map-notice--notice {
+  animation: map-notice-in 200ms ease both;
+  animation-delay: 900ms;
+}
+
+@keyframes map-notice-up {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes map-notice-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ── Shared parts ───────────────────────────────────────────────────────── */
+
+.map-notice-body {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.map-notice-icon {
+  flex: 0 0 auto;
+  color: var(--notice-alert);
+}
+
+.map-notice-message {
+  min-width: 0;
+}
+
+.map-notice-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.map-notice-btn {
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--hairline);
+  background: transparent;
+  font-family: var(--font-main);
+  font-size: var(--font-size-2xs);
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.map-notice-btn:hover {
+  background: var(--hover-bg-strong);
+}
+
+.map-notice-btn-primary {
+  border-color: var(--notice-alert);
+  color: var(--notice-alert);
+}
+
+.map-notice-btn-primary:hover {
+  background: color-mix(in srgb, var(--notice-alert) 15%, transparent);
+}
+
+/* The bare × / link affordances (announcement). */
+.map-notice-link {
+  flex: 0 0 auto;
+  margin-left: auto;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.map-notice-link:hover {
+  opacity: 0.7;
+}
+
+.map-notice-close {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-family: var(--font-main);
+  font-size: 16px;
+  line-height: 1;
+  color: color-mix(in srgb, var(--ink) 45%, transparent);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.map-notice-close:hover {
+  color: var(--ink);
+}
+
+/* ── Mobile ─────────────────────────────────────────────────────────────── */
+
+/* A phone gets the full width and lets a long sentence wrap onto its own line
+   with the controls beneath it. The toast used to be `white-space: nowrap`,
+   which ran a "no route found" message off both edges of the screen. */
+@media (max-width: 600px) {
+  .map-notice {
+    flex-wrap: wrap;
+    bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
+    width: auto;
+    left: var(--space-3);
+    right: var(--space-3);
+    max-width: none;
+    transform: none;
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .map-notice:not(.map-notice--anchor) {
+    bottom: calc(
+      var(--space-3) + env(safe-area-inset-bottom, 0px) + var(--map-notice-offset, 0px)
+    );
+  }
+
+  /* The slide-up keyframes carry the desktop centring transform; on mobile the
+     strip is pinned by left/right instead, so animate opacity only. */
+  .map-notice--alert {
+    animation: map-notice-in 200ms ease;
+  }
+
+  .map-notice-body {
+    flex: 1 1 100%;
+    align-items: flex-start;
+  }
+
+  .map-notice-actions {
+    flex: 1 1 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+
+  .map-notice-btn {
+    /* Comfortable thumb target — the desktop padding is a 22px-tall button. */
+    min-height: 34px;
+    padding: var(--space-1) var(--space-3);
+  }
+
+  .map-notice-close {
+    width: 32px;
+    height: 32px;
+    font-size: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-notice {
+    animation: none;
+  }
+}

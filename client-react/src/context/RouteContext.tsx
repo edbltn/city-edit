@@ -8,7 +8,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import { useRouteCalculation } from "../hooks/useRouteCalculation";
+import { useRouteCalculation, NO_ROUTE_MESSAGE } from "../hooks/useRouteCalculation";
 import { CONFIG } from "../config";
 import { getMapSlug, getCurrentMap, mapVoteTypesForPointType } from "../map/runtime";
 import { getDefaultVoteTypeForTheme } from "../constants/voteTypes";
@@ -146,11 +146,9 @@ const segmentsFromGeometry = segmentsFromGeometryImpl;
 // far drop (> this) still falls back to server routing for a real path.
 const LOCAL_SPLIT_THRESHOLD_METERS = 30;
 
-/** Shown when a waypoint can't be reached on foot from its neighbours (an
- *  island, a pier, a stretch that isn't in the routable network). Goes through
- *  the same ErrorToast as "That's outside this map" — one banner, one pattern. */
-export const NO_ROUTE_MESSAGE =
-  "No route found to that point — try somewhere connected to the street network.";
+/** Re-exported so callers reach the one copy of this sentence. Defined in
+ *  useRouteCalculation, which the direct start→end request also raises it from. */
+export { NO_ROUTE_MESSAGE };
 
 export type ActiveTool = "start" | "end";
 

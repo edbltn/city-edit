@@ -56,6 +56,11 @@
   --z-autocomplete: 300;
   --z-modal: 400;
   --z-pac-container: 500;
+  /* Bottom-centre notices (error toast, event announcement). Deliberately
+     BELOW the map's own cards — pinned proposal (1100), route summary (1300),
+     hover card (1400) — so a transient strip is never the reason a selected
+     proposal can't be read. See MapNotice.css. */
+  --z-map-notice: 1050;
 
   /* Layout */
   --topbar-height: auto;
@@ -100,6 +105,10 @@
      heatmap glow. Dark on dark basemaps; overridden to light below. */
   --marker-outline: rgba(0, 0, 0, 0.72);
 
+  /* The alert notice's rule + icon. Its own token rather than --accent: that
+     one is set per map and could land unreadably close to the paper. */
+  --notice-alert: #C4841D;
+
   /* Per-map (set by ThemeContext; fallbacks for pre-JS / landing) */
   --accent: #E0A23A;
   --on-accent: #0d0d0d;
@@ -123,6 +132,8 @@
   --on-accent: #ffffff;
   --selection: #1f2a1c;
   --marker-outline: rgba(255, 255, 255, 0.95);
+  /* Darkened for warm paper — #C4841D on #F4F5F0 is ~2.3:1, unreadable. */
+  --notice-alert: #8A5510;
 }
 
 

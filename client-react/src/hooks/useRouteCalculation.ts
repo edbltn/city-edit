@@ -8,6 +8,16 @@ import type {
   RouteResponse,
 } from "../types";
 
+/**
+ * Shown whenever a point can't be reached on foot from its neighbours — an
+ * island, a pier, a stretch that isn't in the routable network. Lives here so
+ * the direct start→end request and RouteContext's split calc say the SAME thing
+ * (RouteContext re-exports it); the server's own words ("Route calculation
+ * failed: NOT FOUND") are for the console, not for a person.
+ */
+export const NO_ROUTE_MESSAGE =
+  "No route found to that point — try somewhere connected to the street network.";
+
 interface RouteCalculationState {
   isCalculating: boolean;
   error: string | null;
@@ -101,8 +111,14 @@ export function useRouteCalculation() {
           signal: controller.signal,
         });
 
+        // 4xx here means OSRM couldn't reach one of the endpoints — a routing
+        // verdict, not a transport failure. Say so in the app's words.
         if (!response.ok) {
-          throw new Error(`Route calculation failed: ${response.statusText}`);
+          throw new Error(
+            response.status >= 400 && response.status < 500
+              ? NO_ROUTE_MESSAGE
+              : `Route calculation failed: ${response.statusText}`
+          );
         }
 
         const data: RouteResponse = await response.json();

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { getCurrentMap } from "../../map/runtime";
-import "./EventBanner.css";
+import { MapNotice } from "../MapNotice";
 
 // ==========================================================================
 // Event banner — a one-off promo strip for an upcoming City Edit meetup.
@@ -52,7 +52,6 @@ function rememberDismissal(): void {
 
 export function EventBanner() {
   const [dismissed, setDismissed] = useState(wasDismissed);
-  const ref = useRef<HTMLElement | null>(null);
 
   const inAudience = AUDIENCE_CITIES.has(getCurrentMap()?.cityId ?? "");
   const visible = !dismissed && inAudience && Date.now() < EVENT_ENDS_AT;
@@ -62,38 +61,18 @@ export function EventBanner() {
     setDismissed(true);
   }, []);
 
-  // The error toast shares this bottom-centre slot, so publish our height as a
-  // CSS variable and let the toast stack on top of us (see ErrorToast.css)
-  // rather than land underneath. Measured, not hardcoded: the strip is one line
-  // on desktop and wraps to two or three on a phone.
-  useEffect(() => {
-    const el = ref.current;
-    if (!visible || !el) return;
-    const root = document.documentElement;
-    const publish = () => {
-      root.style.setProperty("--event-banner-offset", `${el.offsetHeight + 12}px`);
-    };
-    publish();
-    const observer = new ResizeObserver(publish);
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      root.style.removeProperty("--event-banner-offset");
-    };
-  }, [visible]);
-
   // Deliberately no Escape-to-dismiss: unlike the error toast this dismissal is
   // permanent, and Escape is already the app's "close the modal / drop the
   // selection" key — one stray press would retire the banner for good.
   if (!visible) return null;
 
   return (
-    <aside className="event-banner" ref={ref} aria-label="Upcoming event">
-      <span className="event-banner-text">
+    <MapNotice tone="notice" anchor aria-label="Upcoming event">
+      <span className="map-notice-message">
         Join us for our first Tactical Urbanism Adventure on Aug. 22!
       </span>
       <a
-        className="event-banner-cta"
+        className="map-notice-link"
         href={EVENT_URL}
         target="_blank"
         rel="noopener noreferrer"
@@ -101,13 +80,13 @@ export function EventBanner() {
         RSVP
       </a>
       <button
-        className="event-banner-close"
+        className="map-notice-close"
         onClick={dismiss}
         aria-label="Dismiss event announcement"
         title="Dismiss"
       >
         ×
       </button>
-    </aside>
+    </MapNotice>
   );
 }

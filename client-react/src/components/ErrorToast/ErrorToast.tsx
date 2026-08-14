@@ -1,5 +1,5 @@
-import { useEffect, useCallback, memo } from "react";
-import "./ErrorToast.css";
+import { useEffect, memo } from "react";
+import { MapNotice } from "../MapNotice";
 
 interface ErrorToastProps {
   message: string | null;
@@ -7,6 +7,11 @@ interface ErrorToastProps {
   onDismiss: () => void;
 }
 
+/**
+ * The app's one error voice — "No route found to that point", "That's outside
+ * this map". Layout, palette, stacking, and mobile behaviour come from
+ * {@link MapNotice}; this owns the copy, the auto-dismiss, and the buttons.
+ */
 export const ErrorToast = memo(function ErrorToast({
   message,
   onRetry,
@@ -19,44 +24,36 @@ export const ErrorToast = memo(function ErrorToast({
     return () => clearTimeout(timer);
   }, [message, onDismiss]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onDismiss();
-      }
-    },
-    [onDismiss]
-  );
+  // Escape dismisses from anywhere — the strip never takes focus (it's
+  // pointer-transparent so it can't shadow the map), so a keydown handler on
+  // the element itself would never fire. Window-level, and only while up.
+  useEffect(() => {
+    if (!message) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onDismiss();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [message, onDismiss]);
 
   if (!message) return null;
 
   return (
-    <div
-      className="error-toast"
-      role="alert"
-      aria-live="assertive"
-      onKeyDown={handleKeyDown}
-    >
-      <div className="error-toast-content">
-        <span className="error-toast-icon">!</span>
-        <span className="error-toast-message">{message}</span>
+    <MapNotice tone="alert" role="alert" aria-live="assertive">
+      <div className="map-notice-body">
+        <span className="map-notice-icon" aria-hidden>!</span>
+        <span className="map-notice-message">{message}</span>
       </div>
-      <div className="error-toast-actions">
+      <div className="map-notice-actions">
         {onRetry && (
-          <button
-            className="error-toast-btn error-toast-btn-retry"
-            onClick={onRetry}
-          >
+          <button className="map-notice-btn map-notice-btn-primary" onClick={onRetry}>
             Retry
           </button>
         )}
-        <button
-          className="error-toast-btn error-toast-btn-dismiss"
-          onClick={onDismiss}
-        >
+        <button className="map-notice-btn" onClick={onDismiss}>
           Dismiss
         </button>
       </div>
-    </div>
+    </MapNotice>
   );
 });
