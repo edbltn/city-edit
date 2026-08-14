@@ -21,6 +21,7 @@ import { DesirePathLayer, SplitDesirePathLayer } from "../RouteLayer";
 import { WaypointMarker } from "../WaypointMarker";
 import { WaypointConnectors } from "../WaypointConnectors";
 import { GhostPin } from "../GhostPin";
+import { PendingWaypoint } from "../PendingWaypoint";
 import { NavHistoryControls } from "../NavHistoryControls/NavHistoryControls";
 import { GraphLayer } from "../GraphLayer/GraphLayer";
 import { BoundaryLayer } from "../BoundaryLayer";
@@ -199,6 +200,7 @@ export function MapView() {
     ghostWaypoints,
     ghostWaypointIds,
     splitDesirePaths,
+    pendingWaypoint,
     routeEdgeIds,
     suppressNextClick,
     activeTool,
@@ -804,6 +806,10 @@ export function MapView() {
           />
         );
       })}
+
+      {/* A dropped waypoint still waiting on its route: floats on dotted
+          connectors until a real path exists (or is dropped with a banner). */}
+      <PendingWaypoint pending={pendingWaypoint} />
 
       {/* Grey arc connectors from waypoints to path endpoints */}
       <WaypointConnectors

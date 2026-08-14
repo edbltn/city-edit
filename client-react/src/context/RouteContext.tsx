@@ -16,7 +16,7 @@ import { blockCoverage, type VoteDirection } from "../utils/voteStore";
 import { useVotesVersion } from "../utils/useVotesVersion";
 import { castVotes, voteButtonState } from "../utils/castVote";
 import { reverseGeocode } from "../utils/geocode";
-import { derror } from "../utils/debugLog";
+import { dlog, derror } from "../utils/debugLog";
 import { useTheme } from "./ThemeContext";
 import { useGraphSnap } from "./GraphSnapContext";
 import type { ForcedCorridor, Selection } from "../selection/types";
@@ -31,6 +31,11 @@ import {
   setForcedCorridorAt as selSetForcedCorridorAt,
   fullIndexOf,
 } from "../selection/reducer";
+import {
+  routeSegments,
+  segmentsFromGeometry as segmentsFromGeometryImpl,
+  type SegmentCalcResult,
+} from "./segmentRouting";
 import { deriveStart, deriveEnd, deriveMids, deriveMidIds } from "../selection/selectors";
 import { selectionFromParams } from "../selection/serialize";
 import { canonicalSearch } from "../selection/urlSync";
@@ -130,14 +135,9 @@ function splitGeometryAtPoint(
 }
 
 /** Derive vote segments (consecutive coordinate pairs) from a geometry. */
-function segmentsFromGeometry(geometry: RouteGeometry): [number, number][][] {
-  const coords = geometry.coordinates;
-  const segs: [number, number][][] = [];
-  for (let i = 0; i < coords.length - 1; i++) {
-    segs.push([coords[i], coords[i + 1]]);
-  }
-  return segs;
-}
+// Re-exported from segmentRouting so the routing module and this one agree on
+// how a polyline becomes segments.
+const segmentsFromGeometry = segmentsFromGeometryImpl;
 
 // Max distance (meters) from the dropped point to the existing route geometry to
 // qualify for the fast, instant local geometry split (no server round-trip). The
@@ -146,7 +146,24 @@ function segmentsFromGeometry(geometry: RouteGeometry): [number, number][][] {
 // far drop (> this) still falls back to server routing for a real path.
 const LOCAL_SPLIT_THRESHOLD_METERS = 30;
 
+/** Shown when a waypoint can't be reached on foot from its neighbours (an
+ *  island, a pier, a stretch that isn't in the routable network). Goes through
+ *  the same ErrorToast as "That's outside this map" — one banner, one pattern. */
+export const NO_ROUTE_MESSAGE =
+  "No route found to that point — try somewhere connected to the street network.";
+
 export type ActiveTool = "start" | "end";
+
+/** A waypoint the user has dropped but whose route is still being computed. It
+ *  renders as a floating pin joined to its neighbours by the same dotted
+ *  connector the drag trail uses — never as route geometry, because there is no
+ *  routed geometry for it yet. `prev`/`next` are the committed waypoints it sits
+ *  between (either may be absent at the ends of the sequence). */
+export interface PendingWaypoint {
+  coords: LatLng;
+  prev: LatLng | null;
+  next: LatLng | null;
+}
 
 /** Selection edges → the touched blocks' materialized edge lists (docs
  *  three-layer-model §4). Registered by GraphLayer, which owns the topology. */
@@ -192,6 +209,10 @@ interface RouteContextValue {
   ghostWaypointIds: string[];
   splitDesirePaths: SplitDesirePath[];
   isCalculatingSplit: boolean;
+  /** A dropped waypoint awaiting its route. Renders as a floating pin on dotted
+   *  connectors — it is deliberately NOT in `ghostWaypoints`, because it is not
+   *  part of the selection until a real path to it exists. */
+  pendingWaypoint: PendingWaypoint | null;
   /** Graph edge IDs of the direct (start→end) route. Combined with the split
    *  segments to tell GraphLayer which top proposals the path passes through. */
   routeEdgeIds: number[] | null;
@@ -371,6 +392,10 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   const [waypoints, setWaypoints] = useState<LatLng[]>([]);
   const [splitDesirePaths, setSplitDesirePaths] = useState<SplitDesirePath[]>([]);
   const [isCalculatingSplit, setIsCalculatingSplit] = useState(false);
+  // A dropped waypoint whose route hasn't come back yet. It is NOT in the
+  // selection — it floats on a dotted line to its neighbours until the router
+  // proves a path exists, then it's committed (or dropped, with a banner).
+  const [pendingWaypoint, setPendingWaypoint] = useState<PendingWaypoint | null>(null);
   // Re-renders this context on any vote change (from here OR the proposal modal)
   // so derived "already voted" values recompute. See useVotesVersion.
   const votesVersion = useVotesVersion();
@@ -448,15 +473,29 @@ export function RouteProvider({ children }: { children: ReactNode }) {
 
   const {
     isCalculating,
-    error,
+    error: calcError,
     routeData,
     desirePathData,
     edgeIds: routeEdgeIds,
     calculateRoute,
     clearRoute,
-    clearError,
-    setError,
+    clearError: clearCalcError,
   } = useRouteCalculation();
+
+  // Errors raised OUTSIDE the direct start→end request: an unroutable ghost drop,
+  // a click outside the mapped area. They live here rather than in
+  // useRouteCalculation because that hook REPLACES its entire state on every
+  // request — and a selection with mids fires calculateRoute and the split calc
+  // CONCURRENTLY, so a start→end route that succeeds would wipe the "no route
+  // found" the split calc had just raised. Same banner, separate channel.
+  const [pathError, setPathError] = useState<string | null>(null);
+  const error = pathError ?? calcError;
+
+  const setError = useCallback((message: string) => setPathError(message), []);
+  const clearError = useCallback(() => {
+    setPathError(null);
+    clearCalcError();
+  }, [clearCalcError]);
 
   // ── Derived legacy shape (so every consumer keeps working unchanged) ──────
   const start = useMemo(() => deriveStart(selection), [selection]);
@@ -545,9 +584,21 @@ export function RouteProvider({ children }: { children: ReactNode }) {
   // proposal/snapshot geometry — no OSRM round-trip, and the segment's edgeIds
   // are the corridor's own path edges, so the heat/hover highlight, block
   // coverage, and the vote target all match what's selected.
+  //
+  // `forcedFrom` is the waypoint list the flags come from. It defaults to the
+  // LIVE selection, but a route-then-commit caller (a ghost drop, which must
+  // prove the route before it touches the selection) passes its CANDIDATE
+  // waypoints — otherwise the candidate's forced flags would be invisible and
+  // its corridor segments would go to OSRM instead of tracing the proposal.
   const corridorSegmentFor = useCallback(
-    (a: LatLng, b: LatLng, segmentIndex: number): SplitDesirePath | null => {
-      const forced = selectionRef.current.waypoints[segmentIndex]?.forcedCorridor ?? null;
+    (
+      a: LatLng,
+      b: LatLng,
+      segmentIndex: number,
+      forcedFrom?: readonly { forcedCorridor?: ForcedCorridor | null }[]
+    ): SplitDesirePath | null => {
+      const src = forcedFrom ?? selectionRef.current.waypoints;
+      const forced = src[segmentIndex]?.forcedCorridor ?? null;
       if (!forced) return null;
       const c = corridorResolverRef.current?.(a, b, forced);
       if (!c || c.coordinates.length < 2) {
@@ -566,82 +617,129 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  const calculateAllSegments = useCallback(async (points: LatLng[]): Promise<SplitDesirePath[]> => {
-    if (points.length < 2) return [];
+  /**
+   * Route [start, ...mids, end]. Never fabricates geometry: a segment that can't
+   * route comes back in `failed`, and the caller decides — a ghost drop reverts,
+   * a restored deep link just reports. `forcedFrom` supplies the forced-corridor
+   * flags when routing a CANDIDATE selection that isn't applied yet.
+   */
+  const calculateAllSegments = useCallback(
+    async (
+      points: LatLng[],
+      forcedFrom?: readonly { forcedCorridor?: ForcedCorridor | null }[]
+    ): Promise<SegmentCalcResult> => {
+      if (points.length < 2) return { paths: [], failed: [], aborted: false };
 
-    // Abort previous batch of split requests
-    splitAbortRef.current?.abort();
-    const controller = new AbortController();
-    splitAbortRef.current = controller;
+      // Abort previous batch of split requests
+      splitAbortRef.current?.abort();
+      const controller = new AbortController();
+      splitAbortRef.current = controller;
 
-    // Compute one segment per consecutive pair, INDEPENDENTLY. A single segment
-    // that can't route (e.g. a waypoint snapped onto a proposed bike lane that
-    // isn't in the routable network) must NOT discard the whole route — it falls
-    // back to a straight connector. So we always return exactly points.length-1
-    // segments and the route always renders.
-    const fetchSegment = async (i: number): Promise<SplitDesirePath> => {
-      const a = points[i], b = points[i + 1];
-      // A segment flagged as forced routes through its proposal's corridor
-      // VERBATIM — locally, before (and instead of) any OSRM request.
-      const corridor = corridorSegmentFor(a, b, i);
-      if (corridor) return corridor;
-      const straight: SplitDesirePath = {
-        id: `split-${i}`,
-        segmentIndex: i,
-        geometry: { type: "LineString", coordinates: [[a.lng, a.lat], [b.lng, b.lat]] },
-        segments: [],
-        edgeIds: [],
-      };
-      try {
-        const resp = await fetch(`${CONFIG.apiUrl}/routes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            start: [a.lat, a.lng],
-            end: [b.lat, b.lng],
-            waypoints: [],
-            map: getMapSlug(),
-          }),
-          signal: controller.signal,
-        });
-        if (!resp.ok) return straight;
-        const data = await resp.json();
-        const geometry = data.route?.geometry;
-        if (!geometry) return straight;
-        return {
-          id: `split-${i}`,
-          segmentIndex: i,
-          geometry,
-          segments: data.desire_path_segments || [],
-          edgeIds: data.edge_ids || [],
-        };
-      } catch {
-        // Abort or network error: return the straight fallback. Stale aborted
-        // batches are discarded by the caller's calcVersion check regardless.
-        return straight;
-      }
-    };
+      return routeSegments(points, {
+        corridorFor: (a, b, i) => corridorSegmentFor(a, b, i, forcedFrom),
+        signal: controller.signal,
+        apiUrl: CONFIG.apiUrl,
+        mapSlug: getMapSlug(),
+      });
+    },
+    [corridorSegmentFor]
+  );
 
-    return Promise.all(points.slice(0, -1).map((_, i) => fetchSegment(i)));
-  }, [corridorSegmentFor]);
-
-  /** Recompute the split paths for [start, ...mids, end], discarding stale batches. */
+  /**
+   * Recompute the split paths for [start, ...mids, end], discarding stale
+   * batches. Used by the paths where the selection has ALREADY changed for a
+   * legitimate reason (a deep link restored, a point cleared, an endpoint
+   * moved): there's nothing to revert, so an unroutable segment clears the
+   * route and says so rather than drawing a straight line through it.
+   */
   const runSplitCalc = useCallback(
     (startC: LatLng, endC: LatLng, mids: LatLng[]) => {
       setIsCalculatingSplit(true);
+      // Bumping the version orphans any in-flight route-then-commit, so this
+      // call inherits its floating pin and must put it away.
+      setPendingWaypoint(null);
+      setPathError(null); // a fresh attempt supersedes the last verdict
       splitCalcVersionRef.current++;
       const calcVersion = splitCalcVersionRef.current;
       calculateAllSegments([startC, ...mids, endC])
-        .then((splitPaths) => {
-          if (calcVersion !== splitCalcVersionRef.current) return;
-          if (splitPaths.length === mids.length + 1) setSplitDesirePaths(splitPaths);
+        .then(({ paths, failed, aborted }) => {
+          if (calcVersion !== splitCalcVersionRef.current || aborted) return;
+          if (failed.length > 0) {
+            // Partial geometry would read as a complete route (and every
+            // consumer indexes split paths positionally), so show none of it.
+            dlog("proposals", "no route for segment(s)", failed, "— clearing path");
+            setSplitDesirePaths([]);
+            setError(NO_ROUTE_MESSAGE);
+            return;
+          }
+          if (paths.length === mids.length + 1) setSplitDesirePaths(paths);
         })
         .catch((err) => derror("proposals", "split path calculation failed:", err))
         .finally(() => {
           if (calcVersion === splitCalcVersionRef.current) setIsCalculatingSplit(false);
         });
     },
-    [calculateAllSegments]
+    [calculateAllSegments, setError]
+  );
+
+  /**
+   * Route a CANDIDATE selection and commit it only if every segment routes.
+   *
+   * This is the rule for anything the user drops on the map: the waypoint is not
+   * part of the selection until a real path to it exists. Until then it floats
+   * (see {@link PendingWaypoint}); if the router can't reach it, nothing is
+   * applied — no waypoint, no URL change, no history entry — and the existing
+   * route is left exactly as it was, with the "no route" banner explaining why.
+   *
+   * Returns true when the candidate was committed.
+   */
+  const commitIfRoutable = useCallback(
+    async (nextSel: Selection, pending: PendingWaypoint): Promise<boolean> => {
+      const startC = deriveStart(nextSel).coords;
+      const endC = deriveEnd(nextSel).coords;
+      if (!startC || !endC) return false;
+      const mids = deriveMids(nextSel);
+      const points = [startC, ...mids, endC];
+
+      setPendingWaypoint(pending);
+      setPathError(null); // a fresh attempt supersedes the last verdict
+      setIsCalculatingSplit(true);
+      splitCalcVersionRef.current++;
+      const calcVersion = splitCalcVersionRef.current;
+
+      try {
+        // The candidate's own forced-corridor flags — it isn't applied yet, so
+        // the live selection can't supply them.
+        const { paths, failed, aborted } = await calculateAllSegments(points, nextSel.waypoints);
+
+        // Superseded by a newer drop: that one owns the pending state now.
+        if (calcVersion !== splitCalcVersionRef.current || aborted) return false;
+
+        if (failed.length > 0 || paths.length !== mids.length + 1) {
+          dlog("proposals", "no route to dropped waypoint", pending.coords, "— not adding it");
+          setPendingWaypoint(null);
+          setError(NO_ROUTE_MESSAGE);
+          return false;
+        }
+
+        // Proven routable — now, and only now, does it become the selection.
+        routeVersionRef.current++;
+        applySelection(nextSel);
+        setSplitDesirePaths(paths);
+        setPendingWaypoint(null);
+        return true;
+      } catch (err) {
+        derror("proposals", "route-then-commit failed:", err);
+        if (calcVersion === splitCalcVersionRef.current) {
+          setPendingWaypoint(null);
+          setError(NO_ROUTE_MESSAGE);
+        }
+        return false;
+      } finally {
+        if (calcVersion === splitCalcVersionRef.current) setIsCalculatingSplit(false);
+      }
+    },
+    [calculateAllSegments, applySelection, setError]
   );
 
   // Route start→end directly (no mids): through the corridor VERBATIM when the
@@ -654,6 +752,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       const corridor = corridorSegmentFor(startC, endC, 0);
       if (corridor) {
         // Invalidate any in-flight split batch so it can't clobber the corridor.
+        setPendingWaypoint(null);
         splitCalcVersionRef.current++;
         setSplitDesirePaths([corridor]);
         setIsCalculatingSplit(false);
@@ -740,6 +839,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       });
     }
     setSplitDesirePaths([]);
+    setPendingWaypoint(null);
   }, [applySelection]);
 
   const clearSuppressClick = useCallback(() => {
@@ -768,6 +868,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
     applySelection(selClearWaypoints(selectionRef.current));
     setWaypoints([]);
     setSplitDesirePaths([]);
+    setPendingWaypoint(null);
+    setPathError(null);
     routeVersionRef.current++;
     setActiveToolState("start");
     setStartReplaceArmed(false);
@@ -802,12 +904,6 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       const wasForced = !!cur.waypoints[segmentIndex]?.forcedCorridor;
 
       const nextSel = selInsertMid(cur, segmentIndex, { coords: position }, makeId);
-      // Path changed - bump version so any in-flight vote isn't recorded
-      routeVersionRef.current++;
-      // Inserting a mid leaves start/end unchanged, so the main effect won't fire
-      // and clobber the instant local split below.
-      applySelection(nextSel);
-      const newMids = deriveMids(nextSel);
 
       // Try client-side geometry splitting: if the insertion point is on the
       // existing route/segment geometry, split locally instead of server requests.
@@ -821,7 +917,9 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         const splitResult = splitGeometryAtPoint(currentGeometry, position);
         if (splitResult && splitResult.distanceMeters <= LOCAL_SPLIT_THRESHOLD_METERS) {
           // Point is on/near the route -- split locally (instant, no server round
-          // trip — the same fast path normal mids use). Force both halves to meet
+          // trip — the same fast path normal mids use). This branch CANNOT fail:
+          // it slices geometry the router already produced, so the waypoint is
+          // committed immediately rather than floating. Force both halves to meet
           // at the ACTUAL dropped coordinate (not the route projection), so a
           // waypoint snapped to an off-route proposal still connects exactly at the
           // proposal: the connector and drag-trail anchor are correct, and a mid
@@ -880,38 +978,22 @@ export function RouteProvider({ children }: { children: ReactNode }) {
             existingPaths[i].id = `split-${i}`;
           }
 
+          // Path changed - bump version so any in-flight vote isn't recorded.
+          // Inserting a mid leaves start/end unchanged, so the main effect won't
+          // fire and clobber this instant local split.
+          routeVersionRef.current++;
+          applySelection(nextSel);
           setSplitDesirePaths(existingPaths);
           return;
         }
       }
 
-      // Fallback: point is off-route or geometry unavailable -- use server requests
-      setSplitDesirePaths([]);
-      setIsCalculatingSplit(true);
-
-      // Track this calculation version to discard stale responses
-      splitCalcVersionRef.current++;
-      const calcVersion = splitCalcVersionRef.current;
-
-      try {
-        const allPoints = [startC, ...newMids, endC];
-        const splitPaths = await calculateAllSegments(allPoints);
-
-        // Discard if a newer calculation was started
-        if (calcVersion !== splitCalcVersionRef.current) return;
-
-        if (splitPaths.length === newMids.length + 1) {
-          setSplitDesirePaths(splitPaths);
-        }
-      } catch (err) {
-        derror("proposals", "Failed to calculate split paths:", err);
-      } finally {
-        if (calcVersion === splitCalcVersionRef.current) {
-          setIsCalculatingSplit(false);
-        }
-      }
+      // Point is off-route or geometry unavailable: the server has to find a
+      // path to it, and it may not be able to. Float the pin until it does —
+      // the existing route stays on screen untouched meanwhile.
+      await commitIfRoutable(nextSel, { coords: position, prev, next });
     },
-    [splitDesirePaths, routeData, routeEdgeIds, calculateAllSegments, applySelection, makeId]
+    [splitDesirePaths, routeData, routeEdgeIds, commitIfRoutable, applySelection, makeId]
   );
 
   // ============================================
@@ -939,40 +1021,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         return;
       }
 
+      // Route to the new position BEFORE moving the waypoint there. The pin
+      // floats at the drop point on dotted connectors while that resolves; if
+      // no path exists the move never happens and the waypoint stays put.
       const nextSel = selUpdateAt(cur, fullIndexOf(cur, index), position);
-      // Path changed - bump version so any in-flight vote isn't recorded
-      routeVersionRef.current++;
-      // A mid move leaves start/end unchanged → main effect won't fire; recalc here.
-      applySelection(nextSel);
-
-      // Clear paths immediately - they'll reappear when calculation completes
-      setSplitDesirePaths([]);
-      setIsCalculatingSplit(true);
-
-      // Track this calculation version to discard stale responses
-      splitCalcVersionRef.current++;
-      const calcVersion = splitCalcVersionRef.current;
-
-      try {
-        const newMids = deriveMids(nextSel);
-        const allPoints = [startC, ...newMids, endC];
-        const splitPaths = await calculateAllSegments(allPoints);
-
-        // Discard if a newer calculation was started
-        if (calcVersion !== splitCalcVersionRef.current) return;
-
-        if (splitPaths.length === newMids.length + 1) {
-          setSplitDesirePaths(splitPaths);
-        }
-      } catch (err) {
-        derror("proposals", "Failed to recalculate split paths:", err);
-      } finally {
-        if (calcVersion === splitCalcVersionRef.current) {
-          setIsCalculatingSplit(false);
-        }
-      }
+      await commitIfRoutable(nextSel, { coords: position, prev, next });
     },
-    [calculateAllSegments, applySelection]
+    [commitIfRoutable]
   );
 
   // ============================================
@@ -1036,14 +1091,13 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         nextSel = selSetForcedCorridorAt(nextSel, chainStart + i, corridors[i] ?? null);
       }
 
-      routeVersionRef.current++;
-      applySelection(nextSel);
-      setSplitDesirePaths([]);
-      const newMids = deriveMids(nextSel);
-      if (newMids.length > 0) runSplitCalc(startC, endC, newMids);
-      else routeDirect(startC, endC);
+      // Same rule as a plain ghost drop: the corridor's connector segments still
+      // go through the router, so prove them before the chain joins the
+      // selection. corridorSegmentFor reads the CANDIDATE's forced flags, so the
+      // forced segments still trace their proposal verbatim during this check.
+      void commitIfRoutable(nextSel, { coords: chain[0], prev: prevC, next: nextC });
     },
-    [applySelection, runSplitCalc, routeDirect, makeId]
+    [commitIfRoutable, makeId]
   );
 
   const insertWaypointChainAtSegment = useCallback(
@@ -1078,12 +1132,9 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         nextSel = selSetForcedCorridorAt(nextSel, chainStart + i, corridors[i] ?? null);
       }
       if (nextSel === cur) return;
-      routeVersionRef.current++;
-      applySelection(nextSel);
-      setSplitDesirePaths([]);
-      runSplitCalc(startC, endC, deriveMids(nextSel));
+      void commitIfRoutable(nextSel, { coords: chain[0], prev: prevC, next: nextC });
     },
-    [applySelection, runSplitCalc, makeId]
+    [commitIfRoutable, makeId]
   );
 
   // Dropping an ENDPOINT onto a route-proposal diamond threads the corridor at
@@ -1638,6 +1689,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       ghostWaypointIds,
       splitDesirePaths,
       isCalculatingSplit,
+      pendingWaypoint,
       routeEdgeIds,
       voteType: effectiveVoteType,
       requestedVoteType: selection.voteType,
@@ -1696,6 +1748,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       ghostWaypointIds,
       splitDesirePaths,
       isCalculatingSplit,
+      pendingWaypoint,
       routeEdgeIds,
       effectiveVoteType,
       selection.voteType,
