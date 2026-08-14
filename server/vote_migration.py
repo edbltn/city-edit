@@ -15,6 +15,7 @@ live in database.resnap_edge_votes.
 """
 import logging
 
+import block_votes
 import database
 import vote_store
 
@@ -44,26 +45,52 @@ def resnap_map(cg, slug: str) -> dict:
 
 
 def rebuild_redis_for_map(redis_client, slug: str, mode_int: int) -> int:
-    """Rebuild a map's Redis aggregate hash from the (now re-snapped) DB rows.
+    """Rebuild ALL of a map's Redis serving state from the canonical DB rows.
 
-    Drops the stale hash + revision, then replays the per-(edge, type, direction)
-    counts. Returns the number of fields written.
+    Postgres is canonical; Redis holds three derived layers, and a DB-level
+    change to a vote invalidates every one of them:
+
+      * ``ev:<slug>``            the per-(edge, type, direction) aggregate
+      * ``bd:<slug>:<mode>:…``   the per-block identity hashes
+      * ``bagg:<slug>:<mode>``   the deduped per-block aggregate
+
+    This used to rebuild only the first. The block layers are keyed by VOTE TYPE
+    as well as by block, so re-pointing votes at a different type (or deleting
+    them) left the old slots standing and the pins kept rendering from state
+    nothing would ever correct — the heatmap and the proposal pins disagreeing
+    about which votes exist. The block layers are keyed by edge→block, which
+    lives on the graph and is not available here, so they are CLEARED rather
+    than replayed: `/api/graph-votes` rebuilds them from Postgres on the next
+    request, against the graph that instance actually has (app.py, `bagg_cold`).
+
+    The revision is bumped FORWARD, never reset. Dropping the key sent it back
+    to 1 on the next cast, which is lower than the revision connected clients
+    and cached bodies already hold — so a client comparing revisions concludes
+    it is up to date and 304-pins itself to a body describing votes that no
+    longer exist. INCR is the only safe move: it is atomic, it cannot collide
+    with a concurrent caster, and it always lands above whatever was there.
+
+    Returns the number of edge-aggregate fields written.
     """
     if redis_client is None:
         return 0
     redis_client.delete(vote_store.hash_key(slug))
-    redis_client.delete(vote_store.revision_key(slug))
+    # Derived block state — dropped here so it can't outlive the votes it was
+    # built from. Cheap and idempotent when the map has no block layer.
+    block_votes.clear(redis_client, slug, mode_int)
 
     rows = database.aggregate_votes_for_replay(slug)  # [(slug, edge, vt, dir, cnt)]
-    if not rows:
-        return 0
-    pipe = redis_client.pipeline(transaction=False)
     n = 0
-    for _slug, edge_id, vt_id, direction, cnt in rows:
-        field = vote_store.redis_field(edge_id, mode_int, vt_id, direction)
-        pipe.hset(vote_store.hash_key(slug), str(field), int(cnt))
-        n += 1
-    pipe.execute()
+    if rows:
+        pipe = redis_client.pipeline(transaction=False)
+        for _slug, edge_id, vt_id, direction, cnt in rows:
+            field = vote_store.redis_field(edge_id, mode_int, vt_id, direction)
+            pipe.hset(vote_store.hash_key(slug), str(field), int(cnt))
+            n += 1
+        pipe.execute()
+
+    rev = redis_client.incr(vote_store.revision_key(slug))
+    logger.info(f"[REBUILD:{slug}] {n} edge fields, block state cleared, revision → {rev}")
     return n
 
 

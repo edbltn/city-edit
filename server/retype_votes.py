@@ -8,11 +8,15 @@ means pointing its rows at the canonical vote type — a *retype*, not a re-vote
 nobody's vote is created or destroyed, it just says the map's word for the thing.
 
 The catch is that a vote lives in FOUR places, and the obvious ones are not all
-of them. `vote_migration.rebuild_redis_for_map` rebuilds the edge aggregate only
-(and resets the revision to 1, which sends it BACKWARDS and can 304-pin stale
-bodies on connected clients), so a DB-level retype done that way leaves the block
-layers keyed on the old type and stale pins keep rendering. Every layer, in the
-order this script writes them:
+of them. `vote_migration.rebuild_redis_for_map` used to rebuild the edge
+aggregate only, and to reset the revision to 1 — sending it BACKWARDS, which can
+304-pin stale bodies on connected clients — so a DB-level retype done that way
+left the block layers keyed on the old type and stale pins kept rendering. That
+helper now clears the block layers and bumps the revision forward, so it is no
+longer a trap; it still CLEARS rather than moves, leaving the rebuild to the next
+`/api/graph-votes`, where this script writes the new slots itself and keeps the
+map correct on the very next read. Every layer, in the order this script writes
+them:
 
   1. Postgres `edge_votes.vote_type_id`        — canonical (database.remap_edge_vote_type)
   2. Redis `ev:<slug>`                         — edge aggregate; the type is packed
