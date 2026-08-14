@@ -24,7 +24,7 @@
   { "label": "Add Citibike station",         "icon": "bikes",               "pointType": "point" },
 
   { "label": "Improve sidewalk",             "icon": "walkways",            "pointType": "route" },
-  { "label": "Add pedestrian bridge",        "icon": "walkways",            "pointType": "route" },
+  { "label": "Add pedestrian bridge",        "icon": "walkways",            "pointType": "point" },
   { "label": "Improve accessibility",        "icon": "accessibility",       "pointType": "route" },
   { "label": "Fix curb cut",                 "icon": "accessibility",       "pointType": "point" },
   { "label": "Add bench",                    "icon": "public-space",        "pointType": "point" },
