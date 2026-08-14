@@ -31,5 +31,15 @@
   { "label": "Add bus shelter",              "icon": "transit",             "pointType": "point" },
 
   { "label": "Add tree-lined street",        "icon": "trees",               "pointType": "route" },
-  { "label": "Add planter boxes",            "icon": "parks",               "pointType": "point" }
+  { "label": "Add planter boxes",            "icon": "parks",               "pointType": "point" },
+
+  { "label": "Add curb cut",                 "icon": "accessibility",       "pointType": "point" },
+  { "label": "Add tactile paving",           "icon": "accessibility",       "pointType": "point" },
+  { "label": "Add audible pedestrian signal","icon": "accessibility",       "pointType": "point" },
+  { "label": "Extend crossing time",         "icon": "traffic-reduction",   "pointType": "point" },
+  { "label": "Add subway elevator",          "icon": "accessibility",       "pointType": "point" },
+  { "label": "Fix broken elevator",          "icon": "accessibility",       "pointType": "point" },
+  { "label": "Add accessible parking space", "icon": "accessibility",       "pointType": "point" },
+  { "label": "Clear sidewalk obstruction",   "icon": "walkways",            "pointType": "point" },
+  { "label": "Fix broken sidewalk",          "icon": "walkways",            "pointType": "route" }
 ]
