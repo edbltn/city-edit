@@ -38,22 +38,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "stickers"))
 
 import isoqr  # noqa: E402
 
-# Clear cells between the code and the first building. Four is the QR spec's
-# minimum quiet zone; this is nearly double it, because the surround's roofline
-# is a far busier neighbour than white paper.
-MARGIN = 6
+# Clear cells between the code and the first building — the QR spec's minimum
+# quiet zone exactly. It reads as the boulevard the code's district sits inside,
+# which is the point: any wider and the code floats in a moat with no continuity
+# to the city around it.
+MARGIN = 4
 
-# How far the city reaches past that, in cells. Generous, because the whole
-# effect is a gradient — a short span reads as a frame drawn around the code
-# rather than a district it happens to sit in.
-SPAN = 18
+# How far the city reaches past that, in cells.
+SPAN = 16
 
-# Height range for an ordinary block, and the occasional landmark that breaks
-# the skyline. Kept below the code's own cube height so the district around it
-# never out-shouts it.
-LOW_H = (0.20, 0.34, 0.48, 0.62)
-LANDMARK_H = 1.15
-LANDMARK_EVERY = 23     # coprime with the strides below, so they never phase-lock
+# The street plan. Roads run on the SAME integer lattice as the code, so the
+# city and the thing it surrounds share one grid — which is what stops the
+# surround reading as noise scattered around a graphic.
+ROAD_EVERY = 7
+ROAD_PHASE = 3
+
+# Buildings are 2×2 cells, so a roof is a roof rather than a single module
+# pretending to be one.
+LOT = 2
+
+# Heights. Every roof in the CODE sits at one height by construction, which is
+# what makes it readable; the city around it varies, which is what makes it a
+# city. Kept under the code's own cube so the district never out-shouts it.
+LOW_H = (0.18, 0.30, 0.44, 0.60, 0.78, 0.26, 0.52, 0.94)
+LANDMARK_H = 1.45
+LANDMARK_EVERY = 9
+
+# Not every lot is built. Roughly one in seven is a plaza, a yard or a parking
+# lot — which is what stops a regular street grid reading as a quilt. An
+# ordered city is not a uniform one.
+EMPTY_EVERY = 7
 
 
 def _rand(seed: int):
@@ -104,31 +118,39 @@ def scene(url: str, ground: str, ink: str, *, seed: int = 20260813,
             if lo <= c < hi and lo <= r < hi:
                 continue
             # Euclidean distance from the quiet-zone box, so the district has
-            # rounded corners. Chebyshev gives a square in grid space, which
-            # this projection turns into a hard diamond — a frame, not a place.
+            # rounded corners rather than the hard diamond a Chebyshev radius
+            # turns into under this projection.
             dx = max(lo - c, c - (hi - 1), 0)
             dy = max(lo - r, r - (hi - 1), 0)
             d = (dx * dx + dy * dy) ** 0.5
             if d > SPAN:
                 continue
 
-            # Dense and bright against the quiet zone, thinning and dimming all
-            # the way out. Both knobs move together: fading tone alone leaves a
-            # ghost grid at the rim, and thinning density alone leaves the last
-            # survivors at full strength like litter.
-            t = d / SPAN
-            if rand() > 0.97 - 0.92 * t:
-                continue
-            fade = (1.0 - t) ** 1.25
-            if fade <= 0.05:
+            # Streets. A cell on a road stays empty, which is what gives the
+            # district blocks instead of a solid field — and the roads run on
+            # the code's own lattice, so the two read as one plan.
+            if c % ROAD_EVERY == ROAD_PHASE or r % ROAD_EVERY == ROAD_PHASE:
                 continue
 
-            # Tall near the code, low further out — a downtown that falls away
-            # to sheds. Heights stay under the code's own cube either way, so
-            # the district never out-shouts the thing it surrounds.
-            landmark = (c * 7 + r * 13) % LANDMARK_EVERY == 0 and t < 0.6
-            base = LANDMARK_H if landmark else LOW_H[(c * 3 + r * 5) % len(LOW_H)]
-            cells.append((c, r, base * (1.0 - 0.55 * t),
+            t = d / SPAN
+            fade = (1.0 - t) ** 1.15
+            if fade <= 0.06:
+                continue
+            # Density is left alone until the outer third. Thinning it earlier
+            # is what made this look scattered: a city does not lose buildings
+            # at random, it just gets further away.
+            if t > 0.66 and rand() > (1.0 - t) / 0.34:
+                continue
+
+            # One height per 2×2 lot, so four cells share a roof and read as a
+            # single building rather than four separate posts.
+            lot = (c // LOT, r // LOT)
+            if (lot[0] * 11 + lot[1] * 4) % EMPTY_EVERY == 0:
+                continue
+            landmark = (lot[0] * 5 + lot[1] * 9) % LANDMARK_EVERY == 0 and t < 0.6
+            base = (LANDMARK_H if landmark
+                    else LOW_H[(lot[0] * 3 + lot[1] * 7) % len(LOW_H)])
+            cells.append((c, r, base * (1.0 - 0.4 * t),
                           _fade_tones(ground, ink, fade)))
 
     # Painter's order over the WHOLE scene, code and district together: depth

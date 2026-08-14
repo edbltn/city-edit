@@ -28,11 +28,16 @@ that fades out around it (`cityscape.py`). It needs no light panel behind it —
 its light half *is* the garment — so a black shirt gets a city of pale towers
 dissolving into black rather than a white sticker.
 
-⚠️ **The gap between the code and the first building is the quiet zone.** A QR
-cannot be found without it. `MARGIN` and `SPAN` in `cityscape.py` were swept
-against a decode of the finished art on both garments *and* across eight capture
-widths — do that again if you touch them, because the failure mode is "reads
-fine on screen, not off a shirt".
+The district runs on the code's own lattice, with streets every seven cells,
+2×2 lots, varied heights and about one lot in seven left as a plaza. All of that
+is structure rather than decoration: an earlier version thinned the city at
+random and read as scatter around a graphic instead of a place the code sits in.
+
+⚠️ **The gap between the code and the first building is the quiet zone** — four
+modules, the QR spec's minimum, and it is not styling. `MARGIN` and `SPAN` in
+`cityscape.py` were swept against a decode of the finished art on both garments
+*and* across nine capture widths. Do that again if you touch them: the failure
+mode is "reads fine on screen, not off a shirt".
 
 **One code per shirt, not per print.** A One Note shirt carries the code on both
 faces and they are the *same* code: two would bind to two different proposals,
