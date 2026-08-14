@@ -19,7 +19,7 @@ import {
   type EdgePosition,
   type VoteTypeWinner,
 } from "./topProposals";
-import { topologyFromJson } from "./graphTopology";
+import { topologyFromJson, COORD_SCALE } from "./graphTopology";
 
 const SALT = 12345;
 
@@ -291,8 +291,14 @@ describe("candidatesForGraph — the app's step 1, resolvers not optional", () =
     block_vote_types: [[[0, 1, 0]], [[0, 3, 0]]] as [number, number, number][][],
   };
 
+  // Every edge in this fixture joins the same two nodes, so all five share one
+  // midpoint and the per-type spacing would collapse them to a single
+  // candidate. These cases are about the block grain, not about spacing, so
+  // they pass 0 — spacing has its own describe block below.
+  const unspaced = (minNet: number) => candidatesForGraph(data, 5, undefined, minNet, 0);
+
   it("ranks by deduped devices, so the 3-device block beats the 4-edge one", () => {
-    const out = candidatesForGraph(data, 5, undefined, 0);
+    const out = unspaced(0);
     expect(out.map((w) => ({ edgeIdx: w.edgeIdx, count: w.count })))
       .toEqual([{ edgeIdx: 4, count: 3 }, { edgeIdx: 0, count: 1 }]);
   });
@@ -302,20 +308,82 @@ describe("candidatesForGraph — the app's step 1, resolvers not optional", () =
     const degraded = computeWinnerCandidates(
       data.vote_type_legend, data.edge_vote_types, 5, undefined, 0
     );
-    expect(degraded.map((w) => w.count)).not.toEqual(
-      candidatesForGraph(data, 5, undefined, 0).map((w) => w.count)
-    );
+    expect(degraded.map((w) => w.count)).not.toEqual(unspaced(0).map((w) => w.count));
     expect(degraded[0]).toMatchObject({ edgeIdx: 4, count: 3 });
     expect(degraded).toHaveLength(5); // five singleton "blocks", not two
   });
 
   it("groups by block, so a long block yields ONE candidate not four", () => {
-    expect(candidatesForGraph(data, 5, undefined, 0)).toHaveLength(2);
+    expect(unspaced(0)).toHaveLength(2);
   });
 
   it("applies the support floor to the deduped net", () => {
-    expect(candidatesForGraph(data, 5, undefined, 2).map((w) => w.edgeIdx))
-      .toEqual([4]);
+    expect(unspaced(2).map((w) => w.edgeIdx)).toEqual([4]);
+  });
+});
+
+describe("per-type candidate slots go to distinct PLACES", () => {
+  // Two clusters of tied blocks far apart, numbered so that ALL of the low edge
+  // indices belong to cluster A — the nyc-tactical shape: 39 blocks tied at net
+  // 1 across two casts 12 km apart, every slot spent inside 228 m of one of
+  // them, one pin drawn.
+  const legend = ["Pick up litter"];
+  const CLUSTER_A_LAT = 40.81;   // Harlem
+  const CLUSTER_B_LAT = 40.70;   // Bushwick, ~12 km south
+  const N_PER_CLUSTER = 6;
+
+  // Node i sits 100 m east of node i-1 within its cluster, so neighbours inside
+  // a cluster are 100 m apart and the clusters are kilometres apart.
+  const nNodes = 2 * N_PER_CLUSTER;
+  const coords = new Int32Array(2 * nNodes);
+  for (let i = 0; i < N_PER_CLUSTER; i++) {
+    coords[2 * i] = Math.round(CLUSTER_A_LAT * COORD_SCALE);
+    coords[2 * i + 1] = Math.round((-73.95 + i * 0.0012) * COORD_SCALE);
+    const j = N_PER_CLUSTER + i;
+    coords[2 * j] = Math.round(CLUSTER_B_LAT * COORD_SCALE);
+    coords[2 * j + 1] = Math.round((-73.92 + i * 0.0012) * COORD_SCALE);
+  }
+  // Edge i is the self-loop at node i — one edge per block, one block per node.
+  // Cluster A takes edge indices 0..5, cluster B 6..11: the build-order bias.
+  const ends = new Uint32Array(2 * nNodes);
+  for (let e = 0; e < nNodes; e++) { ends[2 * e] = e; ends[2 * e + 1] = e; }
+
+  const data = {
+    nNodes, nEdges: nNodes, coords, ends,
+    edgeBlockId: Int32Array.from({ length: nNodes }, (_, e) => e),
+    nBlocks: nNodes,
+    vote_type_legend: legend,
+    // Every block: exactly one supporter. All tied.
+    edge_vote_types: Array.from({ length: nNodes },
+      () => [[0, 1, 0]]) as [number, number, number][][],
+    block_vote_type_legend: legend,
+    block_vote_types: Array.from({ length: nNodes },
+      () => [[0, 1, 0]]) as [number, number, number][][],
+  };
+
+  it("does not spend every slot on the lowest-numbered cluster", () => {
+    const winners = selectTopProposals(data, 0, 50);
+    const inA = winners.filter((w) => w.edgeIdx < N_PER_CLUSTER).length;
+    const inB = winners.length - inA;
+    expect(inA).toBeGreaterThan(0);
+    expect(inB).toBeGreaterThan(0);
+  });
+
+  it("without spacing in step 1, the far cluster is never a candidate", () => {
+    // The pre-fix behaviour, reproduced by turning the step-1 spacing off: the
+    // five slots go to the five lowest edge indices, all in cluster A, and the
+    // spacing pass then collapses them to one pin.
+    const unspaced = candidatesForGraph(data, TOP_PROPOSALS_PER_TYPE, undefined, 0, 0);
+    expect(unspaced.every((w) => w.edgeIdx < N_PER_CLUSTER)).toBe(true);
+    const winners = selectTopProposalsFrom(data, unspaced, 0, 50);
+    expect(winners.every((w) => w.edgeIdx < N_PER_CLUSTER)).toBe(true);
+  });
+
+  it("keeps blocks whose geometry can't be resolved", () => {
+    // A winner with no midpoint must never be silently dropped for spacing.
+    const noGeom = { ...data, nNodes: 0 };
+    expect(candidatesForGraph(noGeom, TOP_PROPOSALS_PER_TYPE, undefined, 0))
+      .toHaveLength(TOP_PROPOSALS_PER_TYPE);
   });
 });
 

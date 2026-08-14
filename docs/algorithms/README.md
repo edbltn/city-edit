@@ -65,7 +65,7 @@ header is `Knob`:
 
 | Knob | Value | Defined in | What breaks if you change it |
 |---|---|---|---|
-| `TOP_PROPOSAL_MIN_SPACING_M` | `1000` | `topProposals.ts` | Lower it and a hot avenue grows a stack of identical pins. |
+| `TOP_PROPOSAL_MIN_SPACING_M` | `500` | `topProposals.ts` | Lower it and a hot avenue grows a stack of identical pins. |
 
 The checker parses the first three columns and compares the documented value
 against the literal in the source, so a knob tuned in code and not in prose is a

@@ -31,7 +31,7 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored
 >   **square** pin at the edge midpoint. Selected by
 >   `topProposals.selectTopProposals` (client) — at most **one pin per block**
 >   across all vote types, and same-type pins at least
->   `TOP_PROPOSAL_MIN_SPACING_M` (1000 m) apart — drawn by GraphLayer's
+>   `TOP_PROPOSAL_MIN_SPACING_M` (500 m) apart — drawn by GraphLayer's
 >   `indicatorMarkers`.
 > - **RBTP** — **route-based top proposal**: a hot **corridor** (Layer 3 below),
 >   rendered as a **diamond** pin at its middle path edge. Computed by

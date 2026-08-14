@@ -3,7 +3,7 @@ title: Top proposals — point-based (PBTP)
 description: How a handful of square pins are chosen out of every voted edge on the map.
 sources:
   - path: client-react/src/components/GraphLayer/topProposals.ts
-    anchors: [selectTopProposals, computeVoteTypeWinners, computeWinnerCandidates, dedupedBlockNetResolver, dedupeWinnersByEdge, dedupeWinnersByBlock, spaceOutWinners, applyTopProposalLimit, compareWinners, shuffleKey, topLabelForEdges, edgeMidpointResolver, TOP_PROPOSAL_MIN_NET, ROUTE_PROPOSAL_MIN_NET, TOP_PROPOSALS_PER_TYPE, TOP_PROPOSAL_MIN_SPACING_M]
+    anchors: [selectTopProposals, computeVoteTypeWinners, computeWinnerCandidates, dedupedBlockNetResolver, dedupeWinnersByEdge, dedupeWinnersByBlock, spaceOutWinners, takeSpacedBlocks, applyTopProposalLimit, compareWinners, shuffleKey, topLabelForEdges, edgeMidpointResolver, TOP_PROPOSAL_MIN_NET, ROUTE_PROPOSAL_MIN_NET, TOP_PROPOSALS_PER_TYPE, TOP_PROPOSAL_MIN_SPACING_M]
   - path: client-react/src/components/GraphLayer/spatialLookup.ts
     anchors: [TOP_PROPOSAL_LIMIT]
 ---
@@ -64,9 +64,21 @@ selectTopProposals(data, salt, limit, minSpacing, kindOf, minNet, isVisible):
                block.net = dedupedBlockNet(block, type) # distinct DEVICES
                         ?? block.edgeSum                # only when there is no
                                                         # deduped row to read
-           keep its top TOP_PROPOSALS_PER_TYPE blocks by net, where net > minNet
+           rank the blocks with net > minNet by net desc, edge id asc
+           takeSpacedBlocks: fill TOP_PROPOSALS_PER_TYPE slots strongest-first,
+               skipping any block within TOP_PROPOSAL_MIN_SPACING_M of one
+               already taken
        # per-type, not global: a popular type can surface several distinct
-       # LOCATIONS rather than only its single best block.
+       # LOCATIONS rather than only its single best block. The spacing is what
+       # makes them distinct LOCATIONS: the ranking tiebreak is the edge id and
+       # edge ids follow the graph BUILD order, so on a map where blocks tie —
+       # a young map, where every proposal has exactly one supporter — a plain
+       # truncation handed every slot to whichever neighbourhood the builder
+       # numbered first, and step 4 then collapsed that neighbourhood to one
+       # pin. nyc-tactical, 2026-08-14: 39 blocks tied at net 1 across two
+       # casts 12 km apart, all five slots inside a 228 m stretch of one of
+       # them, one pin drawn. Cost is O(blocks × slots) — the scan stops at
+       # five kept, so this is linear, not the O(n²) of step 4.
 
   2. dedupeWinnersByEdge
        winners sharing an edge collapse to one representative (compareWinners)
@@ -147,8 +159,8 @@ RBTP's blocks already cover are dropped downstream by `dropPointsCoveredByRoutes
 | `TOP_PROPOSAL_MIN_NET` | `0` | `topProposals.ts` | The pin support floor, applied strictly (`net > floor`) to a BLOCK's DEDUPED net — so it now reads as "more than this many people", not "more than this many vote rows". Zero since 2026-08-12: a single net vote earns a pin, and the ranking plus `TOP_PROPOSAL_LIMIT` decides who keeps one. A map can raise it for itself (`topProposalMinNet`); a raised floor is meaningfully HARDER to clear than it was at edge grain, where a lone route-length cast could clear it alone. |
 | `ROUTE_PROPOSAL_MIN_NET` | `100` | `topProposals.ts` | The corridor floor, as a minimum path score — where the shared floor used to sit. Corridors keep it because a route grown from one or two votes wanders; a map's `topProposalMinNet` override still wins (`nyc-proposals` sets 0). |
 | `TOP_PROPOSAL_LIMIT` | `50` | `spatialLookup.ts` | Global cap on rendered pins, applied last, by net descending. With no support floor this is the legibility control. RBTP corridors are capped separately (`DEFAULT_LIMIT`, `routeProposals.ts`). |
-| `TOP_PROPOSALS_PER_TYPE` | `5` | `topProposals.ts` | How many BLOCKS per type reach the spacing step. Raise it and a popular type surfaces more distinct locations — at the cost of crowding other types out of the final `limit`. Dropped from 6 with the move to block grain (2026-08-12): the slot that used to be eaten by a street's second direction now doesn't exist. |
-| `TOP_PROPOSAL_MIN_SPACING_M` | `1000` | `topProposals.ts` | Same-type non-max suppression radius, ≈ 12 NYC avenue blocks. Lower it and a hot avenue grows a stack of identical pins; raise it and a genuinely city-wide demand shows up as one pin in one neighbourhood. Tune for denser or sparser networks. |
+| `TOP_PROPOSALS_PER_TYPE` | `5` | `topProposals.ts` | How many DISTINCT LOCATIONS per type reach the spacing step (`takeSpacedBlocks`; before 2026-08-14 it was the top five blocks by rank, which on tied nets meant five entries from one corridor). Raise it and a popular type surfaces more places — at the cost of crowding other types out of the final `limit`. Dropped from 6 with the move to block grain (2026-08-12): the slot that used to be eaten by a street's second direction now doesn't exist. |
+| `TOP_PROPOSAL_MIN_SPACING_M` | `500` | `topProposals.ts` | Same-type suppression radius, ≈ 6 NYC avenue blocks or 2 crosstown ones. Applied TWICE: once when step 1 fills a type's slots, once in step 4 across the survivors. Lower it and a hot avenue grows a stack of identical pins; raise it and a genuinely city-wide demand shows up as one pin in one neighbourhood. Halved from 1000 on 2026-08-14 — at a walkable grain a kilometre suppressed neighbouring streets with nothing to do with each other. Tune for denser or sparser networks. |
 
 The families no longer share one bar (2026-08-12): `createRouteProposalJob` is
 called with `minRouteScore = routeProposalMinNet + 1`, which resolves to a map's

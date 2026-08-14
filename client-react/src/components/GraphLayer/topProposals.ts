@@ -24,7 +24,10 @@
 //      arrays. Block net ≤ 0 is excluded, and so are ROUTE-kind types (they
 //      surface as RBTPs; a route type's hot edge is a corridor fragment, not a
 //      point proposal). Types of unknown kind (legacy suggestions never
-//      flagged) stay eligible.
+//      flagged) stay eligible. The `perTypeLimit` slots go to blocks that are
+//      genuinely APART (takeSpacedBlocks): ranking alone hands every slot to
+//      one neighbourhood whenever the blocks tie, since the tiebreak is the
+//      edge index and edge indices follow the graph build order.
 //   2. dedupeWinnersByEdge   — collapse winners that share an edge to a single
 //      representative (tiebreak), so one edge shows one indicator and occupies
 //      one slot.
@@ -195,6 +198,52 @@ interface BlockTally {
 }
 
 /**
+ * Fill one vote type's `limit` candidate slots with blocks that are actually in
+ * DIFFERENT PLACES: walk the ranked blocks strongest-first and skip any within
+ * `minSpacingMeters` of one already taken.
+ *
+ * Without this the cap was a plain `slice(limit)` over a list whose tiebreak is
+ * the edge index, and edge indices follow the graph BUILD order — so a type
+ * whose blocks tie on net (the normal state of a young map: every proposal has
+ * exactly one supporter) spent all of its slots on whichever neighbourhood the
+ * graph builder happened to number first. Step 4's spacing pass then collapsed
+ * that one neighbourhood to a single pin, and every other place asking for the
+ * same thing was never a candidate at all. Observed on nyc-tactical: 39 blocks
+ * tied at net 1 across two casts 12 km apart, all five slots inside a 228 m
+ * stretch of one of them, one pin drawn.
+ *
+ * Spacing here uses the SAME radius as step 4, so this only ever pre-empts
+ * suppressions that pass would have made anyway — it cannot admit a pin the
+ * finished list would have rejected, it just stops the losers from eating the
+ * slots. Blocks whose position can't be resolved are kept (never silently
+ * dropped on missing geometry), and with no resolver the behaviour is the
+ * former plain truncation.
+ *
+ * Cost is O(blocks × limit), not O(blocks²): the scan stops at `limit` kept.
+ */
+function takeSpacedBlocks<T extends { edgeIdx: number }>(
+  ranked: T[],
+  limit: number,
+  positionOf?: EdgePosition,
+  minSpacingMeters = 0
+): T[] {
+  if (!positionOf || minSpacingMeters <= 0) return ranked.slice(0, limit);
+
+  const kept: T[] = [];
+  const keptPos: [number, number][] = [];
+  for (const block of ranked) {
+    if (kept.length >= limit) break;
+    const pos = positionOf(block.edgeIdx);
+    if (pos) {
+      if (keptPos.some((p) => metersBetween(p, pos) < minSpacingMeters)) continue;
+      keptPos.push(pos);
+    }
+    kept.push(block);
+  }
+  return kept;
+}
+
+/**
  * Step 1 — for each vote type, the top `perTypeLimit` blocks by DEDUPED net
  * support (highest first). Vote types with no block above max(0, minNet) are
  * dropped (a net-downvoted proposal is not a "top proposal", and below the
@@ -238,7 +287,9 @@ export function computeWinnerCandidates(
   kindOf?: VoteTypeKindResolver,
   minNet = 0,
   blockKeyOfEdge: EdgeBlockKey = singletonBlockKey,
-  blockNetOf?: BlockNetResolver
+  blockNetOf?: BlockNetResolver,
+  positionOf?: EdgePosition,
+  minSpacingMeters = 0
 ): VoteTypeWinner[] {
   if (!legend.length || !edgeVoteTypes.length) return [];
 
@@ -306,7 +357,9 @@ export function computeWinnerCandidates(
       if (net > floor) blocks.push({ edgeIdx: tally.edgeIdx, net });
     }
     blocks.sort((a, b) => b.net - a.net || a.edgeIdx - b.edgeIdx);
-    for (const { edgeIdx, net } of blocks.slice(0, perTypeLimit)) {
+    for (const { edgeIdx, net } of takeSpacedBlocks(
+      blocks, perTypeLimit, positionOf, minSpacingMeters
+    )) {
       winners.push({ legendIdx, label, edgeIdx, count: net });
     }
   }
@@ -498,22 +551,26 @@ export function applyTopProposalLimit(
     .slice(0, limit);
 }
 
-// Up to this many BLOCKS per vote type feed the spacing step, so a popular type
-// can surface several distinct LOCATIONS (not just its single best block). The
-// spacing pass then collapses any that land on the same corridor. Five rather
-// than the six of the edge-grain era: a block already absorbs the near-duplicate
-// candidates (both directions of a street, both halves of a split segment) that
-// the sixth slot used to spend itself on.
+// Up to this many DISTINCT LOCATIONS per vote type feed the spacing step, so a
+// popular type can surface several places asking for it (not just its single
+// best block). Five rather than the six of the edge-grain era: a block already
+// absorbs the near-duplicate candidates (both directions of a street, both
+// halves of a split segment) that the sixth slot used to spend itself on.
+// `takeSpacedBlocks` is what makes these five distinct locations rather than
+// five entries from one corridor — see its comment for what that cost us.
 export const TOP_PROPOSALS_PER_TYPE = 5;
 
 // Two top proposals of the SAME vote type closer than this collapse to the
 // stronger one — kills the "3 identical pins stacked on one avenue" look.
-// Deliberately much wider than the cross-type grain (one pin per block, see
+// Deliberately wider than the cross-type grain (one pin per block, see
 // dedupeWinnersByBlock): identical pins carry zero extra information nearby,
 // while different-type pins are distinct proposals and only collapse when they
-// share a block. A kilometre is ~12 NYC avenue blocks — wide enough that one
-// popular type spreads across neighbourhoods instead of pooling in one.
-export const TOP_PROPOSAL_MIN_SPACING_M = 1000;
+// share a block. 500 m is ~6 NYC avenue blocks or ~2 crosstown ones — far
+// enough that a pin means a place rather than a segment, close enough that two
+// genuinely different corners keep their own pins. It was 1 km, which on a
+// walkable grain suppressed neighbouring streets that had nothing to do with
+// each other.
+export const TOP_PROPOSAL_MIN_SPACING_M = 500;
 
 /**
  * Step 1 for a REAL graph — `computeWinnerCandidates` with the block-grain
@@ -537,7 +594,8 @@ export function candidatesForGraph(
     | "block_vote_types" | "block_vote_type_legend"> & GraphTopology,
   perTypeLimit = TOP_PROPOSALS_PER_TYPE,
   kindOf?: VoteTypeKindResolver,
-  minNet = TOP_PROPOSAL_MIN_NET
+  minNet = TOP_PROPOSAL_MIN_NET,
+  minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M
 ): VoteTypeWinner[] {
   return computeWinnerCandidates(
     data.vote_type_legend ?? [],
@@ -547,7 +605,12 @@ export function candidatesForGraph(
     minNet,
     // Votes live on edges but count on BLOCKS, by distinct device.
     (edgeIdx) => blockKeyOf(data, edgeIdx),
-    dedupedBlockNetResolver(data)
+    dedupedBlockNetResolver(data),
+    // A type's slots go to distinct PLACES, not to whichever blocks the graph
+    // builder numbered first — the third resolver this entry point exists to
+    // stop callers forgetting.
+    edgeMidpointResolver(data),
+    minSpacingMeters
   );
 }
 
@@ -577,7 +640,7 @@ export function selectTopProposals(
   if (!data) return [];
   return selectTopProposalsFrom(
     data,
-    candidatesForGraph(data, TOP_PROPOSALS_PER_TYPE, kindOf, minNet),
+    candidatesForGraph(data, TOP_PROPOSALS_PER_TYPE, kindOf, minNet, minSpacingMeters),
     salt, limit, minSpacingMeters, isVisible
   );
 }
