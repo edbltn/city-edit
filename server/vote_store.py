@@ -217,6 +217,9 @@ def int_to_mode(i: int) -> str:
 
 _vt_label: dict[str, int] = {}
 _vt_id: dict[int, str] = {}
+# Ids with no vote_types row, so a genuinely orphaned id is looked up once per
+# process instead of on every snapshot build. Cleared by load_vote_types().
+_vt_missing: set[int] = set()
 
 
 def load_vote_types() -> None:
@@ -226,6 +229,7 @@ def load_vote_types() -> None:
     rows = database.fetch_all_vote_types()
     _vt_label = {label: vid for vid, label in rows}
     _vt_id = {vid: label for vid, label in rows}
+    _vt_missing.clear()
     logger.info(f"[VOTES] Loaded {len(rows)} vote types into cache")
 
 
@@ -250,9 +254,30 @@ def get_vote_type_id(label: str, point_type: str | None = None) -> int:
 
 
 def resolve_vote_type(vid: int) -> str:
+    """id → label for the heatmap legend. "#<id>" only when the id has no row.
+
+    The cache is loaded at startup, so an id this process has never seen is
+    normally NOT an orphan: another instance minted the label on a free-text
+    cast, or an admin retyped votes onto a label created out-of-band
+    (retype_votes.py). Rendering those as "#43675" until the next restart is a
+    display bug with a one-row fix, so miss → read through to the database and
+    remember it. Bounded: callers resolve each DISTINCT id once per snapshot
+    build, and a real orphan is recorded in _vt_missing so it is asked about
+    once."""
     if vid == 0:
         return ""
-    return _vt_id.get(vid, f"#{vid}")
+    label = _vt_id.get(vid)
+    if label is not None:
+        return label
+    if vid not in _vt_missing:
+        import database
+        label = database.fetch_vote_type_label(vid)
+        if label:
+            _vt_id[vid] = label
+            _vt_label.setdefault(label, vid)
+            return label
+        _vt_missing.add(vid)
+    return f"#{vid}"
 
 
 def all_vote_types() -> dict[int, str]:

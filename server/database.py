@@ -671,6 +671,22 @@ def fetch_all_vote_types() -> list[tuple[int, str]]:
         return []
 
 
+def fetch_vote_type_label(vt_id: int) -> Optional[str]:
+    """One vote type's label, or None if no such row. Backs the cache-miss path
+    in vote_store.resolve_vote_type — an id this process has never seen is
+    usually a label another instance minted, not an orphan."""
+    if not DATABASE_URL or not vt_id:
+        return None
+    try:
+        with get_cursor() as cursor:
+            cursor.execute("SELECT label FROM vote_types WHERE id = %s", (vt_id,))
+            row = cursor.fetchone()
+            return row[0] if row else None
+    except Exception as e:
+        logger.error(f"[DB] Failed to fetch vote type #{vt_id}: {e}")
+        return None
+
+
 def fetch_voted_vote_type_labels(map_slug: str) -> list[dict]:
     """Distinct vote types actually voted on a map (newest activity first), each
     as {"label", "pointType"} — pointType is 'route' | 'point' | None (unknown).
@@ -881,6 +897,23 @@ def orphaned_vote_type_counts(map_slug: str) -> list[tuple[int, int]]:
     except Exception as e:
         logger.error(f"[DB] Failed to read orphaned vote types: {e}")
         return []
+
+
+def count_map_votes_by_type(map_slug: str, vt_id: int) -> int:
+    """How many of a map's edge_votes rows carry one vote type. The dry-run half
+    of a retype (retype_votes.py): what remap_edge_vote_type would touch."""
+    if not DATABASE_URL:
+        return 0
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM edge_votes WHERE map_slug = %s AND vote_type_id = %s",
+                (map_slug, vt_id),
+            )
+            return int(cursor.fetchone()[0])
+    except Exception as e:
+        logger.error(f"[DB] Failed to count votes of type {vt_id} on '{map_slug}': {e}")
+        return 0
 
 
 def remap_edge_vote_type(map_slug: str, old_vt_id: int, new_vt_id: int) -> int:
