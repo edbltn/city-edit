@@ -26,7 +26,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CONFIG } from "../../config";
 import { getMapSlug, passcodeHeaders } from "../../map/runtime";
 import { routeVotesKey } from "../../utils/blockSelection";
-import { cachedRouteVoteRows, loadRouteVoteRows } from "./routeVotesCache";
+import {
+  cachedRouteVoteRows, loadRouteVoteRows, loadRouteVoteRowsBatch,
+} from "./routeVotesCache";
 import { ROUTE_VOTES_DEBOUNCE_MS, ROUTE_VOTES_EDGE_CAP, type VoteTypeRow } from "./spatialLookup";
 
 /** Hover asks on a short delay so sweeping the cursor across a cluster of
@@ -57,25 +59,63 @@ export interface RouteVoteRowsResult {
  * resolved rows keep rendering meanwhile, which is what makes a cast feel
  * immediate instead of blanking the counts.
  */
+/**
+ * The exact ids one edge set is asked about, plus their cache key.
+ *
+ * Every asker MUST go through this. The cache key is a signature of the ids
+ * actually sent, so a caller that deduped differently — or capped at a
+ * different length — would compute a different key for the same corridor and
+ * quietly get its own copy of the answer. That is precisely the drift this
+ * whole module exists to prevent, so the normalization lives in one function
+ * and the hook and the batch prime both call it.
+ */
+export function routeVotesQuery(
+  edgeIds: readonly number[] | null | undefined,
+): { ids: number[]; key: string } | null {
+  if (!edgeIds || edgeIds.length === 0) return null;
+  const ids: number[] = [];
+  const seen = new Set<number>();
+  for (const e of edgeIds) {
+    if (seen.has(e)) continue;
+    seen.add(e);
+    ids.push(e);
+    // A merged foot-component block can union thousands of edges; past the
+    // cap the count degrades gracefully (undercounts) rather than sending an
+    // unbounded body.
+    if (ids.length >= ROUTE_VOTES_EDGE_CAP) break;
+  }
+  return { ids, key: routeVotesKey(getMapSlug(), ids) };
+}
+
+/**
+ * Resolve a whole list of edge sets (the corridors the map is labelling) in
+ * ONE request, into the shared cache. Read the results back with
+ * `cachedRouteVoteRows(query.key)`; sets the server declined to count stay
+ * unresolved (null) rather than resolving to zero.
+ */
+export function primeRouteVoteRows(
+  queries: readonly { ids: number[]; key: string }[],
+): Promise<void> {
+  return loadRouteVoteRowsBatch(queries, async (sets) => {
+    const r = await fetch(`${CONFIG.apiUrl}/route-votes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...passcodeHeaders() },
+      body: JSON.stringify({ map: getMapSlug(), sets }),
+    });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const results = j?.results;
+    if (!Array.isArray(results)) return null;
+    return results.map((entry: { rows?: VoteTypeRow[] | null } | null) =>
+      entry?.rows ?? null);
+  });
+}
+
 export function useRouteVoteRows(
   edgeIds: readonly number[] | null | undefined,
   { refetchToken = 0, firstDelayMs = 0 }: RouteVoteRowsOptions = {},
 ): RouteVoteRowsResult {
-  const query = useMemo(() => {
-    if (!edgeIds || edgeIds.length === 0) return null;
-    const ids: number[] = [];
-    const seen = new Set<number>();
-    for (const e of edgeIds) {
-      if (seen.has(e)) continue;
-      seen.add(e);
-      ids.push(e);
-      // A merged foot-component block can union thousands of edges; past the
-      // cap the count degrades gracefully (undercounts) rather than sending an
-      // unbounded body.
-      if (ids.length >= ROUTE_VOTES_EDGE_CAP) break;
-    }
-    return { ids, key: routeVotesKey(getMapSlug(), ids) };
-  }, [edgeIds]);
+  const query = useMemo(() => routeVotesQuery(edgeIds), [edgeIds]);
 
   const [fetched, setFetched] = useState<{ key: string; rows: VoteTypeRow[] } | null>(null);
   // The effect below keys on `key`, not on `query` — `query` is a fresh object

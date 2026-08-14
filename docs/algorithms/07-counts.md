@@ -5,11 +5,13 @@ sources:
   - path: server/vote_identity.py
     anchors: [counting_identity, COUNT_BY, SQL_IDENTITY]
   - path: server/database.py
-    anchors: [count_unique_voters_for_edges, list_maps]
+    anchors: [count_unique_voters_for_edges, count_unique_voters_for_edge_sets, list_maps]
   - path: server/block_votes.py
     anchors: [bd_key, bagg_key, pack_block_field, apply_block_delta, build_block_arrays, read_block_vt_counts]
   - path: client-react/src/components/GraphLayer/routeVoteRows.ts
-    anchors: [useRouteVoteRows, ROUTE_VOTES_HOVER_DELAY_MS]
+    anchors: [routeVotesQuery, useRouteVoteRows, primeRouteVoteRows, ROUTE_VOTES_HOVER_DELAY_MS]
+  - path: client-react/src/components/GraphLayer/routeVotesCache.ts
+    anchors: [loadRouteVoteRows, loadRouteVoteRowsBatch, cachedRouteVoteRows]
   - path: client-react/src/utils/blockSelection.ts
     anchors: [selectionVoteRows, selectionCoverage, SelectionCoverage]
   - path: client-react/src/components/GraphLayer/graphTopology.ts
@@ -105,8 +107,30 @@ Three deliberate choices here:
   to distrust every number on the card.
 - **POST, not GET.** A corridor's block-edge union routinely exceeds URL length
   limits.
-- **One hook, one cache, two consumers.** The route-summary card and the hovered
-  corridor share it, so they can never disagree. They used to.
+- **One hook, one cache, three consumers.** The route-summary card, the hovered
+  corridor, and the corridor's floating map LABEL share it, so they can never
+  disagree. All three used to.
+
+The label is the third consumer because it is the number most people read and
+the only one nobody clicks to check. It cannot use the hook (it needs every
+drawn corridor at once, not the one under the cursor), so it primes the same
+cache in bulk:
+
+```
+primeRouteVoteRows(queries):            # queries = routeVotesQuery per corridor
+    POST /api/route-votes { map, sets: [[edge ids], …] }
+        -> ONE query: unnest(idx[], edge_id[]) JOIN edge_votes
+                      GROUP BY idx, vote_type_id, direction
+        -> { results: [{ rows } | { rows: null }, …] }   # null = over budget
+    remember each set's rows under ITS key
+```
+
+Two rules keep this honest. The ids and the key come from `routeVotesQuery` —
+the ONE normalization — so the label's key for a corridor is byte-identical to
+the key the card computes when it opens, and the card then finds the label's own
+rows already cached rather than asking a second time. And a set the server
+declined to count answers `null`, never `[]`: nothing is cached, and the label
+draws its claim with NO number rather than a confident `+0`.
 
 ### "blocks" — coverage
 
@@ -141,9 +165,17 @@ in the app, and the one most worth fixing.
 | Knob | Value | Defined in | What breaks if you change it |
 |---|---|---|---|
 | `ROUTE_VOTES_HOVER_DELAY_MS` | `200` | `routeVoteRows.ts` | How long a corridor must stay hovered before its distinct-voter query fires. Lower it and sweeping the mouse across a dense map fires a query per diamond. |
+| `ROUTE_VOTES_MAX_SETS` | `32` | `server/app.py` | How many corridors one batch may count. Below the drawn-corridor limit and the extras go unlabelled (`rows: null`). |
+| `ROUTE_VOTES_BATCH_EDGE_CAP` | `60000` | `server/app.py` | Total edges one batch may scan. The budget is spent in the order the client sends (strongest corridor first), and what it couldn't afford is logged, not silently zeroed. |
 
 `ROUTE_VOTES_EDGE_CAP` (`server/app.py`) bounds the edge set one request may ask
 about; the client caps its cache key at the same list.
+
+The label batch runs on the CORRIDORS' cadence, not the votes' — it is
+deliberately not wired to `votesVersion`. Any vote that moves one of these
+numbers also moves that corridor's score, which republishes `routeProposals` on
+the next recompute and re-runs the batch; putting it on every vote tick would
+park a 40k-edge `COUNT(DISTINCT)` behind each one.
 
 ## Invariants
 
@@ -165,7 +197,13 @@ about; the client caps its cache key at the same list.
 - **Counts and coverage share a regime.** Both pick block-vs-edge the same way,
   so a card cannot report counts at one grain and coverage at another.
 - **The cache is keyed by the edge set**, so the same corridor resolves to the
-  same rows for every consumer in the session.
+  same rows for every consumer in the session — and every consumer normalizes
+  that set through `routeVotesQuery`, because two spellings of one corridor are
+  two keys and two answers.
+- **A surface that prints a corridor number reads those rows.** Not a local sum,
+  not the corridor's `score`. `score` (Σ per-edge nets) is what GROWS and RANKS
+  a corridor and is systematically bigger than the number of people; it must
+  never reach a user's eye as a count.
 
 ## Failure modes and history
 
@@ -174,6 +212,7 @@ about; the client caps its cache key at the same list.
 | A 12-block corridor's card read **432 voters** for 36 people | Local per-block sums added the same device once per block | `/api/route-votes` distinct-device counts, via `useRouteVoteRows` |
 | The number silently corrected itself ~300 ms after appearing | The card rendered the inflated local sum, then swapped in server truth | `null` → `PENDING_GLYPH`; never substitute a guess |
 | The hover card and the summary card showed different totals | Two independent code paths | One hook, one shared cache |
+| A corridor's map label read **+59** while its own card read **+1** (nyc-tactical, "Pick up trash along here", 2026-08-14) | The label printed the corridor's `score` — Σ per-edge nets — so the one voter who drew a route across 59 edges was counted 59 times. Ranking wants that number; a reader does not | The label reads the distinct-voter rows, primed in bulk into the same cache the cards read (`primeRouteVoteRows`), keyed identically |
 | Negative block counts on prod | Counter-vote imports wrote `-1` rows; block counts dedupe per voter, so any `-1` row showed the block negative | Flips banned on prod imports; all 308 k `-1` rows deleted |
 | One iPhone became the city's **top** "Fix signal timing" proposal (2026-08-13) | Six page loads in three minutes minted six `voter_id`s — storage was not surviving the visit — so three of them counted as three separate people on one block, and each reload's "my votes" was empty, inviting the next press | Count on the IP hash, not the device (`vote_identity.py`); `bver:` carries the scheme so the aggregate rebuilds |
 | A vote type appeared in coverage with nobody standing behind it | `[type, 0, 0]` entries — up and down cancelled | Skipped explicitly in `selectionCoverage` |

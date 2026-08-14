@@ -33,6 +33,9 @@ interface Flight {
 
 const inflight = new Map<string, Flight>();
 
+/** Open batch requests, keyed by the set of keys they answer. */
+const inflightBatch = new Map<string, Promise<void>>();
+
 /** Rows already known for this edge set, or null if it has never resolved. */
 export function cachedRouteVoteRows(key: string): VoteTypeRow[] | null {
   return cache.get(key) ?? null;
@@ -42,6 +45,7 @@ export function cachedRouteVoteRows(key: string): VoteTypeRow[] | null {
 export function resetRouteVotesCache(): void {
   cache.clear();
   inflight.clear();
+  inflightBatch.clear();
 }
 
 function remember(key: string, rows: VoteTypeRow[]): void {
@@ -106,4 +110,55 @@ export function loadRouteVoteRows(
 
   inflight.set(key, flight);
   return flight.promise;
+}
+
+/**
+ * Resolve MANY edge sets in one request, into this same cache.
+ *
+ * The map labels every corridor it draws, and a label's number has to be the
+ * corridor's DISTINCT-VOTER count — the same number its card shows — so the
+ * label layer needs answers for a whole list of corridors at once. Asking per
+ * corridor would be one round trip (and one COUNT DISTINCT) each; the batch is
+ * one of both. What matters for correctness is where the answers LAND: keyed
+ * by edge set, in the cache `cachedRouteVoteRows` reads, so the card that
+ * opens afterwards renders the very rows the label was drawn from instead of
+ * asking again and possibly answering differently.
+ *
+ * A `null` answer means the server declined to count that set (over its batch
+ * budget); nothing is cached for it, and the caller renders it as unresolved
+ * rather than as zero. Never rejects, for the same reason the single loader
+ * doesn't: a network blip must not leave a caller hanging.
+ */
+export function loadRouteVoteRowsBatch(
+  entries: readonly { key: string; ids: number[] }[],
+  fetchSets: (sets: number[][]) => Promise<(VoteTypeRow[] | null)[] | null>,
+): Promise<void> {
+  if (entries.length === 0) return Promise.resolve();
+
+  // Same list of corridors ⇒ same question; a second asker joins the open one.
+  const sig = entries.map((e) => e.key).join("|");
+  const open = inflightBatch.get(sig);
+  if (open) return open;
+
+  let started: Promise<(VoteTypeRow[] | null)[] | null>;
+  try {
+    started = Promise.resolve(fetchSets(entries.map((e) => e.ids)));
+  } catch {
+    started = Promise.resolve(null);
+  }
+  const flight = started
+    .catch(() => null)
+    .then((answers) => {
+      if (!answers) return;
+      for (let i = 0; i < entries.length; i++) {
+        const rows = answers[i];
+        if (rows) remember(entries[i].key, rows);
+      }
+    })
+    .finally(() => {
+      if (inflightBatch.get(sig) === flight) inflightBatch.delete(sig);
+    });
+
+  inflightBatch.set(sig, flight);
+  return flight;
 }

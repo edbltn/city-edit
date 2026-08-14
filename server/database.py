@@ -625,6 +625,56 @@ def get_voter_type_rows(
         return {}
 
 
+def count_unique_voters_for_edge_sets(
+    map_slug: str, edge_sets: list[list[int]]
+) -> list[list[tuple[int, int, int]]]:
+    """Distinct-voter vote counts for MANY edge sets, in ONE query.
+
+    Same counting rule as `count_unique_voters_for_edges` (which delegates
+    here — this is the only place the rule is written), evaluated per input
+    set: returns one [(vote_type_id, direction, count)] list per set, aligned
+    with `edge_sets` by index.
+
+    The batch exists because the map now asks the question for every corridor
+    it labels at once, not just for the one card that is open. Sets are tagged
+    with their index and unnested into a two-column relation, so the whole
+    batch is a single index scan + GROUP BY rather than one round trip per
+    corridor. Duplicate edge ids WITHIN a set are harmless (COUNT DISTINCT
+    absorbs the duplicated join rows), and an edge shared BETWEEN sets is
+    counted for each — the sets are independent questions.
+    """
+    results: list[list[tuple[int, int, int]]] = [[] for _ in edge_sets]
+    idx_col: list[int] = []
+    edge_col: list[int] = []
+    for i, edge_ids in enumerate(edge_sets):
+        for e in edge_ids:
+            idx_col.append(i)
+            edge_col.append(int(e))
+    if not DATABASE_URL or not edge_col:
+        return results
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(
+                # The identity expression is spelled by vote_identity and used
+                # UNQUALIFIED: it may be a COALESCE over two columns, so a
+                # table prefix would land on the function, not the columns.
+                # Only edge_votes has those columns, so it is unambiguous.
+                f"""SELECT s.idx, v.vote_type_id, v.direction,
+                          COUNT(DISTINCT {vote_identity.SQL_IDENTITY})
+                   FROM unnest(%s::int[], %s::int[]) AS s(idx, edge_id)
+                   JOIN edge_votes v
+                     ON v.map_slug = %s AND v.edge_id = s.edge_id
+                   GROUP BY s.idx, v.vote_type_id, v.direction""",
+                (idx_col, edge_col, map_slug),
+            )
+            for idx, vt, d, c in cursor.fetchall():
+                results[int(idx)].append((int(vt), int(d), int(c)))
+            return results
+    except Exception as e:
+        logger.error(f"[DB] Failed to count unique voters for edge sets: {e}")
+        return [[] for _ in edge_sets]
+
+
 def count_unique_voters_for_edges(
     map_slug: str, edge_ids: list[int]
 ) -> list[tuple[int, int, int]]:
@@ -638,22 +688,9 @@ def count_unique_voters_for_edges(
     Counted on the same identity as the block layer (vote_identity.SQL_IDENTITY),
     so the card and the pins can't disagree about how many people that is.
     """
-    if not DATABASE_URL or not edge_ids:
+    if not edge_ids:
         return []
-    try:
-        with get_cursor() as cursor:
-            cursor.execute(
-                f"""SELECT vote_type_id, direction,
-                          COUNT(DISTINCT {vote_identity.SQL_IDENTITY})
-                   FROM edge_votes
-                   WHERE map_slug = %s AND edge_id = ANY(%s)
-                   GROUP BY vote_type_id, direction""",
-                (map_slug, list(edge_ids)),
-            )
-            return [(int(vt), int(d), int(c)) for vt, d, c in cursor.fetchall()]
-    except Exception as e:
-        logger.error(f"[DB] Failed to count unique voters for edges: {e}")
-        return []
+    return count_unique_voters_for_edge_sets(map_slug, [list(edge_ids)])[0]
 
 
 # ── Vote types (label ↔ id) ─────────────────────────────────────────────────

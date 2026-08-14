@@ -40,6 +40,7 @@ from database import (
     init_db, get_cursor, record_edge_votes, delete_edge_votes,
     get_voter_edge_directions, get_voter_type_rows,
     count_devices_per_ip_for_edges, count_unique_voters_for_edges,
+    count_unique_voters_for_edge_sets,
     evict_lru_devices_for_edges,
     seed_presets, backfill_vote_type_kinds, normalize_point_type,
     list_maps, get_map, get_map_by_subdomain, slug_available, get_map_redirect,
@@ -1814,21 +1815,81 @@ def my_votes():
 # sends too, so past this the count degrades gracefully (undercounts).
 ROUTE_VOTES_EDGE_CAP = 20000
 
+# Batch form (`sets`): the map asks for every labelled corridor at once, so the
+# budget is on the WHOLE request. Sets past either cap are answered `null` —
+# "not counted" — never an empty row list, which would read as "nobody voted".
+ROUTE_VOTES_MAX_SETS = 32
+ROUTE_VOTES_BATCH_EDGE_CAP = 60000
+
+
+def _voter_rows(counts: list[tuple[int, int, int]]) -> list[dict]:
+    """(vote_type_id, direction, count) tuples → card/label rows, by label."""
+    by_label: dict[str, dict[str, int]] = {}
+    for vt_id, direction, count in counts:
+        label = vote_store.resolve_vote_type(vt_id)
+        if not label:
+            continue
+        row = by_label.setdefault(label, {"up": 0, "down": 0})
+        row["down" if direction < 0 else "up"] += count
+    rows = [{"label": label, "up": v["up"], "down": v["down"]}
+            for label, v in by_label.items()]
+    rows.sort(key=lambda r: r["down"] - r["up"])
+    return rows
+
 
 @app.route("/api/route-votes", methods=["POST"])
 def route_votes():
-    """Distinct-voter vote rows for a route selection.
+    """Distinct-voter vote rows for route selections.
 
-    Body: { map, edge_ids: [int] }. Counts DISTINCT devices per (vote type,
-    direction) across the WHOLE edge set — a route cast fans one device's vote
-    onto every edge of every block it covers, so per-edge/per-block sums count
-    the same person once per block. The route-summary card shows these instead.
+    Body: { map, edge_ids: [int] } → { rows }, or { map, sets: [[int], …] } →
+    { results: [{ rows } | { rows: null }, …] } aligned with `sets`.
+
+    Counts DISTINCT devices per (vote type, direction) across a WHOLE edge set
+    — a route cast fans one device's vote onto every edge of every block it
+    covers, so per-edge/per-block sums count the same person once per block.
+    Every corridor number the client shows comes from here: the route-summary
+    card, the hovered diamond's card, and the floating map label all read these
+    rows, which is what keeps them from disagreeing about one corridor.
     POST because a selection's block-edge union routinely exceeds URL limits.
     """
     data = request.get_json(silent=True) or {}
     rmap = resolve_map(data.get("map"))
     if _locked(rmap):
         return _locked_response()
+
+    raw_sets = data.get("sets")
+    if raw_sets is not None:
+        if not isinstance(raw_sets, list):
+            return jsonify({"error": "sets must be a list of edge-id lists"}), 400
+        try:
+            sets = [[int(e) for e in s[:ROUTE_VOTES_EDGE_CAP]]
+                    for s in raw_sets if isinstance(s, list)]
+        except (TypeError, ValueError):
+            return jsonify({"error": "sets must be a list of edge-id lists"}), 400
+        if len(sets) != len(raw_sets):
+            return jsonify({"error": "sets must be a list of edge-id lists"}), 400
+
+        # Spend the budget on the sets in the order asked (the client sends them
+        # strongest-first), and say out loud which ones went uncounted.
+        counted: list[int] = []
+        budget = ROUTE_VOTES_BATCH_EDGE_CAP
+        for i, s in enumerate(sets):
+            if len(counted) >= ROUTE_VOTES_MAX_SETS or len(s) > budget:
+                continue
+            budget -= len(s)
+            counted.append(i)
+        if len(counted) < len(sets):
+            logger.warning(
+                f"[ROUTE-VOTES] {rmap.slug}: counted {len(counted)}/{len(sets)} "
+                f"edge sets (caps: {ROUTE_VOTES_MAX_SETS} sets, "
+                f"{ROUTE_VOTES_BATCH_EDGE_CAP} edges)")
+
+        answers = count_unique_voters_for_edge_sets(
+            rmap.slug, [sets[i] for i in counted])
+        results: list[dict] = [{"rows": None} for _ in sets]
+        for i, counts in zip(counted, answers):
+            results[i] = {"rows": _voter_rows(counts)}
+        return jsonify({"results": results})
 
     raw = data.get("edge_ids")
     if not isinstance(raw, list):
@@ -1838,17 +1899,8 @@ def route_votes():
     except (TypeError, ValueError):
         return jsonify({"error": "edge_ids must be a list of integers"}), 400
 
-    by_label: dict[str, dict[str, int]] = {}
-    for vt_id, direction, count in count_unique_voters_for_edges(rmap.slug, edge_ids):
-        label = vote_store.resolve_vote_type(vt_id)
-        if not label:
-            continue
-        row = by_label.setdefault(label, {"up": 0, "down": 0})
-        row["down" if direction < 0 else "up"] += count
-    rows = [{"label": label, "up": v["up"], "down": v["down"]}
-            for label, v in by_label.items()]
-    rows.sort(key=lambda r: r["down"] - r["up"])
-    return jsonify({"rows": rows})
+    return jsonify(
+        {"rows": _voter_rows(count_unique_voters_for_edges(rmap.slug, edge_ids))})
 
 
 # ── Graph data APIs ──────────────────────────────────────────────────────────

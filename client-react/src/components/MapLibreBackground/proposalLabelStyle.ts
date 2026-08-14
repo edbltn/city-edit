@@ -237,11 +237,20 @@ const PROPOSAL_COUNT_MIN_LEAFLET_ZOOM = 13;
 
 export function proposalTextField(countColor: string): maplibregl.ExpressionSpecification {
   const claim: unknown[] = ["format", ["get", "text"], {}];
+  // An empty `count` means "not resolved yet" (a corridor's voter count is a
+  // round trip behind the corridor itself). The line BREAK lives inside the
+  // count section rather than in a section of its own, so an unresolved label
+  // is the claim exactly — not the claim plus a blank line, which would size
+  // its collision box for a number that isn't drawn.
+  const countSection: unknown[] = [
+    "case",
+    ["==", ["get", "count"], ""], "",
+    ["concat", "\n", ["get", "count"]],
+  ];
   const claimAndCount: unknown[] = [
     "format",
     ["get", "text"], {},
-    "\n", {},
-    ["get", "count"], { "font-scale": PROPOSAL_COUNT_SCALE, "text-color": countColor },
+    countSection, { "font-scale": PROPOSAL_COUNT_SCALE, "text-color": countColor },
   ];
   return [
     "step", ["zoom"],

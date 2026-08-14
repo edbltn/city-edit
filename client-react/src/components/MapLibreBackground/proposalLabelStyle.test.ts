@@ -92,9 +92,9 @@ describe("proposal label expressions", () => {
     expect(close[0]).toBe("format");
     expect(close[1]).toEqual(["get", "text"]);
     expect(close[2]).toEqual({});
-    expect(close[3]).toBe("\n");
-    expect(close[5]).toEqual(["get", "count"]);
-    expect(close[6]).toEqual({ "font-scale": PROPOSAL_COUNT_SCALE, "text-color": "rgb(9, 9, 9)" });
+    // The count section carries its own leading break (see below).
+    expect(JSON.stringify(close[3])).toContain('["get","count"]');
+    expect(close[4]).toEqual({ "font-scale": PROPOSAL_COUNT_SCALE, "text-color": "rgb(9, 9, 9)" });
     expect(PROPOSAL_COUNT_SCALE).toBeLessThan(1);
     // And the claim is never the thing dropped.
     expect(wide[1]).toEqual(["get", "text"]);
@@ -106,8 +106,22 @@ describe("proposal label expressions", () => {
     const [wide, close] = textFieldBranches(proposalTextField("rgb(9, 9, 9)"));
     expect(JSON.stringify(wide)).not.toContain("count");
     expect(JSON.stringify(close)).toContain("count");
-    expect(wide.filter((s) => s === "\n")).toHaveLength(0);
-    expect(close.filter((s) => s === "\n")).toHaveLength(1);
+    expect(JSON.stringify(wide)).not.toContain("\\n");
+    expect(JSON.stringify(close)).toContain("\\n");
+  });
+
+  // A corridor's voter count is a round trip behind the corridor itself, and
+  // the label draws meanwhile. An empty count must cost NOTHING — no number and
+  // no blank second line sizing the collision box for one.
+  it("draws the claim alone, break and all, when the count is unresolved", () => {
+    const [, close] = textFieldBranches(proposalTextField("rgb(9, 9, 9)"));
+    const section = close[3] as unknown[];
+    expect(section[0]).toBe("case");
+    expect(section[1]).toEqual(["==", ["get", "count"], ""]);
+    // Unresolved → the empty string, so the break comes with the number or not
+    // at all.
+    expect(section[2]).toBe("");
+    expect(section[3]).toEqual(["concat", "\n", ["get", "count"]]);
   });
 
   it("switches the count in on a MapLibre stop, not a Leaflet one", () => {

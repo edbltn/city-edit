@@ -106,7 +106,7 @@ import {
   SPREAD_DURATION_MS, SPREAD_ANIM_MS, PROPOSALS_REFRESH_INTERVAL_MS,
   PROPOSALS_OWN_CAST_DELAY_MS,
   scheduleIdleSlice, MID_DRAG_THRESHOLD_SQ, MID_DRAG_TRAIL_STYLE,
-  MY_VOTES_EDGE_CAP, ROUTE_VOTES_EDGE_CAP,
+  MY_VOTES_EDGE_CAP, ROUTE_VOTES_EDGE_CAP, ROUTE_VOTES_DEBOUNCE_MS,
   STALE_VOTES_RETRY_MS, STALE_VOTES_MAX_RETRIES,
   buildNodeIndex, buildEdgeIndex,
   hitTest, blockFiltersAt, adjShortestInBlock, projectOntoEdge,
@@ -116,7 +116,11 @@ import {
   votesMatchTopology, servedRevIsStale,
 } from "./topologyHelpers";
 import { useVoteSources, type SourcesByLabel } from "./voteSources";
-import { useRouteVoteRows, ROUTE_VOTES_HOVER_DELAY_MS } from "./routeVoteRows";
+import {
+  useRouteVoteRows, primeRouteVoteRows, routeVotesQuery,
+  ROUTE_VOTES_HOVER_DELAY_MS,
+} from "./routeVoteRows";
+import { cachedRouteVoteRows } from "./routeVotesCache";
 
 // ---------------------------------------------------------------------------
 // Top-proposal indicator marker
@@ -3927,6 +3931,72 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // is precisely where all but the top-ranked label is being suppressed anyway;
   // following the animation would re-run placement on every frame of it to
   // reposition labels nobody can see.
+  //
+  // The NUMBER under a label is a count of PEOPLE, and for a corridor only the
+  // server knows that: a route cast writes one row per edge of every block the
+  // corridor covers, so the corridor's own weight (`score`, the sum of those
+  // per-edge nets — what grows and ranks it) counts one person once per edge.
+  // The label used to print that sum, and read "+59" for the single voter whose
+  // route happened to cross 59 edges while the card for the very same corridor
+  // read "+1". So the label now reads the DISTINCT-VOTER rows — from the same
+  // /api/route-votes cache, under the same key, as the card (routeVotesQuery is
+  // the shared normalization). Not "computed the same way": literally the same
+  // rows, so the two cannot drift apart again.
+  //
+  // Point proposals never had the mismatch and need no round trip: a PBTP's
+  // `count` is its block's deduped net (block_vote_types — distinct devices per
+  // block), which is exactly what the point card sums over its one block.
+  const [rbtpVoterNets, setRbtpVoterNets] = useState<Map<string, number>>(
+    () => new Map());
+  useEffect(() => {
+    const queries = routeProposals
+      .map((p) => ({ p, q: routeVotesQuery(p.blockEdgeIds) }))
+      .filter((e): e is { p: RouteProposal; q: { ids: number[]; key: string } } => !!e.q);
+    // Corridors whose rows haven't landed are ABSENT from the map, not zero:
+    // the label then draws its claim without a number rather than asserting
+    // that nobody asked for this.
+    const readCache = () => {
+      const next = new Map<string, number>();
+      for (const { p, q } of queries) {
+        const rows = cachedRouteVoteRows(q.key);
+        if (!rows) continue;
+        const row = rows.find((r) => r.label === p.label);
+        next.set(p.id, row ? row.up - row.down : 0);
+      }
+      return next;
+    };
+    // A fresh Map re-broadcasts every label; a corridor list that resolves to
+    // the numbers already on screen is not worth that.
+    const publish = () => setRbtpVoterNets((prev) => {
+      const next = readCache();
+      if (prev.size === next.size
+        && [...next].every(([id, net]) => prev.get(id) === net)) return prev;
+      return next;
+    });
+    publish();
+    if (queries.length === 0) return;
+
+    let cancelled = false;
+    // Debounced like the cards' own refetch, so a corridor list that settles in
+    // two steps costs one batch.
+    const timer = window.setTimeout(() => {
+      primeRouteVoteRows(queries.map((e) => e.q)).then(() => {
+        if (!cancelled) publish();
+      });
+    }, ROUTE_VOTES_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+    // Deliberately NOT on votesVersion: this is the one COUNT(DISTINCT) on the
+    // whole map's corridors, and re-running it per vote would put a 40k-edge
+    // query behind every tick. It doesn't need to — any vote that moves one of
+    // these numbers also moves that corridor's score, which replaces
+    // `routeProposals` (the identity guard compares ids AND scores) on the next
+    // recompute and re-runs this. So the counts refresh on the corridors' own
+    // cadence, which is the cadence the labels are drawn on anyway.
+  }, [routeProposals]);
+
   useEffect(() => {
     const topology = topologyRef.current;
     // Station networks turn EVERY edge into a pseudo-winner sharing one label
@@ -3959,36 +4029,49 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           net: w.count,
         };
       });
+    // Ranked by `score`, DRAWN with the voter count. Rank decides the reveal
+    // zoom, so it has to be settled the moment the corridors are — ordering by
+    // a number that arrives one round trip later would shuffle labels between
+    // zoom bands as the counts landed, popping them in and out.
     const routes = [...routeProposals]
       .sort((a, b) => b.score - a.score)
       .map((p) => {
         const [lat, lng] = rbtpDisplayPos(topology, p);
-        return { key: `r${p.id}`, lat, lng, label: p.label, net: p.score };
+        return {
+          key: `r${p.id}`, lat, lng, label: p.label,
+          net: rbtpVoterNets.get(p.id) ?? null,
+        };
       });
 
     const detail: ProposalLabelDetail[] = [];
+    let pending = 0;
     for (let i = 0; i < Math.max(points.length, routes.length); i++) {
       for (const item of [routes[i], points[i]]) {
         if (!item) continue;
         const rank = detail.length;
+        if (item.net === null) pending++;
         detail.push({
           key: item.key,
           lat: item.lat,
           lng: item.lng,
           text: proposalLabelText(item.label),
-          count: formatProposalCount(item.net),
+          // "" = this corridor's voter count hasn't resolved; the label draws
+          // its claim alone until it does.
+          count: item.net === null ? "" : formatProposalCount(item.net),
           rank,
           minz: proposalRevealZoom(rank),
         });
       }
     }
     dlog("proposals", `labels broadcast: ${detail.length}`
-      + ` (${points.length} point, ${routes.length} route)`);
+      + ` (${points.length} point, ${routes.length} route`
+      + `, ${pending} awaiting voter counts)`);
     window.dispatchEvent(new CustomEvent<ProposalLabelDetail[]>(
       PROPOSAL_LABELS_EVENT, { detail }));
     // topologyRef is settled well before either list is non-empty (both are
-    // computed FROM it), so the lists are the only triggers needed.
-  }, [winners, routeProposals, isStationNetwork]);
+    // computed FROM it), so the lists — plus the voter counts that land after
+    // them — are the only triggers needed.
+  }, [winners, routeProposals, rbtpVoterNets, isStationNetwork]);
 
   // ===========================================================================
   // CLUSTER FAN-OUT — shared by BOTH proposal kinds (PBTP squares and RBTP
@@ -4734,6 +4817,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           hoverMatchesPinned). */}
       {hoverRbtp && !(routeCardPos && coveredRouteProposal?.id === hoverRbtp.id) && createPortal(
         <ProposalCard
+          // `count` names the corridor for the header; it is NOT the number
+          // this card shows — `rows` is, and those are distinct voters. A
+          // corridor's `score` sums per-edge nets (one route voter once per
+          // edge), so anything that starts DRAWING winner.count here has to
+          // take it from hoverRbtpRows instead.
           winner={{
             legendIdx: hoverRbtp.legendIdx,
             label: hoverRbtp.label,
@@ -4767,6 +4855,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       {routeCardPos && routeBlocks && routeBlocks.length > 0 && !showPinned && createPortal(
         <ProposalCard
           key={`route:${coveredRouteProposal?.id ?? "selection"}`}
+          // As on the hover card above: `count` is header identity, never the
+          // displayed number (rows are, and they are distinct voters).
           winner={coveredRouteProposal
             ? {
                 legendIdx: coveredRouteProposal.legendIdx,

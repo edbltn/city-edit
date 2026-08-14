@@ -4,6 +4,7 @@ import { ROUTE_VOTES_CACHE_MAX } from "../../utils/blockSelection";
 import {
   cachedRouteVoteRows,
   loadRouteVoteRows,
+  loadRouteVoteRowsBatch,
   resetRouteVotesCache,
 } from "./routeVotesCache";
 import type { VoteTypeRow } from "./spatialLookup";
@@ -120,5 +121,58 @@ describe("loadRouteVoteRows", () => {
     await loadRouteVoteRows("old", async () => rows(7));
     await loadRouteVoteRows("newest", async () => rows(8));
     expect(cachedRouteVoteRows("old")).toEqual(rows(7));
+  });
+});
+
+describe("loadRouteVoteRowsBatch", () => {
+  const entries = [
+    { key: "a", ids: [1, 2] },
+    { key: "b", ids: [3] },
+  ];
+
+  it("lands every answer in the cache the cards read", async () => {
+    // The whole point: the label layer primes with a batch, then the card for
+    // one of those corridors opens and finds its rows already there — the same
+    // rows, so the two numbers cannot differ.
+    await loadRouteVoteRowsBatch(entries, async () => [rows(1), rows(9)]);
+    expect(cachedRouteVoteRows("a")).toEqual(rows(1));
+    expect(cachedRouteVoteRows("b")).toEqual(rows(9));
+
+    const fetchRows = vi.fn(async () => rows(99));
+    expect(cachedRouteVoteRows("a")).toEqual(rows(1));
+    expect(fetchRows).not.toHaveBeenCalled();
+  });
+
+  it("sends the sets in order and asks once for a repeated list", async () => {
+    const fetchSets = vi.fn(async () => [rows(1), rows(2)]);
+    const a = loadRouteVoteRowsBatch(entries, fetchSets);
+    const b = loadRouteVoteRowsBatch(entries, fetchSets);
+    await Promise.all([a, b]);
+    expect(fetchSets).toHaveBeenCalledTimes(1);
+    expect(fetchSets).toHaveBeenCalledWith([[1, 2], [3]]);
+  });
+
+  it("caches nothing for a set the server declined to count", async () => {
+    // `null` means "over the batch budget", NOT "nobody voted" — caching an
+    // empty row list would draw a confident +0 on a corridor nobody counted.
+    await loadRouteVoteRowsBatch(entries, async () => [null, rows(4)]);
+    expect(cachedRouteVoteRows("a")).toBeNull();
+    expect(cachedRouteVoteRows("b")).toEqual(rows(4));
+  });
+
+  it("survives a failed batch without hanging or caching", async () => {
+    await expect(loadRouteVoteRowsBatch(entries, async () => {
+      throw new Error("network");
+    })).resolves.toBeUndefined();
+    expect(cachedRouteVoteRows("a")).toBeNull();
+    // ...and the signature is not left marked in flight.
+    await loadRouteVoteRowsBatch(entries, async () => [rows(1), rows(2)]);
+    expect(cachedRouteVoteRows("a")).toEqual(rows(1));
+  });
+
+  it("does nothing for an empty list", async () => {
+    const fetchSets = vi.fn(async () => []);
+    await loadRouteVoteRowsBatch([], fetchSets);
+    expect(fetchSets).not.toHaveBeenCalled();
   });
 });
