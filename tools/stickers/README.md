@@ -99,24 +99,33 @@ Visits by message are a group-by on `cityedit_map_load_ms` in Metrics Explorer.
 ## The line
 
 `campaign.py` holds every message, the vote type it casts, and why. The three
-starters, then three more in the same voice — six in all, every one of them
-three words or fewer.
+starters plus one more in the same voice — four in all.
 
 | Line | Casts | Kind |
 |------|-------|------|
 | Tired of waiting? | Fix signal timing | point |
 | Fix this intersection. | Add traffic calming | route |
 | Whose streets? | Add tree | point |
-| Nowhere to stand. | Add pedestrian refuge island | point |
-| Press. Wait. Wait. | Fix signal timing | point |
-| No way across. | Add crosswalk | route |
+| What side are you on? | Add crosswalk | route |
 
-Two more were cut on review, and the reasons are worth keeping: **"This corner
-kills."** was too dark to put on a stranger's walk to work, and **"It's dark
-here."** fails the one test a sticker has to pass — it is unreadable in the
-condition it describes, and anyone who *could* read it would be confused about
-what "here" referred to.
+**"What side are you on?"** is literally which side of the road you are stranded
+on, and audibly the other thing — the same double reading as "Whose streets?".
+It casts `Add crosswalk`, the crossing ask that left with "No way across.", in
+better words.
 
+**The length rule is the longest WORD, not the word count.** It used to be a
+three-word cap, and that cap was standing in for "short enough to read at a
+glance" — but a monospaced stack is sized by its longest *line*, and a line
+cannot break mid-word, so one long word sets the whole sticker:
+
+| line | words | longest word | sets at |
+|---|---|---|---|
+| WHAT SIDE ARE YOU ON? | 5 | 4 chars | **16.5 pt** |
+| FIX THIS INTERSECTION. | 3 | 13 chars | 14.6 pt |
+
+Five short words read bigger than three long ones, so counting words was
+rejecting the better sticker. `campaign.validate()` caps the longest word at 13
+characters instead.
 **Three words, hard limit.** The character cap is about whether the type *fits*;
 the word cap is about whether anyone reads it. A sticker is taken in at a glance,
 side-on, by someone walking. The four- and five-word lines this line-up started

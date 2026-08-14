@@ -28,13 +28,20 @@ feet away, at an angle, in the rain, gets about four words.
 # round and the sticker stops working as a sticker.
 MAX_LINE = 26
 
-#: Three words, hard limit. The character cap above is about whether the type
-#: FITS; this is about whether anyone reads it. A sticker is taken in at a
-#: glance, side-on, while its reader is walking — and the four- and five-word
-#: lines this line-up started with were all worse than the three-word ones at
-#: exactly the moment that matters. Fewer words also set larger, since the type
-#: is sized by its own longest line.
-MAX_WORDS = 3
+#: The longest single WORD, which is what actually decides how big a line sets.
+#:
+#: This replaced a three-word cap, and the replacement is the interesting part.
+#: The word cap was standing in for "short enough to read at a glance", and it
+#: misfires: a monospaced stack is sized by its longest LINE, a line cannot be
+#: broken mid-word, so one long word sets the whole sticker. Measured on the
+#: 2.5":
+#:
+#:     "WHAT SIDE ARE YOU ON?"    5 words, longest 4 chars  -> 16.5 pt
+#:     "FIX THIS INTERSECTION."   3 words, longest 13 chars -> 14.6 pt
+#:
+#: Five short words read bigger than three long ones. Counting words was
+#: rejecting the better sticker.
+MAX_WORD_CHARS = 13
 
 
 class Sticker:
@@ -60,9 +67,9 @@ def _s(key, line, vote_type, kind, note):
 
 
 # --------------------------------------------------------------------------
-# The line. The first three are the commissioned starters; the rest extend the
-# same voice — second person, present tense, no slogan, no brand. Each one is a
-# complaint that a passer-by has already had, printed at the place they had it.
+# The line. The first three are the commissioned starters; the fourth extends
+# the same voice — second person, present tense, no slogan, no brand. Each one
+# is a complaint a passer-by has already had, printed where they had it.
 # --------------------------------------------------------------------------
 
 STICKERS = [
@@ -78,16 +85,12 @@ STICKERS = [
     _s("whose", "Whose streets?", "Add tree", "point",
        "Reclaiming the roadbed, in its softest form: a tree in it. Needs the "
        "'Add tree' type added to nyc-proposals — see README."),
+    _s("side", "What side are you on?", "Add crosswalk", "route",
+       "Literally which side of the road you are stranded on, and audibly the "
+       "other thing. Same double reading as 'Whose streets?'. Casts the "
+       "crossing ask that left with 'No way across.', in better words."),
 
-    # ── Point lines: a spot you are standing at ──────────────────────────
-    _s("stand", "Nowhere to stand.", "Add pedestrian refuge island", "point",
-       "The stranded-in-the-middle crossing."),
-    _s("press", "Press. Wait. Wait.", "Fix signal timing", "point",
-       "The beg-button variant of 'wait' — same vote, different joke."),
 
-    # ── Route lines: a stretch you are walking along ─────────────────────
-    _s("cross", "No way across.", "Add crosswalk", "route",
-       "Long blocks with no marked crossing."),
 ]
 
 BY_KEY = {s.key: s for s in STICKERS}
@@ -102,9 +105,11 @@ def validate() -> list[str]:
     problems = []
     seen_src = {}
     for s in STICKERS:
-        if len(s.line.split()) > MAX_WORDS:
+        longest = max(len(w) for w in s.display.split())
+        if longest > MAX_WORD_CHARS:
             problems.append(
-                f"{s.key}: {len(s.line.split())} words, max {MAX_WORDS} "
+                f"{s.key}: longest word is {longest} chars, max "
+                f"{MAX_WORD_CHARS} — it would set the whole line small "
                 f"({s.line!r})"
             )
         if len(s.display) > MAX_LINE:
