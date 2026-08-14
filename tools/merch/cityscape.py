@@ -20,6 +20,14 @@ the finished art on both garments, and then again across capture widths, because
 the failure this design can have is not "looks wrong" — it is "reads fine on
 screen and not off a shirt".
 
+One honest caveat, found by sweeping and not fixable by tuning: there is a
+narrow band of capture widths — around 325–350 px across the whole print — where
+some of these fail while 300 px and 375 px both pass. That is the aliasing
+`tools/stickers/isoqr.py` documents: the rhombus edges run at 45° and beat
+against the binariser's sampling at particular scales. It is a band, not a
+floor, and it sits at a framing where a 12-inch print is a small part of a
+photograph.
+
 ## Buildings hang
 
 Straight from `isoqr._block`: a roof sits at z=0 and its walls drop to
@@ -38,14 +46,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "stickers"))
 
 import isoqr  # noqa: E402
 
-# Clear cells between the code and the first building — the QR spec's minimum
-# quiet zone exactly. It reads as the boulevard the code's district sits inside,
-# which is the point: any wider and the code floats in a moat with no continuity
-# to the city around it.
-MARGIN = 4
+# Clear cells between the code and the first building — the boulevard the code's
+# district sits inside. Wider and the code floats in a moat with no continuity to
+# the city; narrower and it stops reading.
+#
+# Five, not the spec's four, and the extra cell is bought by the whole-cube
+# buildings. At four, decodes failed across a broad span of capture widths; at
+# five they fail only in one narrow band (see below). Dimming the near ring
+# instead was tried and measured WORSE — the binariser needs that contrast to
+# find the plaza's edge, so taking it away costs more than it buys.
+MARGIN = 5
 
-# How far the city reaches past that, in cells.
-SPAN = 16
+# How far the city reaches past the code, measured RADIALLY from its centre.
+SPAN = 17
 
 # The street plan. Roads run on the SAME integer lattice as the code, so the
 # city and the thing it surrounds share one grid — which is what stops the
@@ -53,16 +66,21 @@ SPAN = 16
 ROAD_EVERY = 7
 ROAD_PHASE = 3
 
-# Buildings are 2×2 cells, so a roof is a roof rather than a single module
-# pretending to be one.
+# Not every street survives. Roughly one road SEGMENT in four is built over,
+# merging the two blocks either side into a superblock — done per segment
+# rather than per cell so it reads as a block that was never cut through,
+# rather than as rubble dropped in the road.
+ROAD_KEPT = 4
+
+# Two storeys, and nothing between. Every roof in the CODE sits at exactly one
+# cube by construction — that is what makes it readable — so the city around it
+# is built from the same unit: one cube or two, never 0.43 of one. Fractional
+# heights read as a pile of oddments; whole ones read as architecture on the
+# same grid as everything else.
+HEIGHTS = (1.0, 1.0, 2.0)   # two thirds low, one third tall
 LOT = 2
 
-# Heights. Every roof in the CODE sits at one height by construction, which is
-# what makes it readable; the city around it varies, which is what makes it a
-# city. Kept under the code's own cube so the district never out-shouts it.
-LOW_H = (0.18, 0.30, 0.44, 0.60, 0.78, 0.26, 0.52, 0.94)
-LANDMARK_H = 1.45
-LANDMARK_EVERY = 9
+
 
 # Not every lot is built. Roughly one in seven is a plaza, a yard or a parking
 # lot — which is what stops a regular street grid reading as a quilt. An
@@ -105,6 +123,11 @@ def scene(url: str, ground: str, ink: str, *, seed: int = 20260813,
     rand = _rand(seed)
 
     lo, hi = -MARGIN, n + MARGIN
+    # The code's centre, and the radius at which the city may start: the quiet
+    # zone stays a SQUARE ring, because a square code needs a square one — only
+    # the fade is circular.
+    mid = (n - 1) / 2.0
+    inner = mid + MARGIN
     cells = []
 
     for r in range(n):
@@ -117,22 +140,28 @@ def scene(url: str, ground: str, ink: str, *, seed: int = 20260813,
             # Inside the code or its quiet zone: nothing, ever.
             if lo <= c < hi and lo <= r < hi:
                 continue
-            # Euclidean distance from the quiet-zone box, so the district has
-            # rounded corners rather than the hard diamond a Chebyshev radius
-            # turns into under this projection.
-            dx = max(lo - c, c - (hi - 1), 0)
-            dy = max(lo - r, r - (hi - 1), 0)
-            d = (dx * dx + dy * dy) ** 0.5
-            if d > SPAN:
+            # RADIAL distance from the code's centre, not distance to its
+            # square. Measuring to the box gives a rounded square, which this
+            # projection turns into a diamond; measuring from the centre gives a
+            # circle, and the projection very nearly preserves it — its two
+            # basis vectors come out equal in length and all but orthogonal.
+            radial = ((c - mid) ** 2 + (r - mid) ** 2) ** 0.5
+            t = (radial - inner) / SPAN
+            if t > 1.0:
+                continue
+            t = max(0.0, t)
+
+            # Streets, on the code's own lattice — with some segments built
+            # over. A segment is the run of road between two crossings, keyed by
+            # which road it is and how far along, so the whole stretch goes or
+            # stays together.
+            on_v = c % ROAD_EVERY == ROAD_PHASE
+            on_h = r % ROAD_EVERY == ROAD_PHASE
+            if on_v and (c // ROAD_EVERY * 31 + r // ROAD_EVERY * 17) % ROAD_KEPT:
+                continue
+            if on_h and (r // ROAD_EVERY * 23 + c // ROAD_EVERY * 13) % ROAD_KEPT:
                 continue
 
-            # Streets. A cell on a road stays empty, which is what gives the
-            # district blocks instead of a solid field — and the roads run on
-            # the code's own lattice, so the two read as one plan.
-            if c % ROAD_EVERY == ROAD_PHASE or r % ROAD_EVERY == ROAD_PHASE:
-                continue
-
-            t = d / SPAN
             fade = (1.0 - t) ** 1.15
             if fade <= 0.06:
                 continue
@@ -147,11 +176,8 @@ def scene(url: str, ground: str, ink: str, *, seed: int = 20260813,
             lot = (c // LOT, r // LOT)
             if (lot[0] * 11 + lot[1] * 4) % EMPTY_EVERY == 0:
                 continue
-            landmark = (lot[0] * 5 + lot[1] * 9) % LANDMARK_EVERY == 0 and t < 0.6
-            base = (LANDMARK_H if landmark
-                    else LOW_H[(lot[0] * 3 + lot[1] * 7) % len(LOW_H)])
-            cells.append((c, r, base * (1.0 - 0.4 * t),
-                          _fade_tones(ground, ink, fade)))
+            height = HEIGHTS[(lot[0] * 3 + lot[1] * 7) % len(HEIGHTS)]
+            cells.append((c, r, height, _fade_tones(ground, ink, fade)))
 
     # Painter's order over the WHOLE scene, code and district together: depth
     # increases with col + row, so a nearer block covers a farther one. Drawing
@@ -161,7 +187,7 @@ def scene(url: str, ground: str, ink: str, *, seed: int = 20260813,
 
     # Bounds cover the district, not the code. Nominal like isoqr's, so the
     # framing does not shift when a corner module or a random block flips.
-    reach = SPAN + MARGIN
+    reach = SPAN
     x = (n + 2 * reach) * k
     return ("".join(out),
             (-x, -isoqr.CUBE_H - reach * 0.5, x, float(n) + reach),

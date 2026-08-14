@@ -28,13 +28,20 @@ that fades out around it (`cityscape.py`). It needs no light panel behind it —
 its light half *is* the garment — so a black shirt gets a city of pale towers
 dissolving into black rather than a white sticker.
 
-The district runs on the code's own lattice, with streets every seven cells,
-2×2 lots, varied heights and about one lot in seven left as a plaza. All of that
-is structure rather than decoration: an earlier version thinned the city at
-random and read as scatter around a graphic instead of a place the code sits in.
+The district runs on the code's own lattice: streets every seven cells with
+about a quarter of the segments built over into superblocks, 2×2 lots, one lot
+in seven left as a plaza, and buildings of exactly one or two cubes — the same
+unit the code's own modules use. The fade is radial, so the district ends in a
+circle even though the quiet zone it surrounds is square.
 
-⚠️ **The gap between the code and the first building is the quiet zone** — four
-modules, the QR spec's minimum, and it is not styling. `MARGIN` and `SPAN` in
+All of that is structure rather than decoration: an earlier version thinned the
+city at random and read as scatter around a graphic instead of a place the code
+sits in.
+
+⚠️ **The gap between the code and the first building is the quiet zone** — five
+modules, one more than the spec's minimum, and it is not styling. The extra cell
+is the price of whole-cube buildings: at four, decodes failed across a broad
+span of capture widths. `MARGIN` and `SPAN` in
 `cityscape.py` were swept against a decode of the finished art on both garments
 *and* across nine capture widths. Do that again if you touch them: the failure
 mode is "reads fine on screen, not off a shirt".
