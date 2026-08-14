@@ -1,0 +1,2111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Audience: view counts and co-presence, built so the number can be believed — 2026-08-14</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Audience: view counts and co-presence, built so the number can be believed</h1>
+    <div class="dateline">2026-08-14 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#identity">What one person is, when device_id is falling apart</a>
+<a href="#views">Counting per block, without double counting a corridor</a>
+<a href="#presence">A room that can empty</a>
+<a href="#transport">Four JSON messages on the socket that already exists</a>
+<a href="#ui">Subtle, and countable</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Two features whose product is common knowledge — &ldquo;we are looking at this together, and we both know it&rdquo; — so both are engineered for a number nobody has a reason to doubt rather than a number that is large. That inverts the usual analytics instinct: over-counting destroys the effect outright, under-counting costs a little, and every trade resolves in that direction. Neither reads <code>device_id</code>, whose localStorage preimage is currently fragmenting — keyed on it, both counts would RISE exactly as identity degrades. View counts are per-block HyperLogLogs UNIONed at read time, so a route proposal needs no durable id (it has none) and one person who opens two of its blocks counts once. Co-presence is a ZSET, not a sketch, because a room has to be able to empty. Both ride the WebSocket that already exists.</p>
+
+  
+    <section class="card" id="identity">
+      <div class="tag">IDENTITY</div>
+      <h2>What one person is, when device_id is falling apart</h2>
+      <h3>Symptom</h3>
+      <p>Both features have to answer “how many PEOPLE” while the app’s only per-browser key is actively fragmenting: one iPhone produced six distinct <code>voter_id</code>s in three minutes on prod (2026-08-13), and per-device dedupe is already load-bearing for vote counting and proposal ranking.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>device_id</code> is the sha256 of a localStorage UUID, and localStorage is not stable on this app’s traffic: Private Browsing and “Block All Cookies” mint a fresh id per document load, a sticker scan is TWO document loads, Safari’s ITP deletes script-writable storage after 7 days without a first-party interaction, and the canonical-subdomain hop crosses an origin</li>
+<li>The dangerous property is not that the key is wrong — it is the DIRECTION it is wrong in. Keyed on <code>device_id</code>, a view count and a presence count both RISE as identity degrades. The metric looks healthier the more broken we get, and nothing outside the system can tell the difference</li>
+<li>The product here is common knowledge, so a number people suspect is inflated is worth less than no number at all. Under-counting costs a little; over-counting costs everything at once</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Both features dedupe on the COUNTING identity votes already use (<code>server/vote_identity.py</code>): the hashed IP. Neither reads <code>device_id</code></li>
+<li>Neither reads ANY client-supplied identifier. The key is taken from the WebSocket handshake server-side, so a client is never asked who it is and could not lie if it wanted to</li>
+<li>Degradation is stated in both directions rather than assumed away: shared egress (household, office, carrier NAT) UNDER-counts permanently; one person across genuinely different networks over months over-counts by a few. The residual inflation needs a NETWORK change, not a page load — reload a hundred times and neither number moves</li>
+<li>If <code>VOTE_COUNT_IDENTITY=device</code> is ever set, both inherit it along with votes and inflate together. That coupling is deliberate: there should not be two answers on one map to “how many people is this”</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/presence.py</li>
+<li>server/view_counts.py</li>
+<li>server/app.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="views">
+      <div class="tag">VIEW COUNTS</div>
+      <h2>Counting per block, without double counting a corridor</h2>
+      <h3>Symptom</h3>
+      <p>A view count on a proposal modal must not report one person twice because they opened two different blocks of the same route proposal — and a route proposal has no durable id to hang a counter on.</p>
+      <h3>Root cause</h3>
+      <ul><li><code>RouteProposal.id</code> is an FNV-1a hash of the corridor’s sorted PATH EDGES. It rotates whenever a vote lengthens, shortens or reroutes the corridor — the client already uses an id change as its signal that a corridor MOVED. A counter keyed on it would silently reset every proposal’s audience to zero on the next vote</li>
+<li><code>legendIdx</code> is worse: it is assigned by first-encounter order while the server builds each graph-votes snapshot, so one vote reordering one edge can shift every index for everybody</li>
+<li>Summing per-block counts is the obvious implementation and is exactly the double count the brief rules out</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Storage is one Redis HyperLogLog per <code>(map, vote type, block)</code>: <code>pv:&lt;slug&gt;:&lt;type&gt;:&lt;block_id&gt;</code>. The key is a BLOCK id — a baked artifact, already the unit the vote system counts in</li>
+<li>The proposal is named only at READ time, as a set of blocks. <code>PFCOUNT k1 k2 … kn</code> returns the cardinality of the UNION, so a person present in two of a corridor’s sketches contributes exactly 1. The dedupe is a property of the data structure, not bookkeeping anyone has to keep correct</li>
+<li>Because nothing durable names the proposal, reshaping the corridor tomorrow reshapes the number with it — no migration, no backfill, no id to keep alive</li>
+<li>The TYPE is in the key. Without it the 200 people who read a Protected-bike-lane corridor would appear as the audience for a Fix-signal-timing pin on the same corner. The key uses the LABEL, the one part of a proposal’s identity stable across recomputes and across clients</li>
+<li>A view writes EVERY block the proposal spans, not just the clicked one. Anchoring on the clicked block was the first design and was wrong: a 40-block corridor read by 100 people would put all 100 in one sketch, so a sub-corridor would read 100 or 0 for the same street and the same readers depending on whether it happened to contain that block</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/view_counts.py</li>
+<li>client-react/src/hooks/useProposalAudience.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="presence">
+      <div class="tag">CO-PRESENCE</div>
+      <h2>A room that can empty</h2>
+      <h3>Symptom</h3>
+      <p>“You’re looking at this with N other people”, shown only when there is more than one other viewer — and correct across the app’s 1–6 Cloud Run instances.</p>
+      <h3>Root cause</h3>
+      <ul><li>HyperLogLog is right for cumulative views and WRONG here, for one reason: presence has to go DOWN. A HLL cannot forget a member, so a map 40 people visited over an afternoon would read “40 people are here now” forever — monotonic inflation, the exact failure this feature cannot survive</li>
+<li><code>delta_hub.subscriber_count()</code> already existed but is PER-PROCESS, so it would have under-reported by a factor of the instance count</li>
+<li>This app throttles background tabs hard enough that a buried viewer is doing nothing at all, so a socket being open is not evidence anyone is looking</li></ul>
+      <h3>What changed</h3>
+      <ul><li>A Redis ZSET <code>pres:&lt;slug&gt;</code>, member = counting identity, score = last heartbeat. Entries older than 35s are pruned at read; heartbeats every 10s come from the server’s own socket loop, so client throttling cannot silently expire a live viewer</li>
+<li>Departure is EXPLICIT (<code>ZREM</code>), not left to expiry — a count that stays high for 35 seconds after everyone leaves is over-reporting. A per-process refcount keeps closing one of a person’s two tabs from evicting them</li>
+<li>Only VISIBLE tabs are counted: the client reports <code>visibilitychange</code> over the same socket and a hidden tab leaves the room immediately. A hidden tab is also not PUSHED the count — it is not in the set, so <code>n</code> would exclude it while the UI renders “n − 1 others” on the assumption that it is counted</li>
+<li>Each process memoizes the count for 2s so a crowded map costs one Redis read per tick rather than one per socket; <code>arrive</code>/<code>depart</code> drop that memo, since the two changes a process makes itself are stale by construction</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/presence.py</li>
+<li>server/app.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="transport">
+      <div class="tag">TRANSPORT</div>
+      <h2>Four JSON messages on the socket that already exists</h2>
+      <h3>Symptom</h3>
+      <p>Presence and view counts both need a client↔server round trip, and neither may open a second channel.</p>
+      <h3>Root cause</h3>
+      <ul><li>A second connection per map for a viewer count would double the connection count, and — worse for a feature whose entire product is trustworthiness — would let presence and votes disagree about whether a client is still there</li>
+<li>The binary wire codec’s <code>KIND_DELTA</code>/<code>KIND_SYNC</code> group layout does not fit a scalar, and client→server binary is rejected outright in frame version 1</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>{&quot;type&quot;:&quot;here&quot;,&quot;visible&quot;:B}</code> and <code>{&quot;type&quot;:&quot;view&quot;,&quot;k&quot;,&quot;t&quot;,&quot;b&quot;}</code> up; <code>{&quot;type&quot;:&quot;presence&quot;,&quot;n&quot;}</code> and <code>{&quot;type&quot;:&quot;views&quot;,&quot;k&quot;,&quot;n&quot;,&quot;exact&quot;}</code> down. No codec bump, no new endpoint</li>
+<li>Presence pushes are EDGE-TRIGGERED — sent only when the number actually changes — so a steady room sends nothing at all</li>
+<li>Presence maintenance sits BEFORE the queue drain in the socket loop: the <code>continue</code> on a successful drain skips the rest of the loop, so anything below it silently stops running on a busy map — exactly when people are most likely to be here together</li>
+<li><code>k</code> echoes the client’s own request token, so a reply that lands after the reader moved to another card is discarded rather than painted onto the wrong proposal</li>
+<li>Views are rate-limited by a TOKEN BUCKET, not a flat interval. The flat version was the first cut and silently dropped a legitimate second view when a point card closed and a route card opened inside one second. PFADD is idempotent, so this is a work bound and never an integrity control</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/app.py</li>
+<li>client-react/src/context/WebSocketContext.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="ui">
+      <div class="tag">UI</div>
+      <h2>Subtle, and countable</h2>
+      <h3>Symptom</h3>
+      <p>Both numbers have to be legible and believable without becoming the loudest thing on the screen.</p>
+      <h3>Root cause</h3>
+      <ul><li>A number nobody can check is a number people quietly discount, which is the whole failure mode for a rational-ritual feature</li>
+<li>The proposal card’s de-emphasis convention is <code>color-mix(in srgb, var(--ink) N%, transparent)</code> plus a smaller size — never a hardcoded grey, so it tracks the light/dark basemap</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The view count rides the card’s existing meta line — inside the 106px right-padding that clears the tool icons, in the same breath as the block count, at 45% ink against the meta’s 70%. It fades in, because it arrives seconds after the card and an unannounced layout shift at that distance reads as a glitch</li>
+<li>Nothing renders below 2 people or while the count is unknown: no skeleton, no zero, no dash. “1 person has looked at this” printed to the one person looking at it reads as a bug or a boast</li>
+<li>Copy is “N people have opened this”, not “N views” — views are cheap and get discounted on sight, and people is the literal truth of what the sketch holds. Above 1000 it says “about 1.2k” rather than a confident 1,247 the HLL cannot stand behind</li>
+<li>Co-presence draws ONE MARK PER PERSON with yours filled, in the bare 1.5px stroked box the mobile wordmark builds its letters from. You can count the marks against the sentence, and the filled mark shows without a footnote that the total includes the reader — a count that had quietly excluded you, or padded itself, could not survive being drawn</li>
+<li>The honest small print is one hover away rather than absent: counted once per network connection, foreground tabs only, people sharing a connection count as one</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/CoPresence/CoPresence.tsx</li>
+<li>client-react/src/components/CoPresence/CoPresence.css</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li>
+<li>client-react/src/styles/globals.css</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>The load-bearing dedupe, measured on a REAL 22-block corridor in the running app: naive per-block sum <strong>25</strong>, union <strong>4</strong>. Three synthetic people seeded into three DIFFERENT blocks of one corridor plus the browser’s own view, unioned back to four.</li>
+<li>Fragmentation immunity, end to end: three concurrent WebSocket clients from one IP report a presence count of <strong>1, not 3</strong>, and six repeat views from one identity leave the sketch bit-identical.</li>
+<li>Hidden tabs leave the room and come back: <code>zcard</code> went 4 → 3 when the browser tab was backgrounded and 3 → 4 when it returned, with no reconnect. Hiding ONE of a person’s tabs does not evict them; hiding the last one does.</li>
+<li>Rendered in the running app and screenshotted: the proposal card reads <strong>“1 proposal · 5 people have opened this”</strong>, and the bottom-left strip reads <strong>■□□□ “You’re looking at this with 3 other people”</strong>.</li>
+<li>Cards that are not proposals stay silent, verified by the <code>[audience]</code> debug channel: a plain block logs <code>idle enabled=true label=- blocks=1</code> and reports nothing. Hover cards never report at all.</li>
+<li>A hidden tab refuses to report a view client-side AND the server refuses to record one — the two checks are independent, and the client-side refusal was observed in the debug log as <code>&lt;- no answer</code>.</li>
+<li>Two real bugs were found by testing rather than reasoning, and both were in the over-reporting direction: the 2s count memo served a pre-arrival value (joining a map you were alone on showed “0 others”, and a departure lingered), and the server kept pushing presence to hidden tabs (stale strip, and <code>n</code> silently excluding the reader so “others” was off by one).</li>
+<li>11 new tests against a real Redis, plus the full existing suite green (<strong>259 unit tests</strong>) and <code>npx tsc -b</code> clean — Vite dev never type-checks, so that pre-flight is the only thing that catches a broken client build.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open the same map in two browsers on DIFFERENT networks (phone on cellular + laptop on wifi) and confirm the bottom-left strip appears with the right mark count. Two tabs on ONE network will correctly show nothing — that is the dedupe working, not a bug.</li>
+<li>Background one of those tabs and watch the other’s count drop within a couple of seconds; foreground it and watch it come back.</li>
+<li>Open a proposal card and leave it open for two seconds, then reopen it — the count must not increase. Reload the page a few times and reopen: still must not increase.</li>
+<li>Open the SAME route proposal from two different blocks of its corridor and confirm the number is identical and unchanged — this is the double-count the design exists to prevent.</li>
+<li>Confirm a proposal with only you having viewed it shows NO count at all, rather than “1 person”.</li>
+<li>Hover (don’t click) across a dense cluster of pins and confirm no counts move — hover cards must never register a view.</li>
+<li>After deploy, check <code>redis-cli --scan --pattern 'pv:*' | wc -l</code> grows slowly and <code>zcard pres:&lt;slug&gt;</code> tracks real traffic; both keys carry TTLs, so neither should grow without bound.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/App.tsx</span>
+            <span class="stat"><span class="d-add">+5</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · app shell</span>
+        <span class="ctx-sum">Provider tree, map bootstrap, and the fixed overlays</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">App.tsx</span>
+        <span class="ctx-sum">~230 LOC — AppContent, MapApp, the provider stack</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports</span><span class="ol-sum">+1 — CoPresence</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">AppContent overlays</span><span class="ol-sum">+4 lines — mounted next to EventBanner, behind the splash</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">MapApp / provider tree</span><span class="ol-sum">unchanged — already inside WebSocketProvider</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Mounted only once the splash is gone, for the same reason the event banner is: the strip animates itself in, and that entrance is wasted under the loader</li><li>It renders nothing at all below two other viewers, so it costs nothing on a quiet map</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/App.tsx b/client-react/src/App.tsx</span>
+<span class="d-meta">index 7cf5564..06537e1 100644</span>
+<span class="d-meta">--- a/client-react/src/App.tsx</span>
+<span class="d-meta">+++ b/client-react/src/App.tsx</span>
+<span class="d-hunk">@@ -3,7 +3,7 @@ import {</span>
+<span class="d-ctx">   RouteProvider, WebSocketProvider, GhostPinProvider, GraphSnapProvider,</span>
+<span class="d-ctx">   ThemeProvider, MapProvider, HeatmapProvider,</span>
+<span class="d-ctx"> } from &quot;./context&quot;;</span>
+<span class="d-del">-import { TopBar, MapView, ErrorToast, EventBanner, Landing, ErrorBoundary } from &quot;./components&quot;;</span>
+<span class="d-add">+import { TopBar, MapView, ErrorToast, EventBanner, Landing, ErrorBoundary, CoPresence } from &quot;./components&quot;;</span>
+<span class="d-ctx"> import { PasscodeGate } from &quot;./components/PasscodeGate/PasscodeGate&quot;;</span>
+<span class="d-ctx"> import { useRoute, useHeatmap } from &quot;./context&quot;;</span>
+<span class="d-ctx"> import { isLandingHost, subdomainRedirectUrl } from &quot;./themes&quot;;</span>
+<span class="d-hunk">@@ -73,6 +73,10 @@ function AppContent() {</span>
+<span class="d-ctx">       {/* Mounted only once the splash is gone: the strip animates itself in, and</span>
+<span class="d-ctx">           that entrance is wasted behind the full-screen loader. */}</span>
+<span class="d-ctx">       {!isInitialLoading &amp;&amp; &lt;EventBanner /&gt;}</span>
+<span class="d-add">+      {/* Renders itself only when there are at least two other people here, so</span>
+<span class="d-add">+          it costs nothing on a quiet map. Mounted behind the splash for the</span>
+<span class="d-add">+          same reason the banner is: its entrance is wasted under the loader. */}</span>
+<span class="d-add">+      {!isInitialLoading &amp;&amp; &lt;CoPresence /&gt;}</span>
+<span class="d-ctx">       &lt;PasscodeGate /&gt;</span>
+<span class="d-ctx">       {getCurrentMap()?.staging &amp;&amp; (</span>
+<span class="d-ctx">         &lt;div className=&quot;staging-ribbon&quot; aria-hidden&gt;STAGING&lt;/div&gt;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/CoPresence/CoPresence.css</span>
+            <span class="stat"><span class="d-add">+100</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · co-presence styling</span>
+        <span class="ctx-sum">The quietest fixed element on the map</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">CoPresence.css</span>
+        <span class="ctx-sum">new — ~100 lines</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">.copresence</span><span class="ol-sum">new — bottom-left (the one free corner), hairline border, z 900 under every card</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.copresence-mark / .is-you</span><span class="ol-sum">new — 7px bare 1.5px stroked box; yours filled</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">keyframes</span><span class="ol-sum">new — strip fades up, marks stagger in from yours outward</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">mobile + reduced-motion</span><span class="ol-sum">new — sentence drops on phones, marks lift out of the muted register</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Bottom-left because zoom and attribution are both bottom-right — the only free corner on the map</li><li>The mark is the wordmark&#x27;s own hand: a bare stroked box, zero radius, no new visual vocabulary introduced to say something quiet</li><li>On phones the SENTENCE is what goes; the marks alone still say &#x27;people are here&#x27; in the width of a thumbnail, and they lift to 75% ink because 55% at 7px reads as lint</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/CoPresence/CoPresence.css b/client-react/src/components/CoPresence/CoPresence.css</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..98c963e</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/CoPresence/CoPresence.css</span>
+<span class="d-hunk">@@ -0,0 +1,100 @@</span>
+<span class="d-add">+/* ==========================================================================</span>
+<span class="d-add">+   Co-presence — who else has this map open right now</span>
+<span class="d-add">+</span>
+<span class="d-add">+   Bottom-left, the one free corner (zoom + attribution both sit bottom-right).</span>
+<span class="d-add">+   Deliberately the quietest fixed element on the map: it is a fact about the</span>
+<span class="d-add">+   room, not a control, and it must never compete with the proposal it is</span>
+<span class="d-add">+   telling you other people are reading.</span>
+<span class="d-add">+   ========================================================================== */</span>
+<span class="d-add">+</span>
+<span class="d-add">+.copresence {</span>
+<span class="d-add">+  position: fixed;</span>
+<span class="d-add">+  bottom: var(--space-5);</span>
+<span class="d-add">+  left: var(--space-5);</span>
+<span class="d-add">+  z-index: 900;                    /* under every card (1100+) and the topbar */</span>
+<span class="d-add">+  display: flex;</span>
+<span class="d-add">+  align-items: center;</span>
+<span class="d-add">+  gap: var(--space-2);</span>
+<span class="d-add">+  padding: 6px 10px;</span>
+<span class="d-add">+  border: 1px solid var(--hairline);</span>
+<span class="d-add">+  background: var(--paper);</span>
+<span class="d-add">+  font-family: var(--font-main);</span>
+<span class="d-add">+  font-size: 11px;</span>
+<span class="d-add">+  color: color-mix(in srgb, var(--ink) 70%, transparent);</span>
+<span class="d-add">+  pointer-events: auto;            /* the title needs a hover target */</span>
+<span class="d-add">+  cursor: default;</span>
+<span class="d-add">+  animation: copresence-in 320ms ease-out both;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.copresence-marks {</span>
+<span class="d-add">+  display: flex;</span>
+<span class="d-add">+  align-items: center;</span>
+<span class="d-add">+  gap: 3px;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* One hollow box per person, in the wordmark&#x27;s own hand: a bare 1.5px stroke,</span>
+<span class="d-add">+   no fill, no radius. Drawn rather than tallied so the row can be counted</span>
+<span class="d-add">+   against the sentence — a number you can check is a number you can believe. */</span>
+<span class="d-add">+.copresence-mark {</span>
+<span class="d-add">+  width: 7px;</span>
+<span class="d-add">+  height: 7px;</span>
+<span class="d-add">+  border: 1.5px solid color-mix(in srgb, var(--ink) 55%, transparent);</span>
+<span class="d-add">+  animation: copresence-mark-in 260ms ease-out both;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* You. Filled, and first in the row, so the sentence&#x27;s &quot;other&quot; needs no</span>
+<span class="d-add">+   explaining and the total can&#x27;t be read as excluding the reader. */</span>
+<span class="d-add">+.copresence-mark.is-you {</span>
+<span class="d-add">+  background: var(--ink);</span>
+<span class="d-add">+  border-color: var(--ink);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.copresence-overflow {</span>
+<span class="d-add">+  margin-left: 2px;</span>
+<span class="d-add">+  font-size: 10px;</span>
+<span class="d-add">+  color: color-mix(in srgb, var(--ink) 45%, transparent);</span>
+<span class="d-add">+  font-variant-numeric: tabular-nums;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.copresence-text {</span>
+<span class="d-add">+  white-space: nowrap;</span>
+<span class="d-add">+  font-variant-numeric: tabular-nums;   /* the count must not shift the line */</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+@keyframes copresence-in {</span>
+<span class="d-add">+  from { opacity: 0; transform: translateY(4px); }</span>
+<span class="d-add">+  to   { opacity: 1; transform: none; }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+@keyframes copresence-mark-in {</span>
+<span class="d-add">+  from { opacity: 0; transform: scale(0.4); }</span>
+<span class="d-add">+  to   { opacity: 1; transform: none; }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* Phones: the sentence is the first thing to go. The marks alone still say</span>
+<span class="d-add">+   &quot;people are here&quot;, and they say it in the width of a thumbnail. */</span>
+<span class="d-add">+@media (max-width: 600px) {</span>
+<span class="d-add">+  .copresence {</span>
+<span class="d-add">+    bottom: var(--space-2);</span>
+<span class="d-add">+    left: var(--space-2);</span>
+<span class="d-add">+    padding: 5px 8px;</span>
+<span class="d-add">+    font-size: 10px;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  .copresence-text {</span>
+<span class="d-add">+    display: none;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  /* With the sentence gone the marks carry the whole message, so lift them</span>
+<span class="d-add">+     out of the muted register — 55% ink at 7px on a phone reads as lint. */</span>
+<span class="d-add">+  .copresence-mark {</span>
+<span class="d-add">+    border-color: color-mix(in srgb, var(--ink) 75%, transparent);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+@media (prefers-reduced-motion: reduce) {</span>
+<span class="d-add">+  .copresence,</span>
+<span class="d-add">+  .copresence-mark {</span>
+<span class="d-add">+    animation: none;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/CoPresence/CoPresence.tsx</span>
+            <span class="stat"><span class="d-add">+78</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · co-presence strip</span>
+        <span class="ctx-sum">Who else has this map open, drawn rather than tallied</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">CoPresence.tsx</span>
+        <span class="ctx-sum">new — ~80 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">MIN_TOTAL / MAX_MARKS</span><span class="ol-sum">new — 3 total (i.e. two others) before it speaks; 12 marks before it stops being countable</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CoPresence</span><span class="ol-sum">new — one mark per person, yours filled, plus the sentence and the small print</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Drawn, not just printed: you can count the marks against the sentence, and a number you can check is a number you can believe</li><li>Your own mark is filled and first, so &#x27;other&#x27; needs no explaining and the total cannot be read as excluding the reader</li><li>0 means both &#x27;nobody&#x27; and &#x27;we lost the socket and no longer know&#x27; — both render as silence, the only safe reading of an unknown</li><li>The small print (per network connection, foreground only, shared connections count once) lives in the title rather than on the face of it</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/CoPresence/CoPresence.tsx b/client-react/src/components/CoPresence/CoPresence.tsx</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..c8f2bc8</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/CoPresence/CoPresence.tsx</span>
+<span class="d-hunk">@@ -0,0 +1,78 @@</span>
+<span class="d-add">+import { useWebSocketContext } from &quot;../../context/WebSocketContext&quot;;</span>
+<span class="d-add">+import &quot;./CoPresence.css&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Below this we say nothing.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ *  The brief: show it only when there is more than one OTHER viewer. So two</span>
+<span class="d-add">+ *  others, plus you, is three marks — the smallest arrangement that is a room</span>
+<span class="d-add">+ *  rather than a coincidence. One other person is a pair, and a pair does not</span>
+<span class="d-add">+ *  need to be told it is a pair. */</span>
+<span class="d-add">+const MIN_TOTAL = 3;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Past this many marks the row stops being countable at a glance, which is</span>
+<span class="d-add">+ *  the entire reason it is drawn as marks. Beyond it, the marks become a</span>
+<span class="d-add">+ *  texture and the numeral carries the count. */</span>
+<span class="d-add">+const MAX_MARKS = 12;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Who else has this map open, drawn rather than tallied.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * The thing being built here is common knowledge — not &quot;how popular is this</span>
+<span class="d-add">+ * map&quot; but &quot;we are looking at this together, and we both know it&quot;. That only</span>
+<span class="d-add">+ * works if the reader believes the number, and a number nobody can check is a</span>
+<span class="d-add">+ * number people quietly discount. So the count is drawn as one mark per</span>
+<span class="d-add">+ * person: you can count the marks and see that the numeral is not lying, and</span>
+<span class="d-add">+ * the mark that is filled is YOU, which makes visible — without a footnote —</span>
+<span class="d-add">+ * that the total includes the person reading it. A count that had quietly</span>
+<span class="d-add">+ * excluded you, or padded itself, could not survive being drawn.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * The marks are hollow squares in the app&#x27;s own hand: the same bare 1.5px</span>
+<span class="d-add">+ * stroked box the mobile wordmark builds its letters from. Nothing new is</span>
+<span class="d-add">+ * introduced to say something quiet.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * What the number actually means is one hover away rather than hidden: people</span>
+<span class="d-add">+ * are counted per network connection and only while their tab is in the</span>
+<span class="d-add">+ * foreground, so a household reads as one and a buried tab reads as nobody.</span>
+<span class="d-add">+ * Both of those under-count. That is the deliberate direction — an audience</span>
+<span class="d-add">+ * that is smaller than the truth costs us nothing, and one that is larger</span>
+<span class="d-add">+ * costs us the only thing this feature has.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function CoPresence() {</span>
+<span class="d-add">+  const { viewerCount } = useWebSocketContext();</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // 0 is both &quot;nobody&quot; and &quot;we lost the socket and no longer know&quot;. Both mean</span>
+<span class="d-add">+  // the same thing here: stop claiming company.</span>
+<span class="d-add">+  if (viewerCount &lt; MIN_TOTAL) return null;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const others = viewerCount - 1;</span>
+<span class="d-add">+  const marks = Math.min(viewerCount, MAX_MARKS);</span>
+<span class="d-add">+  const overflow = viewerCount - marks;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  return (</span>
+<span class="d-add">+    &lt;aside</span>
+<span class="d-add">+      className=&quot;copresence&quot;</span>
+<span class="d-add">+      // The honest small print, on hover rather than on the face of it.</span>
+<span class="d-add">+      title={</span>
+<span class="d-add">+        &quot;Counted once per network connection, and only while a tab is in the &quot;</span>
+<span class="d-add">+        + &quot;foreground. People sharing a connection count as one, so this is &quot;</span>
+<span class="d-add">+        + &quot;more likely to be low than high.&quot;</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    &gt;</span>
+<span class="d-add">+      &lt;span className=&quot;copresence-marks&quot; aria-hidden=&quot;true&quot;&gt;</span>
+<span class="d-add">+        {Array.from({ length: marks }, (_, i) =&gt; (</span>
+<span class="d-add">+          &lt;span</span>
+<span class="d-add">+            key={i}</span>
+<span class="d-add">+            className={`copresence-mark${i === 0 ? &quot; is-you&quot; : &quot;&quot;}`}</span>
+<span class="d-add">+            // Stagger the row in from your own mark outwards, so the</span>
+<span class="d-add">+            // animation reads as &quot;and then these people&quot;, which is what it is.</span>
+<span class="d-add">+            style={{ animationDelay: `${i * 45}ms` }}</span>
+<span class="d-add">+          /&gt;</span>
+<span class="d-add">+        ))}</span>
+<span class="d-add">+        {overflow &gt; 0 &amp;&amp; &lt;span className=&quot;copresence-overflow&quot;&gt;+{overflow}&lt;/span&gt;}</span>
+<span class="d-add">+      &lt;/span&gt;</span>
+<span class="d-add">+      &lt;span className=&quot;copresence-text&quot;&gt;</span>
+<span class="d-add">+        You’re looking at this with {others} other {others === 1 ? &quot;person&quot; : &quot;people&quot;}</span>
+<span class="d-add">+      &lt;/span&gt;</span>
+<span class="d-add">+    &lt;/aside&gt;</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/CoPresence/index.ts</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/CoPresence/index.ts b/client-react/src/components/CoPresence/index.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..f7c9452</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/CoPresence/index.ts</span>
+<span class="d-hunk">@@ -0,0 +1 @@</span>
+<span class="d-add">+export { CoPresence } from &quot;./CoPresence&quot;;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+75</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · graph + proposal cards</span>
+        <span class="ctx-sum">The map layer that owns selection, proposal computation and every proposal card</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~5500 LOC — topology, votes, proposals, markers, the ProposalCard component</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports</span><span class="ol-sum">+4 lines — blockKeyOf, the audience hook</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">proposalBlockIds</span><span class="ol-sum">+22 lines — materialized blocks → server-side block ids</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">pinnedViewBlockIds / routeViewBlockIds</span><span class="ol-sum">+6 lines — one memo per interactive card</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ProposalCardProps</span><span class="ol-sum">+10 lines — viewLabel + viewBlockIds, unset on hover cards</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ProposalCard body</span><span class="ol-sum">+5 lines — the hook call, gated on interactive &amp;&amp; !minimized</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">meta line render</span><span class="ol-sum">+13 lines — the audience span</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">pinned + route call sites</span><span class="ol-sum">+8 lines — pass the label and blocks</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">topology / votes / proposals / markers</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>proposalBlockIds deliberately does NOT use RouteProposal.id — that id is a hash of the path edges and rotates on the next vote, which the client already treats as the &#x27;corridor moved&#x27; signal</li><li>Only a card that HAS a proposal has an audience: a bare block with no winner is a place, not a proposal, and nothing is counted on it</li><li>Hover cards get no viewLabel at all — a card the mouse crossed is not a view, and counting it would make the number mostly mouse trajectory</li><li>The count renders INSIDE .graph-tooltip-meta so it inherits the 106px right-padding that clears the card&#x27;s tool icons</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 5be64b6..de31494 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -64,6 +64,7 @@ import {</span>
+<span class="d-ctx">   buildNodeAdj,</span>
+<span class="d-ctx">   buildBlockIndex,</span>
+<span class="d-ctx">   touchedBlockKeys,</span>
+<span class="d-add">+  blockKeyOf,</span>
+<span class="d-ctx">   adjEdgesOf,</span>
+<span class="d-ctx">   adjShortest,</span>
+<span class="d-ctx"> } from &quot;./graphTopology&quot;;</span>
+<span class="d-hunk">@@ -89,6 +90,9 @@ import {</span>
+<span class="d-ctx">   type VoteDirection,</span>
+<span class="d-ctx"> } from &quot;../../utils/voteStore&quot;;</span>
+<span class="d-ctx"> import { castVotes, voteButtonState } from &quot;../../utils/castVote&quot;;</span>
+<span class="d-add">+import {</span>
+<span class="d-add">+  useProposalAudience, describeAudience, MIN_VIEWS_SHOWN,</span>
+<span class="d-add">+} from &quot;../../hooks/useProposalAudience&quot;;</span>
+<span class="d-ctx"> import { dlog, dwarn, derror, debugState, debugProbe } from &quot;../../utils/debugLog&quot;;</span>
+<span class="d-ctx"> import { useVotesVersion } from &quot;../../utils/useVotesVersion&quot;;</span>
+<span class="d-ctx"> import { getVoterId } from &quot;../../utils/voterIdentity&quot;;</span>
+<span class="d-hunk">@@ -3658,6 +3662,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">     [pinnedBlocks],</span>
+<span class="d-ctx">   );</span>
+<span class="d-ctx">   const pinnedSources = useVoteSources(pinnedSourceEdges);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Block ids for the audience count on each interactive card. One person who</span>
+<span class="d-add">+  // opens block A&#x27;s card and later block B&#x27;s card of the SAME corridor lands</span>
+<span class="d-add">+  // in two per-block sketches and is unioned back to one by the server.</span>
+<span class="d-add">+  const pinnedViewBlockIds = useMemo(</span>
+<span class="d-add">+    () =&gt; proposalBlockIds(topologyRef.current, pinnedBlocks), [pinnedBlocks]);</span>
+<span class="d-ctx">   const routeSources = useVoteSources(routeEdgeUnion);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // The RBTP the current selection stands for, if any — it becomes the card&#x27;s</span>
+<span class="d-hunk">@@ -3668,6 +3678,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   // nothing (ROUTE_SELECTED_MIN_COVERAGE), so several corridors can qualify at</span>
+<span class="d-ctx">   // once — the best-covered one wins the header rather than whichever ranked</span>
+<span class="d-ctx">   // first.</span>
+<span class="d-add">+  const routeViewBlockIds = useMemo(</span>
+<span class="d-add">+    () =&gt; proposalBlockIds(topologyRef.current, routeBlocks), [routeBlocks]);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   const coveredRouteProposal = useMemo(() =&gt; {</span>
+<span class="d-ctx">     void isHeatmapLoading;</span>
+<span class="d-ctx">     const topo = topologyRef.current;</span>
+<span class="d-hunk">@@ -4767,6 +4780,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           name={pinnedName}</span>
+<span class="d-ctx">           rows={pinnedVoteTypes}</span>
+<span class="d-ctx">           topKinds={isStationNetwork ? undefined : pinnedTopKinds}</span>
+<span class="d-add">+          // Only a card that HAS a proposal has an audience. A bare block with</span>
+<span class="d-add">+          // no winner is a place, not a proposal, and nothing is counted on it.</span>
+<span class="d-add">+          viewLabel={pinnedCardWinner?.label ?? null}</span>
+<span class="d-add">+          viewBlockIds={pinnedViewBlockIds}</span>
+<span class="d-ctx">           interactive</span>
+<span class="d-ctx">           getAvoidRects={getWaypointAvoidRects}</span>
+<span class="d-ctx">           edgeId={pinnedVoteEdgeId}</span>
+<span class="d-hunk">@@ -4889,6 +4906,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           coverageUnit={hasBlocksRef.current ? &quot;block&quot; : &quot;segment&quot;}</span>
+<span class="d-ctx">           votersPending={!routeUniqueRows}</span>
+<span class="d-ctx">           topKinds={routeTopKinds}</span>
+<span class="d-add">+          // The corridor&#x27;s own blocks, not the id — see proposalBlockIds. A</span>
+<span class="d-add">+          // free-drawn route that covers no RBTP has no proposal to count.</span>
+<span class="d-add">+          viewLabel={coveredRouteProposal?.label ?? null}</span>
+<span class="d-add">+          viewBlockIds={routeViewBlockIds}</span>
+<span class="d-ctx">           interactive</span>
+<span class="d-ctx">           elevated</span>
+<span class="d-ctx">           getAvoidRects={getWaypointAvoidRects}</span>
+<span class="d-hunk">@@ -4931,6 +4952,30 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx"> // directional cells (−down / +up) share one width; the net cell gets its own</span>
+<span class="d-ctx"> // (its value can be negative, so it counts the sign). Exposed as CSS custom</span>
+<span class="d-ctx"> // properties consumed by .graph-vote-cell / .graph-vote-net.</span>
+<span class="d-add">+/** The block ids behind a set of materialized blocks (each an edge group).</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ *  This is how a proposal names itself to the audience counter, and it is</span>
+<span class="d-add">+ *  deliberately NOT `RouteProposal.id`: that id is an FNV-1a hash of the</span>
+<span class="d-add">+ *  corridor&#x27;s sorted path edges, so it rotates every time a vote lengthens or</span>
+<span class="d-add">+ *  reroutes the corridor — the client already treats an id change as the</span>
+<span class="d-add">+ *  SIGNAL that a corridor moved. A counter hung on it would silently reset a</span>
+<span class="d-add">+ *  proposal&#x27;s audience to zero on the next vote. Block ids are baked artifacts</span>
+<span class="d-add">+ *  and are already the unit the vote system counts in.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ *  Negative keys are legitimate: `blockKeyOf` returns `-(edgeId + 2)` on maps</span>
+<span class="d-add">+ *  with no block layer, which still gives every segment a stable id. */</span>
+<span class="d-add">+function proposalBlockIds(</span>
+<span class="d-add">+  topo: GraphTopology | null,</span>
+<span class="d-add">+  blocks: ArrayLike&lt;number&gt;[] | null,</span>
+<span class="d-add">+): number[] | null {</span>
+<span class="d-add">+  if (!topo || !blocks || blocks.length === 0) return null;</span>
+<span class="d-add">+  const out: number[] = [];</span>
+<span class="d-add">+  for (const group of blocks) {</span>
+<span class="d-add">+    if (group.length &gt; 0) out.push(blockKeyOf(topo, group[0]));</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return out.length &gt; 0 ? out : null;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> function voteColumnWidths(rows: VoteTypeRow[]): CSSProperties {</span>
+<span class="d-ctx">   let cellChars = 1; // widest unsigned count among all up/down values</span>
+<span class="d-ctx">   let netChars = 1;  // widest net value, including a leading &quot;−&quot; when negative</span>
+<span class="d-hunk">@@ -5017,6 +5062,16 @@ interface ProposalCardProps {</span>
+<span class="d-ctx">    *  sums, which count one route voter once per block. */</span>
+<span class="d-ctx">   votersPending?: boolean;</span>
+<span class="d-ctx">   interactive?: boolean;</span>
+<span class="d-add">+  /** The proposal this card is ABOUT, for the audience line: its vote-type</span>
+<span class="d-add">+   *  label and the block ids it spans. Both are needed — the count is scoped</span>
+<span class="d-add">+   *  per type so a bike-lane corridor&#x27;s readers never show up as the audience</span>
+<span class="d-add">+   *  for a signal-timing pin on the same corner.</span>
+<span class="d-add">+   *</span>
+<span class="d-add">+   *  Left unset on hover cards on purpose. A card the mouse crossed on its way</span>
+<span class="d-add">+   *  somewhere else is not a view, and counting it would make the number</span>
+<span class="d-add">+   *  mostly a record of mouse trajectories. */</span>
+<span class="d-add">+  viewLabel?: string | null;</span>
+<span class="d-add">+  viewBlockIds?: number[] | null;</span>
+<span class="d-ctx">   /** Lifts the card one z tier above sibling cards (route summary vs transient</span>
+<span class="d-ctx">    *  hover). Portals mount at different times, so DOM order can&#x27;t order them. */</span>
+<span class="d-ctx">   elevated?: boolean;</span>
+<span class="d-hunk">@@ -5125,6 +5180,7 @@ function CoverageCell({</span>
+<span class="d-ctx"> function ProposalCard({</span>
+<span class="d-ctx">   winner, eyebrow = &quot;Top Proposal&quot;, screenX, screenY, name, metaText = null, rows, topKinds,</span>
+<span class="d-ctx">   coverage = null, coverageUnit = &quot;block&quot;, votersPending = false,</span>
+<span class="d-add">+  viewLabel = null, viewBlockIds = null,</span>
+<span class="d-ctx">   interactive = false, elevated = false, getAvoidRects, avoidKey, donateUrlFor, edgeId = null, blocks = null, mode = &quot;&quot;, shareUrl = null, streetViewLatLng = null, voteTypes, sources, onVote, onRemove, removeLabel = &quot;Remove this point&quot;, onHoverChange, registerEl,</span>
+<span class="d-ctx"> }: ProposalCardProps) {</span>
+<span class="d-ctx">   const [copied, setCopied] = useState(false);</span>
+<span class="d-hunk">@@ -5139,6 +5195,12 @@ function ProposalCard({</span>
+<span class="d-ctx">   // from the top-bar banner. The value itself is unused; the subscription is.</span>
+<span class="d-ctx">   void useVotesVersion();</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // Distinct people who have opened this proposal. Only interactive cards that</span>
+<span class="d-add">+  // are actually expanded on screen count as reading — a minimized card is a</span>
+<span class="d-add">+  // pill with the label on it, which nobody is reading a proposal from.</span>
+<span class="d-add">+  const audience = useProposalAudience(</span>
+<span class="d-add">+    viewLabel, viewBlockIds, interactive &amp;&amp; !minimized);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   // Anchor the card to the point and flip it into whichever quadrant has room,</span>
+<span class="d-ctx">   // then clamp so an oversized card never clips a viewport edge. Measured from</span>
+<span class="d-ctx">   // the card&#x27;s real size (offsetWidth/Height ignore the CSS scale-in animation)</span>
+<span class="d-hunk">@@ -5390,6 +5452,19 @@ function ProposalCard({</span>
+<span class="d-ctx">                 ?? (rows.length &gt; 0</span>
+<span class="d-ctx">                   ? `${rows.length} proposal${rows.length !== 1 ? &quot;s&quot; : &quot;&quot;}`</span>
+<span class="d-ctx">                   : &quot;No votes yet&quot;)}</span>
+<span class="d-add">+              {/* The audience, riding the meta line rather than a line of its</span>
+<span class="d-add">+                  own: it stays inside the 106px right-padding that clears the</span>
+<span class="d-add">+                  tool icons, and it reads as one more fact about the selection</span>
+<span class="d-add">+                  instead of announcing itself. Nothing is rendered while the</span>
+<span class="d-add">+                  count is unknown or below the floor — no skeleton, no zero,</span>
+<span class="d-add">+                  no dash. A number that appears only when it has something</span>
+<span class="d-add">+                  true to say is the whole point. */}</span>
+<span class="d-add">+              {audience &amp;&amp; audience.n &gt;= MIN_VIEWS_SHOWN &amp;&amp; (</span>
+<span class="d-add">+                &lt;span className=&quot;graph-tooltip-audience&quot;&gt;</span>
+<span class="d-add">+                  &lt;span className=&quot;graph-tooltip-audience-sep&quot; aria-hidden=&quot;true&quot;&gt; · &lt;/span&gt;</span>
+<span class="d-add">+                  {describeAudience(audience)}</span>
+<span class="d-add">+                &lt;/span&gt;</span>
+<span class="d-add">+              )}</span>
+<span class="d-ctx">             &lt;/div&gt;</span>
+<span class="d-ctx">             {rows.length &gt; 0 &amp;&amp; (</span>
+<span class="d-ctx">               &lt;div</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/index.ts</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · component barrel</span>
+        <span class="ctx-sum">Re-exports for the top-level components</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">index.ts</span>
+        <span class="ctx-sum">~15 lines</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">exports</span><span class="ol-sum">+1 line — CoPresence</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Matches the existing per-folder pattern (EventBanner, ErrorBoundary)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/index.ts b/client-react/src/components/index.ts</span>
+<span class="d-meta">index 550fca3..5acd87e 100644</span>
+<span class="d-meta">--- a/client-react/src/components/index.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/index.ts</span>
+<span class="d-hunk">@@ -12,3 +12,4 @@ export { Landing } from &quot;./Landing&quot;;</span>
+<span class="d-ctx"> export { BoundaryLayer } from &quot;./BoundaryLayer&quot;;</span>
+<span class="d-ctx"> export { ModeSwitcher } from &quot;./ModeSwitcher&quot;;</span>
+<span class="d-ctx"> export { ErrorBoundary } from &quot;./ErrorBoundary/ErrorBoundary&quot;;</span>
+<span class="d-add">+export { CoPresence } from &quot;./CoPresence&quot;;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/context/WebSocketContext.tsx</span>
+            <span class="stat"><span class="d-add">+115</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · WebSocket provider</span>
+        <span class="ctx-sum">The single socket the whole app shares: delta fan-out, sync repair, and now the audience state</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">WebSocketContext.tsx</span>
+        <span class="ctx-sum">~330 LOC — connect/reconnect, message dispatch, subscriber registries</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">ViewCount type + context surface</span><span class="ol-sum">+30 lines — viewerCount, reportProposalView</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">audience refs</span><span class="ol-sum">+12 lines — pending view replies keyed by echo token</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ws.onopen</span><span class="ol-sum">+6 lines — correct the server&#x27;s visible-by-default assumption on a background reconnect</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ws.onmessage</span><span class="ol-sum">+10 lines — the presence and views branches</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ws.onclose</span><span class="ol-sum">+5 lines — zero the count and settle every pending reply</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">visibility effect</span><span class="ol-sum">+20 lines — one message per visibilitychange, plus pageshow for bfcache</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">reportProposalView</span><span class="ol-sum">+28 lines — promise keyed on an echo token, 8s timeout</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">delta / sync / open registries</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Losing the socket zeroes the count: leaving the last number on screen would keep asserting company we have no evidence for</li><li>visibilitychange is not throttled, so one message per transition keeps the room honest with no timer — which matters because this app throttles background tabs hard</li><li>The echo token is what stops a late reply being painted onto whichever proposal the reader has since opened</li><li>A view is never reported while document.hidden, independent of what the server checks</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/context/WebSocketContext.tsx b/client-react/src/context/WebSocketContext.tsx</span>
+<span class="d-meta">index 69f357c..5d29201 100644</span>
+<span class="d-meta">--- a/client-react/src/context/WebSocketContext.tsx</span>
+<span class="d-meta">+++ b/client-react/src/context/WebSocketContext.tsx</span>
+<span class="d-hunk">@@ -30,6 +30,18 @@ export interface VoteSync {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> type SyncListener = (sync: VoteSync) =&gt; void;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/** The server&#x27;s answer to one view report: how many distinct people have</span>
+<span class="d-add">+ *  opened a proposal of this type covering any part of this one, and whether</span>
+<span class="d-add">+ *  the sketch behind it is still small enough to be exact. */</span>
+<span class="d-add">+export interface ViewCount {</span>
+<span class="d-add">+  n: number;</span>
+<span class="d-add">+  exact: boolean;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** How long to wait for a `views` reply before giving up on it. Generous:</span>
+<span class="d-add">+ *  the server drains inbound once per socket tick, so a second is normal. */</span>
+<span class="d-add">+const VIEW_REPLY_TIMEOUT_MS = 8000;</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> interface WebSocketContextValue {</span>
+<span class="d-ctx">   connectionStatus: string;</span>
+<span class="d-ctx">   subscribeToDelta: (listener: DeltaListener) =&gt; () =&gt; void;</span>
+<span class="d-hunk">@@ -40,6 +52,15 @@ interface WebSocketContextValue {</span>
+<span class="d-ctx">    *  on reconnect — the two moments the tab knows it may have missed deltas</span>
+<span class="d-ctx">    *  but has no arriving delta to notice the gap with. */</span>
+<span class="d-ctx">   requestSync: (sinceRev: number) =&gt; void;</span>
+<span class="d-add">+  /** Distinct people with this map open and in the foreground, INCLUDING us.</span>
+<span class="d-add">+   *  0 means &quot;we don&#x27;t know&quot; as well as &quot;nobody&quot; — both render as silence,</span>
+<span class="d-add">+   *  which is the only safe reading of an unknown. */</span>
+<span class="d-add">+  viewerCount: number;</span>
+<span class="d-add">+  /** Report that a proposal card has been read, and get its audience back.</span>
+<span class="d-add">+   *  Resolves null if the socket is down or the reply never lands: a count we</span>
+<span class="d-add">+   *  did not hear is not a count we may guess at. */</span>
+<span class="d-add">+  reportProposalView: (</span>
+<span class="d-add">+    label: string, blockIds: number[]) =&gt; Promise&lt;ViewCount | null&gt;;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> const WebSocketContext = createContext&lt;WebSocketContextValue | null&gt;(null);</span>
+<span class="d-hunk">@@ -55,6 +76,19 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {</span>
+<span class="d-ctx">   const syncListenersRef = useRef&lt;Set&lt;SyncListener&gt;&gt;(new Set());</span>
+<span class="d-ctx">   const openListenersRef = useRef&lt;Set&lt;() =&gt; void&gt;&gt;(new Set());</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // ── Audience state (co-presence + proposal view counts) ───────────────────</span>
+<span class="d-add">+  // Both ride this socket rather than a channel of their own. A second</span>
+<span class="d-add">+  // connection for a viewer count would double the connection count on every</span>
+<span class="d-add">+  // map, and — worse for a feature whose entire product is trustworthiness —</span>
+<span class="d-add">+  // it would let presence and votes disagree about whether a client is still</span>
+<span class="d-add">+  // there.</span>
+<span class="d-add">+  const [viewerCount, setViewerCount] = useState(0);</span>
+<span class="d-add">+  // In-flight `view` reports, keyed by the token echoed back in the reply, so</span>
+<span class="d-add">+  // an answer that lands after the reader has moved to another card is</span>
+<span class="d-add">+  // discarded rather than painted onto the wrong proposal.</span>
+<span class="d-add">+  const pendingViewsRef = useRef&lt;Map&lt;string, (v: ViewCount | null) =&gt; void&gt;&gt;(new Map());</span>
+<span class="d-add">+  const viewSeqRef = useRef(0);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   const connect = useCallback(() =&gt; {</span>
+<span class="d-ctx">     setConnectionStatus(&quot;connecting...&quot;);</span>
+<span class="d-ctx">     // Browsers can&#x27;t set headers on a WS handshake, so a gated map&#x27;s token</span>
+<span class="d-hunk">@@ -76,6 +110,14 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {</span>
+<span class="d-ctx">       dlog(&quot;ws&quot;, &quot;connected&quot;, wsUrl);</span>
+<span class="d-ctx">       setConnectionStatus(&quot;connected&quot;);</span>
+<span class="d-ctx">       backoffRef.current = 1000;</span>
+<span class="d-add">+      // A fresh connection is assumed VISIBLE by the server, which is right</span>
+<span class="d-add">+      // for the common case and wrong for a reconnect that happened while the</span>
+<span class="d-add">+      // tab was buried. Correct it immediately rather than let a background</span>
+<span class="d-add">+      // tab stand in someone&#x27;s room.</span>
+<span class="d-add">+      if (document.hidden) {</span>
+<span class="d-add">+        try { ws.send(JSON.stringify({ type: &quot;here&quot;, visible: false })); }</span>
+<span class="d-add">+        catch { /* the onclose path will retry the whole connection */ }</span>
+<span class="d-add">+      }</span>
+<span class="d-ctx">       // A reconnect is a gap by definition: deltas published while the socket</span>
+<span class="d-ctx">       // was down were never delivered, and gap detection only fires on the</span>
+<span class="d-ctx">       // NEXT delta to arrive. Tell subscribers so they can ask for a catch-up.</span>
+<span class="d-hunk">@@ -141,6 +183,16 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {</span>
+<span class="d-ctx">               cb(delta as VoteDelta);</span>
+<span class="d-ctx">             }</span>
+<span class="d-ctx">           }</span>
+<span class="d-add">+        } else if (msg.type === &quot;presence&quot;) {</span>
+<span class="d-add">+          // Server-pushed and edge-triggered: it only arrives when the number</span>
+<span class="d-add">+          // actually changed, so a quiet map costs nothing.</span>
+<span class="d-add">+          setViewerCount(typeof msg.n === &quot;number&quot; &amp;&amp; msg.n &gt; 0 ? msg.n : 0);</span>
+<span class="d-add">+        } else if (msg.type === &quot;views&quot;) {</span>
+<span class="d-add">+          const resolve = pendingViewsRef.current.get(String(msg.k));</span>
+<span class="d-add">+          if (resolve) {</span>
+<span class="d-add">+            pendingViewsRef.current.delete(String(msg.k));</span>
+<span class="d-add">+            resolve({ n: Number(msg.n) || 0, exact: msg.exact !== false });</span>
+<span class="d-add">+          }</span>
+<span class="d-ctx">         }</span>
+<span class="d-ctx">         // &quot;init&quot; and &quot;keepalive&quot; are handled silently</span>
+<span class="d-ctx">       } catch (e) {</span>
+<span class="d-hunk">@@ -151,6 +203,12 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {</span>
+<span class="d-ctx">     ws.onclose = () =&gt; {</span>
+<span class="d-ctx">       dwarn(&quot;ws&quot;, `disconnected — reconnecting in ${backoffRef.current}ms`);</span>
+<span class="d-ctx">       setConnectionStatus(&quot;disconnected&quot;);</span>
+<span class="d-add">+      // We can no longer see the room, so we must stop claiming to. Leaving</span>
+<span class="d-add">+      // the last count on screen would keep asserting company we have no</span>
+<span class="d-add">+      // evidence for — the one direction this feature cannot be wrong in.</span>
+<span class="d-add">+      setViewerCount(0);</span>
+<span class="d-add">+      for (const resolve of pendingViewsRef.current.values()) resolve(null);</span>
+<span class="d-add">+      pendingViewsRef.current.clear();</span>
+<span class="d-ctx">       const delay = backoffRef.current;</span>
+<span class="d-ctx">       backoffRef.current = Math.min(delay * 2, MAX_BACKOFF);</span>
+<span class="d-ctx">       reconnectTimeoutRef.current = setTimeout(connect, delay);</span>
+<span class="d-hunk">@@ -198,9 +256,64 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {</span>
+<span class="d-ctx">     ws.send(JSON.stringify({ type: &quot;sync&quot;, since: sinceRev }));</span>
+<span class="d-ctx">   }, []);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // &quot;You are looking at this with N other people&quot; has to mean LOOKING. This</span>
+<span class="d-add">+  // app throttles background tabs hard enough that a buried viewer is doing</span>
+<span class="d-add">+  // nothing at all, and counting them would pad the number with people who</span>
+<span class="d-add">+  // are, truthfully, elsewhere. visibilitychange is not throttled, so one</span>
+<span class="d-add">+  // message on each transition keeps the room honest without a timer.</span>
+<span class="d-add">+  useEffect(() =&gt; {</span>
+<span class="d-add">+    const report = () =&gt; {</span>
+<span class="d-add">+      const ws = wsRef.current;</span>
+<span class="d-add">+      if (!ws || ws.readyState !== WebSocket.OPEN) return;</span>
+<span class="d-add">+      try {</span>
+<span class="d-add">+        ws.send(JSON.stringify({ type: &quot;here&quot;, visible: !document.hidden }));</span>
+<span class="d-add">+      } catch { /* reconnect will re-report on open */ }</span>
+<span class="d-add">+      // Hidden means we stop being told the count, so stop showing one.</span>
+<span class="d-add">+      if (document.hidden) setViewerCount(0);</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+    document.addEventListener(&quot;visibilitychange&quot;, report);</span>
+<span class="d-add">+    // bfcache restore doesn&#x27;t fire visibilitychange in every browser.</span>
+<span class="d-add">+    window.addEventListener(&quot;pageshow&quot;, report);</span>
+<span class="d-add">+    return () =&gt; {</span>
+<span class="d-add">+      document.removeEventListener(&quot;visibilitychange&quot;, report);</span>
+<span class="d-add">+      window.removeEventListener(&quot;pageshow&quot;, report);</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+  }, []);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const reportProposalView = useCallback(</span>
+<span class="d-add">+    (label: string, blockIds: number[]): Promise&lt;ViewCount | null&gt; =&gt; {</span>
+<span class="d-add">+      const ws = wsRef.current;</span>
+<span class="d-add">+      if (!ws || ws.readyState !== WebSocket.OPEN</span>
+<span class="d-add">+          || !label || blockIds.length === 0 || document.hidden) {</span>
+<span class="d-add">+        return Promise.resolve(null);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+      const key = String(++viewSeqRef.current);</span>
+<span class="d-add">+      return new Promise&lt;ViewCount | null&gt;((resolve) =&gt; {</span>
+<span class="d-add">+        let done = false;</span>
+<span class="d-add">+        const settle = (v: ViewCount | null) =&gt; {</span>
+<span class="d-add">+          if (done) return;</span>
+<span class="d-add">+          done = true;</span>
+<span class="d-add">+          pendingViewsRef.current.delete(key);</span>
+<span class="d-add">+          resolve(v);</span>
+<span class="d-add">+        };</span>
+<span class="d-add">+        pendingViewsRef.current.set(key, settle);</span>
+<span class="d-add">+        setTimeout(() =&gt; settle(null), VIEW_REPLY_TIMEOUT_MS);</span>
+<span class="d-add">+        try {</span>
+<span class="d-add">+          ws.send(JSON.stringify(</span>
+<span class="d-add">+            { type: &quot;view&quot;, k: key, t: label, b: blockIds }));</span>
+<span class="d-add">+        } catch {</span>
+<span class="d-add">+          settle(null);</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+      });</span>
+<span class="d-add">+    }, []);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   const value = useMemo(</span>
+<span class="d-del">-    () =&gt; ({ connectionStatus, subscribeToDelta, subscribeToSync, subscribeToOpen, requestSync }),</span>
+<span class="d-del">-    [connectionStatus, subscribeToDelta, subscribeToSync, subscribeToOpen, requestSync],</span>
+<span class="d-add">+    () =&gt; ({</span>
+<span class="d-add">+      connectionStatus, subscribeToDelta, subscribeToSync, subscribeToOpen,</span>
+<span class="d-add">+      requestSync, viewerCount, reportProposalView,</span>
+<span class="d-add">+    }),</span>
+<span class="d-add">+    [connectionStatus, subscribeToDelta, subscribeToSync, subscribeToOpen,</span>
+<span class="d-add">+      requestSync, viewerCount, reportProposalView],</span>
+<span class="d-ctx">   );</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   return (</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/hooks/useProposalAudience.ts</span>
+            <span class="stat"><span class="d-add">+0</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · audience hook</span>
+        <span class="ctx-sum">The dwell rule, the display floor, and how the count is spoken</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">useProposalAudience.ts</span>
+        <span class="ctx-sum">new — ~100 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">VIEW_DWELL_MS</span><span class="ol-sum">new — 2s: longer than a glance, shorter than reading a row of proposals</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">MIN_VIEWS_SHOWN</span><span class="ol-sum">new — 2, below which nothing renders at all</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">useProposalAudience</span><span class="ol-sum">new — string-keyed effect, one report per (label, blocks) per mount</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">describeAudience</span><span class="ol-sum">new — &#x27;N people have opened this&#x27; / &#x27;about 1.2k&#x27; above the exactness threshold</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The key is a STRING built from label + block ids: the arrays are rebuilt on every render, so a reference comparison would re-fire the effect forever</li><li>Moving to another proposal clears the number immediately — showing the previous card&#x27;s audience while this one loads attaches a real count to the wrong proposal</li><li>&#x27;N people have opened this&#x27;, not &#x27;N views&#x27;: views are cheap, everyone knows it, and a view count gets discounted on sight</li><li>Above the exactness threshold the copy stops pretending — the HLL&#x27;s error is no longer smaller than the last digit we would print</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/hooks/useProposalAudience.ts b/client-react/src/hooks/useProposalAudience.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..5d108c7</span>
+<span class="d-ctx">Binary files /dev/null and b/client-react/src/hooks/useProposalAudience.ts differ</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/styles/globals.css</span>
+            <span class="stat"><span class="d-add">+41</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · global styles</span>
+        <span class="ctx-sum">Design tokens, topbar, map controls, and the proposal card</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">globals.css</span>
+        <span class="ctx-sum">~2600 lines — tokens, layout, the graph indicator/proposal card</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">:root tokens / topbar / controls</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">.graph-indicator-modal + body</span><span class="ol-sum">unchanged — name at 90% ink, meta at 70%</span></li><li class="changed"><span class="ol-label">.graph-tooltip-audience</span><span class="ol-sum">+41 lines — 45% ink, tabular numerals, fade-in, touch + reduced-motion variants</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">.graph-proposal-rows and below</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>45% ink puts it a step below the meta line it trails — the fund-chip rule: the faintest thing on the card should be what you find, not what you&#x27;re shown</li><li>It fades rather than appears: it lands seconds after the card, and an unannounced layout change at that distance reads as a glitch</li><li>@media (hover: none) lifts it to 62%, the same reason the row links and fund chips lift on touch</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/styles/globals.css b/client-react/src/styles/globals.css</span>
+<span class="d-meta">index 78eaaf3..50a1f38 100644</span>
+<span class="d-meta">--- a/client-react/src/styles/globals.css</span>
+<span class="d-meta">+++ b/client-react/src/styles/globals.css</span>
+<span class="d-hunk">@@ -1918,6 +1918,47 @@ body.dragging-from-path .leaflet-desirePathPane-pane {</span>
+<span class="d-ctx">   margin-bottom: 4px;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/* How many people have opened this proposal. Rides the meta line — inside the</span>
+<span class="d-add">+   right-padding that clears the tool icons, and in the same breath as the</span>
+<span class="d-add">+   block count — because it is one more fact about the selection, not an</span>
+<span class="d-add">+   announcement. A step quieter than the meta text it trails: the fund-chip</span>
+<span class="d-add">+   rule, that the faintest thing on the card should be the thing you find</span>
+<span class="d-add">+   rather than the thing you&#x27;re shown.</span>
+<span class="d-add">+</span>
+<span class="d-add">+   It fades rather than appears: it arrives seconds after the card, and an</span>
+<span class="d-add">+   unannounced layout change at that distance reads as a glitch. Nothing is</span>
+<span class="d-add">+   ever rendered in its place while it is unknown — no skeleton, no zero, no</span>
+<span class="d-add">+   dash — because a number that only appears when it has something true to say</span>
+<span class="d-add">+   is the whole point of the feature. */</span>
+<span class="d-add">+.graph-indicator-modal-body .graph-tooltip-audience {</span>
+<span class="d-add">+  color: color-mix(in srgb, var(--ink) 45%, transparent);</span>
+<span class="d-add">+  font-variant-numeric: tabular-nums;</span>
+<span class="d-add">+  animation: audience-in 260ms ease-out both;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.graph-tooltip-audience-sep {</span>
+<span class="d-add">+  opacity: 0.6;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+@keyframes audience-in {</span>
+<span class="d-add">+  from { opacity: 0; }</span>
+<span class="d-add">+  to   { opacity: 1; }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* 11px at 45% ink on a phone reads as nothing there at all — the same reason</span>
+<span class="d-add">+   the row links and fund chips lift on touch. */</span>
+<span class="d-add">+@media (hover: none) {</span>
+<span class="d-add">+  .graph-indicator-modal-body .graph-tooltip-audience {</span>
+<span class="d-add">+    color: color-mix(in srgb, var(--ink) 62%, transparent);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+@media (prefers-reduced-motion: reduce) {</span>
+<span class="d-add">+  .graph-indicator-modal-body .graph-tooltip-audience {</span>
+<span class="d-add">+    animation: none;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> .graph-indicator-modal-body .graph-tooltip-types {</span>
+<span class="d-ctx">   margin-top: 4px;</span>
+<span class="d-ctx">   padding-top: 4px;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/debugLog.ts</span>
+            <span class="stat"><span class="d-add">+2</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · debug logging</span>
+        <span class="ctx-sum">Named-tab debug channels (docs/debugging.md): ?tab=&lt;name&gt; turns them all on</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">debugLog.ts</span>
+        <span class="ctx-sum">~150 LOC — channel list, enable/disable, dlog/dwarn/derror</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">DebugChannel union</span><span class="ol-sum">+1 line — &#x27;audience&#x27;</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ALL_CHANNELS</span><span class="ol-sum">+1 entry</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">parseSpec / dlog / dumpState</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The channel earned itself during verification: it is what showed that a plain block card reports nothing, and that a hidden tab refuses to report at all</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/debugLog.ts b/client-react/src/utils/debugLog.ts</span>
+<span class="d-meta">index ad55ebb..fe56a74 100644</span>
+<span class="d-meta">--- a/client-react/src/utils/debugLog.ts</span>
+<span class="d-meta">+++ b/client-react/src/utils/debugLog.ts</span>
+<span class="d-hunk">@@ -25,11 +25,12 @@ export type DebugChannel =</span>
+<span class="d-ctx">   | &quot;proposals&quot;  // route-proposal recomputes (counts + timing)</span>
+<span class="d-ctx">   | &quot;maplibre&quot;   // MapLibre lifecycle: load, webgl fallback, source errors</span>
+<span class="d-ctx">   | &quot;sticker&quot;    // scanned-sticker resolution: lookup, location, pinning</span>
+<span class="d-add">+  | &quot;audience&quot;   // proposal view counts + live co-presence</span>
+<span class="d-ctx">   | &quot;ws&quot;;        // websocket connect/disconnect/messages</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> const ALL_CHANNELS: readonly DebugChannel[] = [</span>
+<span class="d-ctx">   &quot;topo&quot;, &quot;votes&quot;, &quot;cast&quot;, &quot;store&quot;, &quot;blocks&quot;, &quot;proposals&quot;, &quot;maplibre&quot;,</span>
+<span class="d-del">-  &quot;sticker&quot;, &quot;ws&quot;,</span>
+<span class="d-add">+  &quot;sticker&quot;, &quot;audience&quot;, &quot;ws&quot;,</span>
+<span class="d-ctx"> ];</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> const STORAGE_KEY = &quot;cityedit_debug&quot;;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/app.py</span>
+            <span class="stat"><span class="d-add">+136</span> / <span class="d-del">-6</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Server · WebSocket handler</span>
+        <span class="ctx-sum">The per-map live socket: delta fan-out from the hub, plus the two audience features riding the same connection</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">app.py</span>
+        <span class="ctx-sum">~2700 LOC — REST API, the WS handler, vote path; this diff touches imports, the registry, and the socket</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports</span><span class="ol-sum">+2 lines — presence, view_counts</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">delta_hub construction</span><span class="ol-sum">+20 lines — presence_registry + the view rate-limit knobs</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_ws_handle_inbound</span><span class="ol-sum">+60 lines — the `here` and `view` branches; hello/sync unchanged</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ws() handshake</span><span class="ol-sum">+18 lines — per-connection identity from the handshake IP, arrive()</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ws() loop</span><span class="ol-sum">+26 lines — heartbeat + edge-triggered presence push, placed BEFORE the queue drain</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ws() finally</span><span class="ol-sum">+2 lines — depart()</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">REST routes / vote path</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>identity = get_client_ip() taken from the HANDSHAKE, never from anything the client sends — honest (a client cannot claim to be several people) and private (it is never asked)</li><li>Presence maintenance sits BEFORE the q.get drain: the `continue` on a successful drain skips the rest of the loop, so anything below it stops running on a busy map</li><li>Edge-triggered push — only when n actually changes — so a steady room costs nothing</li><li>A hidden tab is not pushed the count at all: it is not in the set, so n would exclude it while the client renders &#x27;n - 1 others&#x27; assuming it is counted</li><li>Token bucket rather than a flat interval: closing a point card and opening a route card is two legitimate views inside one second, and the flat rule dropped the second</li><li>The server re-checks visibility on `view` even though the client already refuses — presence is the server&#x27;s fact and the client&#x27;s is only a claim</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/app.py b/server/app.py</span>
+<span class="d-meta">index 36909f5..45ace41 100644</span>
+<span class="d-meta">--- a/server/app.py</span>
+<span class="d-meta">+++ b/server/app.py</span>
+<span class="d-hunk">@@ -33,6 +33,8 @@ import vote_migration</span>
+<span class="d-ctx"> import block_votes</span>
+<span class="d-ctx"> import database</span>
+<span class="d-ctx"> import delta_hub as delta_hub_mod</span>
+<span class="d-add">+import presence</span>
+<span class="d-add">+import view_counts</span>
+<span class="d-ctx"> from cities import CITIES, DEFAULT_CITY_ID, get_city, all_cities</span>
+<span class="d-ctx"> from graph_registry import GraphRegistry, OsrmRegistry, STATION_NETWORKS</span>
+<span class="d-ctx"> from osrm_router import extract_all_segments</span>
+<span class="d-hunk">@@ -847,6 +849,26 @@ if os.environ.get(&quot;SKIP_WARMUP&quot;) != &quot;1&quot;:</span>
+<span class="d-ctx"> delta_hub = delta_hub_mod.DeltaHub(</span>
+<span class="d-ctx">     lambda: redis.Redis(host=redis_host, port=redis_port, db=0, decode_responses=True))</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+# Live co-presence, shared across replicas via Redis (presence.py). It rides</span>
+<span class="d-add">+# the SAME socket the delta hub does — a second channel for a viewer count</span>
+<span class="d-add">+# would double the connection count for a number, and would let presence and</span>
+<span class="d-add">+# votes disagree about whether a client is still there.</span>
+<span class="d-add">+presence_registry = presence.Presence(redis_client)</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Longest vote-type label a `view` message may carry, matched to the vote path.</span>
+<span class="d-add">+VIEW_LABEL_MAX = 128</span>
+<span class="d-add">+# Views are rate-limited by a token bucket: VIEW_BURST at once, refilled at</span>
+<span class="d-add">+# VIEW_REFILL_PER_SEC. This is a WORK bound, not an integrity control — PFADD</span>
+<span class="d-add">+# is idempotent, so no amount of replay can move a count. A flat minimum</span>
+<span class="d-add">+# interval was the first version and it was wrong: closing a point card and</span>
+<span class="d-add">+# opening a route card lands two DIFFERENT, entirely legitimate views inside a</span>
+<span class="d-add">+# second, and the flat rule silently dropped the second one. Dropping a</span>
+<span class="d-add">+# proposal somebody genuinely read is a quiet under-count with no upper bound</span>
+<span class="d-add">+# on how often it happens, which is not a failure worth accepting to save a</span>
+<span class="d-add">+# Redis pipeline.</span>
+<span class="d-add">+VIEW_BURST = 4.0</span>
+<span class="d-add">+VIEW_REFILL_PER_SEC = 0.5</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # ── Helpers ────────────────────────────────────────────────────────────────</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1264,10 +1286,10 @@ def map_auth(slug):</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # ── WebSocket (delta-based, per-map) ─────────────────────────────────────────</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-def _ws_handle_inbound(ws, slug: str, sub, raw) -&gt; None:</span>
+<span class="d-add">+def _ws_handle_inbound(ws, slug: str, sub, raw, conn=None) -&gt; None:</span>
+<span class="d-ctx">     &quot;&quot;&quot;Handle one client→server WS message. Never raises into the pump loop.</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-    Two messages exist:</span>
+<span class="d-add">+    Four messages exist:</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">       {&quot;type&quot;:&quot;hello&quot;,&quot;bin&quot;:1}     late fallback for announcing binary</span>
+<span class="d-ctx">                                    support. The handshake `?bin=1` is the</span>
+<span class="d-hunk">@@ -1283,6 +1305,21 @@ def _ws_handle_inbound(ws, slug: str, sub, raw) -&gt; None:</span>
+<span class="d-ctx">                                    this, a backgrounded tab stayed stale until</span>
+<span class="d-ctx">                                    the NEXT vote tripped gap detection, and</span>
+<span class="d-ctx">                                    then paid a full ~57 KB refetch.</span>
+<span class="d-add">+      {&quot;type&quot;:&quot;here&quot;,&quot;visible&quot;:B}  this tab became visible / hidden. Presence</span>
+<span class="d-add">+                                   counts people who are LOOKING, and a</span>
+<span class="d-add">+                                   backgrounded tab in this app is throttled</span>
+<span class="d-add">+                                   to a standstill, so a hidden tab leaves the</span>
+<span class="d-add">+                                   room (presence.py). The socket stays open.</span>
+<span class="d-add">+      {&quot;type&quot;:&quot;view&quot;,&quot;t&quot;:&quot;label&quot;,   a proposal card of type `t` spanning</span>
+<span class="d-add">+                &quot;b&quot;:[N,...]}        blocks `b` has been open long enough to</span>
+<span class="d-add">+                                    count as read. Records the viewer into</span>
+<span class="d-add">+                                    every one of those blocks&#x27; sketches and</span>
+<span class="d-add">+                                    replies with the union-deduped audience</span>
+<span class="d-add">+                                    (view_counts.py).</span>
+<span class="d-add">+</span>
+<span class="d-add">+    `conn` carries the per-connection state the last two need (the viewer&#x27;s</span>
+<span class="d-add">+    counting identity and the visibility flag); it is None only in tests that</span>
+<span class="d-add">+    exercise the first two.</span>
+<span class="d-ctx">     &quot;&quot;&quot;</span>
+<span class="d-ctx">     try:</span>
+<span class="d-ctx">         if isinstance(raw, bytes):</span>
+<span class="d-hunk">@@ -1294,6 +1331,52 @@ def _ws_handle_inbound(ws, slug: str, sub, raw) -&gt; None:</span>
+<span class="d-ctx">     if kind == &quot;hello&quot;:</span>
+<span class="d-ctx">         sub.binary = bool(msg.get(&quot;bin&quot;))</span>
+<span class="d-ctx">         return</span>
+<span class="d-add">+    if kind == &quot;here&quot; and conn is not None:</span>
+<span class="d-add">+        visible = bool(msg.get(&quot;visible&quot;))</span>
+<span class="d-add">+        if visible == conn[&quot;visible&quot;]:</span>
+<span class="d-add">+            return</span>
+<span class="d-add">+        conn[&quot;visible&quot;] = visible</span>
+<span class="d-add">+        if visible:</span>
+<span class="d-add">+            presence_registry.arrive(slug, conn[&quot;identity&quot;])</span>
+<span class="d-add">+        else:</span>
+<span class="d-add">+            presence_registry.depart(slug, conn[&quot;identity&quot;])</span>
+<span class="d-add">+        # Force the next tick to re-read and re-push: the caller&#x27;s own</span>
+<span class="d-add">+        # arrival/departure is the one change it can&#x27;t learn about from a</span>
+<span class="d-add">+        # count it is itself part of.</span>
+<span class="d-add">+        conn[&quot;last_presence_sent&quot;] = None</span>
+<span class="d-add">+        return</span>
+<span class="d-add">+    if kind == &quot;view&quot; and conn is not None:</span>
+<span class="d-add">+        label = msg.get(&quot;t&quot;)</span>
+<span class="d-add">+        blocks = view_counts.normalize_blocks(msg.get(&quot;b&quot;))</span>
+<span class="d-add">+        if not isinstance(label, str) or not label or not blocks:</span>
+<span class="d-add">+            return</span>
+<span class="d-add">+        label = label[:VIEW_LABEL_MAX]</span>
+<span class="d-add">+        # A view from a hidden tab is not a view. The client already refuses to</span>
+<span class="d-add">+        # send one, but presence is the server&#x27;s fact and the client&#x27;s is only</span>
+<span class="d-add">+        # a claim, so the check lives here too.</span>
+<span class="d-add">+        if not conn[&quot;visible&quot;]:</span>
+<span class="d-add">+            return</span>
+<span class="d-add">+        # Token bucket: bursts of real UI activity get through, a firehose</span>
+<span class="d-add">+        # does not. See VIEW_BURST.</span>
+<span class="d-add">+        now = time.time()</span>
+<span class="d-add">+        conn[&quot;view_tokens&quot;] = min(</span>
+<span class="d-add">+            VIEW_BURST,</span>
+<span class="d-add">+            conn[&quot;view_tokens&quot;] + (now - conn[&quot;last_view_at&quot;]) * VIEW_REFILL_PER_SEC)</span>
+<span class="d-add">+        conn[&quot;last_view_at&quot;] = now</span>
+<span class="d-add">+        if conn[&quot;view_tokens&quot;] &lt; 1.0:</span>
+<span class="d-add">+            return</span>
+<span class="d-add">+        conn[&quot;view_tokens&quot;] -= 1.0</span>
+<span class="d-add">+        view_counts.record_view(redis_client, slug, label, blocks, conn[&quot;identity&quot;])</span>
+<span class="d-add">+        n, exact = view_counts.count_views(redis_client, slug, label, blocks)</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            # `k` echoes the client&#x27;s own request key so a reply that arrives</span>
+<span class="d-add">+            # after the reader has moved to another card is discarded rather</span>
+<span class="d-add">+            # than painted onto the wrong proposal.</span>
+<span class="d-add">+            ws.send(json.dumps({&quot;type&quot;: &quot;views&quot;, &quot;k&quot;: msg.get(&quot;k&quot;),</span>
+<span class="d-add">+                                &quot;n&quot;: n, &quot;exact&quot;: exact}))</span>
+<span class="d-add">+        except Exception:</span>
+<span class="d-add">+            pass</span>
+<span class="d-add">+        return</span>
+<span class="d-ctx">     if kind == &quot;sync&quot;:</span>
+<span class="d-ctx">         try:</span>
+<span class="d-ctx">             since = int(msg.get(&quot;since&quot;) or 0)</span>
+<span class="d-hunk">@@ -1343,6 +1426,24 @@ def ws(ws):</span>
+<span class="d-ctx">     # is known before the first byte is sent, the same way `map` and `token`</span>
+<span class="d-ctx">     # already are.</span>
+<span class="d-ctx">     sub = delta_hub.subscribe(slug, binary=request.args.get(&quot;bin&quot;) == &quot;1&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # Per-connection state for the two audience features. `identity` is the</span>
+<span class="d-add">+    # COUNTING identity (vote_identity.py) — the hashed IP, NOT device_id. It</span>
+<span class="d-add">+    # is read from the handshake and never from anything the client sends,</span>
+<span class="d-add">+    # which is both the honest choice (a client cannot inflate a count by</span>
+<span class="d-add">+    # claiming to be several people) and the private one (the client is never</span>
+<span class="d-add">+    # asked for an identifier at all).</span>
+<span class="d-add">+    conn = {</span>
+<span class="d-add">+        &quot;identity&quot;: get_client_ip(),</span>
+<span class="d-add">+        &quot;visible&quot;: True,   # a tab that just opened a socket is looking at it</span>
+<span class="d-add">+        &quot;last_presence_sent&quot;: None,</span>
+<span class="d-add">+        &quot;last_view_at&quot;: time.time(),</span>
+<span class="d-add">+        &quot;view_tokens&quot;: VIEW_BURST,</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    presence_registry.arrive(slug, conn[&quot;identity&quot;])</span>
+<span class="d-add">+    last_heartbeat = time.time()</span>
+<span class="d-add">+    last_presence_poll = 0.0</span>
+<span class="d-add">+</span>
+<span class="d-ctx">     try:</span>
+<span class="d-ctx">         rev = int(redis_client.get(vote_store.revision_key(slug)) or 0)</span>
+<span class="d-ctx">         # `bin` echoes back what the server decided, so the client can tell</span>
+<span class="d-hunk">@@ -1355,18 +1456,45 @@ def ws(ws):</span>
+<span class="d-ctx">         KEEPALIVE = 30</span>
+<span class="d-ctx">         while True:</span>
+<span class="d-ctx">             # Pump inbound frames: a client close must be noticed promptly, and</span>
+<span class="d-del">-            # this is also where the two client→server messages arrive —</span>
+<span class="d-del">-            # {&quot;type&quot;:&quot;hello&quot;,&quot;bin&quot;:1} (binary capability) and</span>
+<span class="d-del">-            # {&quot;type&quot;:&quot;sync&quot;,&quot;since&quot;:&lt;rev&gt;} (repair after a backgrounded tab).</span>
+<span class="d-add">+            # this is also where every client→server message arrives —</span>
+<span class="d-add">+            # `hello` (binary capability), `sync` (repair after a backgrounded</span>
+<span class="d-add">+            # tab), `here` (this tab became visible/hidden) and `view` (a</span>
+<span class="d-add">+            # proposal card was read). See _ws_handle_inbound.</span>
+<span class="d-ctx">             try:</span>
+<span class="d-ctx">                 inbound = ws.receive(timeout=0)</span>
+<span class="d-ctx">                 if inbound:</span>
+<span class="d-del">-                    _ws_handle_inbound(ws, slug, sub, inbound)</span>
+<span class="d-add">+                    _ws_handle_inbound(ws, slug, sub, inbound, conn)</span>
+<span class="d-ctx">             except Exception as e:</span>
+<span class="d-ctx">                 s = str(e).lower()</span>
+<span class="d-ctx">                 if &quot;timed out&quot; not in s and &quot;no data&quot; not in s and &quot;connection closed&quot; not in s:</span>
+<span class="d-ctx">                     logger.warning(f&quot;[WS] receive exception: {e}&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+            # Presence maintenance, BEFORE the queue drain: the `continue` on a</span>
+<span class="d-add">+            # successful drain skips the rest of the loop, so anything placed</span>
+<span class="d-add">+            # below it silently stops running on a busy map — which is exactly</span>
+<span class="d-add">+            # when people are most likely to be here together.</span>
+<span class="d-add">+            now = time.time()</span>
+<span class="d-add">+            if conn[&quot;visible&quot;] and now - last_heartbeat &gt;= presence.HEARTBEAT_INTERVAL:</span>
+<span class="d-add">+                presence_registry.heartbeat(slug, conn[&quot;identity&quot;])</span>
+<span class="d-add">+                last_heartbeat = now</span>
+<span class="d-add">+            # Only a VISIBLE tab is told the count. A hidden one is not in the</span>
+<span class="d-add">+            # set, so `n` would exclude it — and the client renders &quot;n − 1</span>
+<span class="d-add">+            # others&quot; on the assumption that it is counted. Pushing to a hidden</span>
+<span class="d-add">+            # tab therefore both under-reports by one AND leaves a stale strip</span>
+<span class="d-add">+            # on a map nobody is looking at. Silence while hidden; becoming</span>
+<span class="d-add">+            # visible clears last_presence_sent and forces a fresh push.</span>
+<span class="d-add">+            if conn[&quot;visible&quot;] and now - last_presence_poll &gt;= presence.PUSH_INTERVAL:</span>
+<span class="d-add">+                last_presence_poll = now</span>
+<span class="d-add">+                n = presence_registry.count(slug)</span>
+<span class="d-add">+                # Edge-triggered: a steady room sends nothing at all.</span>
+<span class="d-add">+                if n != conn[&quot;last_presence_sent&quot;]:</span>
+<span class="d-add">+                    conn[&quot;last_presence_sent&quot;] = n</span>
+<span class="d-add">+                    try:</span>
+<span class="d-add">+                        ws.send(json.dumps({&quot;type&quot;: &quot;presence&quot;, &quot;n&quot;: n}))</span>
+<span class="d-add">+                        last_push = now</span>
+<span class="d-add">+                    except Exception:</span>
+<span class="d-add">+                        pass</span>
+<span class="d-add">+</span>
+<span class="d-ctx">             if sub.overflowed.is_set():</span>
+<span class="d-ctx">                 # This client lagged past its queue bound; a reconnect plus</span>
+<span class="d-ctx">                 # the client&#x27;s gap refetch is cheaper than a catch-up replay.</span>
+<span class="d-hunk">@@ -1386,6 +1514,8 @@ def ws(ws):</span>
+<span class="d-ctx">                 last_push = time.time()</span>
+<span class="d-ctx">     finally:</span>
+<span class="d-ctx">         delta_hub.unsubscribe(slug, sub)</span>
+<span class="d-add">+        if conn[&quot;visible&quot;]:</span>
+<span class="d-add">+            presence_registry.depart(slug, conn[&quot;identity&quot;])</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> # ── Routes API ─────────────────────────────────────────────────────────────</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/presence.py</span>
+            <span class="stat"><span class="d-add">+191</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Server · co-presence</span>
+        <span class="ctx-sum">Who is looking at a map RIGHT NOW, shared across Flask replicas through one Redis sorted set</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">presence.py</span>
+        <span class="ctx-sum">new — ~175 LOC, mostly the argument for why the key and the structure are what they are</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module docstring</span><span class="ol-sum">new — the identity choice, the two directions it degrades in, and why NOT a HyperLogLog</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">PRESENCE_TTL / HEARTBEAT_INTERVAL / COUNT_CACHE_TTL / PUSH_INTERVAL</span><span class="ol-sum">new — 35s staleness, 10s heartbeat, 2s memo, 2s poll</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">presence_key</span><span class="ol-sum">new — pres:&lt;slug&gt;</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Presence.arrive / depart</span><span class="ol-sum">new — local refcount so a second tab doesn&#x27;t evict the first; explicit ZREM on the last one</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Presence.heartbeat</span><span class="ol-sum">new — ZADD with a WALL-clock score (several replicas write the same set)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Presence.count</span><span class="ol-sum">new — prune-then-ZCARD, memoized, 0 on any Redis failure</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Keyed on the hashed IP, never device_id — keyed on device_id the count RISES as identity degrades, which is the failure that is invisible from outside</li><li>A ZSET rather than a HLL because presence has to go DOWN; a HLL cannot forget, so a map 40 people visited would read &#x27;40 here now&#x27; forever</li><li>Departure is explicit rather than left to the 35s expiry: a count that stays high after everyone leaves is over-reporting, the one direction this feature does not accept</li><li>arrive/depart drop the count memo — the two changes this process MAKES are stale by construction, and serving them from cache showed &#x27;0 others&#x27; on join and a lingering viewer on leave</li><li>Redis unreachable returns 0, which reads as &#x27;say nothing&#x27; at the client&#x27;s threshold: a broken cache must not be able to invent company</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/presence.py b/server/presence.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..5570fc7</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/presence.py</span>
+<span class="d-hunk">@@ -0,0 +1,191 @@</span>
+<span class="d-add">+&quot;&quot;&quot;Who is looking at this map right now.</span>
+<span class="d-add">+</span>
+<span class="d-add">+The product here is COMMON KNOWLEDGE — &quot;we are both looking at this, and we</span>
+<span class="d-add">+both know we are&quot; — so the only number worth showing is one nobody has a reason</span>
+<span class="d-add">+to doubt. That constraint drives every choice below, and it points the opposite</span>
+<span class="d-add">+way from the usual analytics instinct: when in doubt, count LESS.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Identity</span>
+<span class="d-add">+--------</span>
+<span class="d-add">+Presence is keyed on the same COUNTING identity votes use (vote_identity.py):</span>
+<span class="d-add">+the hashed client IP, falling back to a per-connection token only when there is</span>
+<span class="d-add">+no IP at all. It deliberately does NOT use `device_id`.</span>
+<span class="d-add">+</span>
+<span class="d-add">+That is not a stylistic choice. `device_id` is the sha256 of a localStorage</span>
+<span class="d-add">+UUID and localStorage on this app&#x27;s traffic is *actively fragmenting* — one</span>
+<span class="d-add">+iPhone produced six voter_ids in three minutes on prod (2026-08-13, see</span>
+<span class="d-add">+vote_identity.py). A presence count keyed on device_id would report that one</span>
+<span class="d-add">+person as six people looking at the map together. That is exactly the lie that</span>
+<span class="d-add">+destroys the ritual: the number goes UP as identity degrades, so the worse our</span>
+<span class="d-add">+identity gets, the more impressive the product looks. Nobody would be able to</span>
+<span class="d-add">+tell the difference from the outside, which is why it has to be structurally</span>
+<span class="d-add">+impossible rather than monitored.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Keying on the IP hash inverts the failure. The two ways it can be wrong:</span>
+<span class="d-add">+</span>
+<span class="d-add">+  · Many people, one IP (household, office, school, carrier NAT) → they count</span>
+<span class="d-add">+    as ONE. The number is too LOW. Safe: the ritual survives a modest count,</span>
+<span class="d-add">+    it does not survive an inflated one.</span>
+<span class="d-add">+  · One person, several IPs inside the 35s window (wifi → LTE handoff, a VPN</span>
+<span class="d-add">+    flipping egress) → they briefly count as two. This is the only inflation</span>
+<span class="d-add">+    path left, it is bounded by the staleness window, and it needs a NETWORK</span>
+<span class="d-add">+    change rather than a page reload — so the device_id churn that is currently</span>
+<span class="d-add">+    under investigation cannot trigger it. Reload the tab a hundred times and</span>
+<span class="d-add">+    the presence count does not move.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Neither key is a person. This is the honest ceiling of what we can claim, and</span>
+<span class="d-add">+the UI copy is written to stay inside it.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Why a sorted set and not a HyperLogLog</span>
+<span class="d-add">+--------------------------------------</span>
+<span class="d-add">+HLL is the right structure for the cumulative view counts (view_counts.py) and</span>
+<span class="d-add">+the wrong one here: presence has to go DOWN. A HLL cannot forget a member, so a</span>
+<span class="d-add">+map that 40 people visited over an afternoon would read &quot;40 people are here</span>
+<span class="d-add">+now&quot; forever — monotonically inflating, the failure mode above. A ZSET of</span>
+<span class="d-add">+identity → last-heartbeat timestamp both expires (score below the cutoff) and</span>
+<span class="d-add">+retracts (ZREM on disconnect), and it stays small: its cardinality is people</span>
+<span class="d-add">+currently on one map, not people ever.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Only VISIBLE tabs are counted. The client reports visibilitychange over the</span>
+<span class="d-add">+same socket, and a hidden tab is removed immediately. &quot;You are looking at this</span>
+<span class="d-add">+with 3 other people&quot; has to mean *looking*, not &quot;has a socket open&quot; — and this</span>
+<span class="d-add">+app throttles background tabs hard enough that a backgrounded viewer is doing</span>
+<span class="d-add">+precisely nothing. This is also why departure is explicit (ZREM) rather than</span>
+<span class="d-add">+left to expiry: a count that stays high for 35 seconds after everyone leaves is</span>
+<span class="d-add">+over-reporting, which is the one direction we do not accept.</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import logging</span>
+<span class="d-add">+import threading</span>
+<span class="d-add">+import time</span>
+<span class="d-add">+</span>
+<span class="d-add">+logger = logging.getLogger(__name__)</span>
+<span class="d-add">+</span>
+<span class="d-add">+# How long a heartbeat keeps an identity &quot;here&quot;. Must exceed HEARTBEAT_INTERVAL</span>
+<span class="d-add">+# by enough to ride out a slow flush or a GC pause without flickering someone</span>
+<span class="d-add">+# out of the room.</span>
+<span class="d-add">+PRESENCE_TTL = 35</span>
+<span class="d-add">+</span>
+<span class="d-add">+# How often a live connection refreshes its score.</span>
+<span class="d-add">+HEARTBEAT_INTERVAL = 10</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Per-process memo so that N sockets on one map share ONE Redis read per tick</span>
+<span class="d-add">+# instead of issuing N. Short enough that arrivals/departures feel immediate.</span>
+<span class="d-add">+COUNT_CACHE_TTL = 2.0</span>
+<span class="d-add">+</span>
+<span class="d-add">+# How often a connection re-checks the count. The push itself is edge-triggered</span>
+<span class="d-add">+# (only sent when the number actually changes), so this is a poll interval, not</span>
+<span class="d-add">+# a send interval.</span>
+<span class="d-add">+PUSH_INTERVAL = 2.0</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Garbage-collect the key on a map nobody visits, without ever expiring it out</span>
+<span class="d-add">+# from under a live room.</span>
+<span class="d-add">+KEY_TTL = PRESENCE_TTL * 8</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def presence_key(slug: str) -&gt; str:</span>
+<span class="d-add">+    return f&quot;pres:{slug}&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+class Presence:</span>
+<span class="d-add">+    &quot;&quot;&quot;Cross-instance live-viewer registry for every map this process serves.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    One instance per Flask process, sharing the app&#x27;s Redis client. All state</span>
+<span class="d-add">+    that matters lives in Redis so the count is correct across replicas; the</span>
+<span class="d-add">+    per-process dicts are only a local refcount (so a second tab from the same</span>
+<span class="d-add">+    person doesn&#x27;t ZREM the first) and a read memo.</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def __init__(self, redis_client):</span>
+<span class="d-add">+        self._r = redis_client</span>
+<span class="d-add">+        self._lock = threading.Lock()</span>
+<span class="d-add">+        # slug -&gt; identity -&gt; how many VISIBLE sockets this process holds for</span>
+<span class="d-add">+        # that identity. Needed so closing one of a person&#x27;s two tabs doesn&#x27;t</span>
+<span class="d-add">+        # remove them from the room.</span>
+<span class="d-add">+        self._local: dict[str, dict[str, int]] = {}</span>
+<span class="d-add">+        # slug -&gt; (monotonic deadline, count)</span>
+<span class="d-add">+        self._cache: dict[str, tuple[float, int]] = {}</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # ── Membership ──────────────────────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def arrive(self, slug: str, identity: str) -&gt; None:</span>
+<span class="d-add">+        &quot;&quot;&quot;This identity now has one more visible socket on this map.&quot;&quot;&quot;</span>
+<span class="d-add">+        with self._lock:</span>
+<span class="d-add">+            per_map = self._local.setdefault(slug, {})</span>
+<span class="d-add">+            per_map[identity] = per_map.get(identity, 0) + 1</span>
+<span class="d-add">+            self._cache.pop(slug, None)</span>
+<span class="d-add">+        self.heartbeat(slug, identity)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def depart(self, slug: str, identity: str) -&gt; None:</span>
+<span class="d-add">+        &quot;&quot;&quot;One visible socket gone. Removes the identity when it was the last</span>
+<span class="d-add">+        one THIS process holds.</span>
+<span class="d-add">+</span>
+<span class="d-add">+        A sibling replica may still hold a live socket for the same identity;</span>
+<span class="d-add">+        that replica&#x27;s next heartbeat (≤10s) puts them back. The transient dip</span>
+<span class="d-add">+        under-reports for a few seconds, which is the direction we tolerate.</span>
+<span class="d-add">+        &quot;&quot;&quot;</span>
+<span class="d-add">+        with self._lock:</span>
+<span class="d-add">+            per_map = self._local.get(slug)</span>
+<span class="d-add">+            if not per_map:</span>
+<span class="d-add">+                return</span>
+<span class="d-add">+            self._cache.pop(slug, None)</span>
+<span class="d-add">+            remaining = per_map.get(identity, 0) - 1</span>
+<span class="d-add">+            if remaining &gt; 0:</span>
+<span class="d-add">+                per_map[identity] = remaining</span>
+<span class="d-add">+                return</span>
+<span class="d-add">+            per_map.pop(identity, None)</span>
+<span class="d-add">+            if not per_map:</span>
+<span class="d-add">+                self._local.pop(slug, None)</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            self._r.zrem(presence_key(slug), identity)</span>
+<span class="d-add">+        except Exception as e:</span>
+<span class="d-add">+            logger.debug(f&quot;[PRESENCE] zrem failed for {slug}: {e}&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def heartbeat(self, slug: str, identity: str) -&gt; None:</span>
+<span class="d-add">+        &quot;&quot;&quot;Refresh this identity&#x27;s freshness. Wall-clock scores on purpose —</span>
+<span class="d-add">+        several Flask replicas write into the same ZSET, so a monotonic clock</span>
+<span class="d-add">+        would make their entries incomparable.&quot;&quot;&quot;</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            key = presence_key(slug)</span>
+<span class="d-add">+            pipe = self._r.pipeline()</span>
+<span class="d-add">+            pipe.zadd(key, {identity: time.time()})</span>
+<span class="d-add">+            pipe.expire(key, KEY_TTL)</span>
+<span class="d-add">+            pipe.execute()</span>
+<span class="d-add">+        except Exception as e:</span>
+<span class="d-add">+            logger.debug(f&quot;[PRESENCE] heartbeat failed for {slug}: {e}&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # ── Counting ────────────────────────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+    def count(self, slug: str) -&gt; int:</span>
+<span class="d-add">+        &quot;&quot;&quot;Distinct identities visibly on this map, INCLUDING the caller.</span>
+<span class="d-add">+</span>
+<span class="d-add">+        Prunes stale entries on the way through — presence has no other</span>
+<span class="d-add">+        reaper, and pruning at read time means the number is never computed</span>
+<span class="d-add">+        over entries we already know are dead. Returns a memoized value for</span>
+<span class="d-add">+        COUNT_CACHE_TTL so a crowded map costs one Redis round-trip per tick</span>
+<span class="d-add">+        rather than one per socket.</span>
+<span class="d-add">+</span>
+<span class="d-add">+        `arrive`/`depart` drop the memo, so the two changes this process makes</span>
+<span class="d-add">+        itself are never served stale. Without that, joining a map you are</span>
+<span class="d-add">+        alone on showed &quot;0 others&quot; for two seconds, and — the direction that</span>
+<span class="d-add">+        actually matters — a room someone had just left kept reporting them.</span>
+<span class="d-add">+        &quot;&quot;&quot;</span>
+<span class="d-add">+        now = time.monotonic()</span>
+<span class="d-add">+        with self._lock:</span>
+<span class="d-add">+            cached = self._cache.get(slug)</span>
+<span class="d-add">+            if cached and cached[0] &gt; now:</span>
+<span class="d-add">+                return cached[1]</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            key = presence_key(slug)</span>
+<span class="d-add">+            pipe = self._r.pipeline()</span>
+<span class="d-add">+            pipe.zremrangebyscore(key, &quot;-inf&quot;, time.time() - PRESENCE_TTL)</span>
+<span class="d-add">+            pipe.zcard(key)</span>
+<span class="d-add">+            n = int(pipe.execute()[-1])</span>
+<span class="d-add">+        except Exception as e:</span>
+<span class="d-add">+            logger.debug(f&quot;[PRESENCE] count failed for {slug}: {e}&quot;)</span>
+<span class="d-add">+            # Redis being unreachable must not invent company. 0 reads out as</span>
+<span class="d-add">+            # &quot;say nothing&quot; at the client&#x27;s threshold.</span>
+<span class="d-add">+            return 0</span>
+<span class="d-add">+        with self._lock:</span>
+<span class="d-add">+            self._cache[slug] = (now + COUNT_CACHE_TTL, n)</span>
+<span class="d-add">+        return n</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/tests/unit/test_audience_counts.py</span>
+            <span class="stat"><span class="d-add">+169</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Server · tests</span>
+        <span class="ctx-sum">The two ways these counts could lie, pinned</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">test_audience_counts.py</span>
+        <span class="ctx-sum">new — ~180 LOC, 11 tests</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module docstring</span><span class="ol-sum">new — why these run against a REAL Redis</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">view tests</span><span class="ol-sum">new — corridor dedupe, partial overlap, fragmentation, type isolation, fail-safe, negative ids, cap</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">presence tests</span><span class="ol-sum">new — people-not-tabs, explicit retraction, stale expiry, Redis down</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Run against a real Redis on purpose: both properties are properties of PFCOUNT-over-many-keys and PFADD idempotency, not of our code. Faking them would test the wrong thing</li><li>test_one_person_two_blocks_of_one_corridor_counts_once also asserts the NAIVE sum is 5, so the test documents the bug it prevents</li><li>test_device_id_fragmentation_does_not_inflate encodes the prod measurement: six ids in three minutes, one member, count unchanged</li><li>test_presence_retracts_rather_than_only_expiring guards the one direction this feature cannot be wrong in</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/tests/unit/test_audience_counts.py b/server/tests/unit/test_audience_counts.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..bde40c7</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/tests/unit/test_audience_counts.py</span>
+<span class="d-hunk">@@ -0,0 +1,169 @@</span>
+<span class="d-add">+&quot;&quot;&quot;The two properties the audience features live or die on.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Both features exist to make co-presence legible, which only works if the number</span>
+<span class="d-add">+is trustworthy. These tests pin the two ways it could lie:</span>
+<span class="d-add">+</span>
+<span class="d-add">+  · a route proposal double-counting one person who opened two of its blocks</span>
+<span class="d-add">+    (the number silently inflates as a corridor grows), and</span>
+<span class="d-add">+  · a person whose device_id fragments being counted once per fragment (the</span>
+<span class="d-add">+    number inflates exactly when identity degrades, which is the failure that</span>
+<span class="d-add">+    is invisible from outside).</span>
+<span class="d-add">+</span>
+<span class="d-add">+They run against a real Redis because both properties are properties of Redis</span>
+<span class="d-add">+data structures — PFCOUNT-over-many-keys returning a union, and PFADD being</span>
+<span class="d-add">+idempotent — not of our code. Faking them would test the wrong thing.</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import os</span>
+<span class="d-add">+</span>
+<span class="d-add">+import pytest</span>
+<span class="d-add">+</span>
+<span class="d-add">+redis = pytest.importorskip(&quot;redis&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+import presence</span>
+<span class="d-add">+import view_counts</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+SLUG = &quot;test-audience&quot;</span>
+<span class="d-add">+LABEL = &quot;Protected bike lane&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+@pytest.fixture</span>
+<span class="d-add">+def r():</span>
+<span class="d-add">+    client = redis.Redis(</span>
+<span class="d-add">+        host=os.environ.get(&quot;REDIS_HOST&quot;, &quot;localhost&quot;),</span>
+<span class="d-add">+        port=int(os.environ.get(&quot;REDIS_PORT&quot;, 6379)),</span>
+<span class="d-add">+        db=0, decode_responses=True)</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        client.ping()</span>
+<span class="d-add">+    except Exception:</span>
+<span class="d-add">+        pytest.skip(&quot;redis not available&quot;)</span>
+<span class="d-add">+    _clean(client)</span>
+<span class="d-add">+    yield client</span>
+<span class="d-add">+    _clean(client)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _clean(client):</span>
+<span class="d-add">+    for pattern in (f&quot;pv:{SLUG}:*&quot;, presence.presence_key(SLUG)):</span>
+<span class="d-add">+        keys = list(client.scan_iter(match=pattern, count=500))</span>
+<span class="d-add">+        if keys:</span>
+<span class="d-add">+            client.delete(*keys)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+# ── Views ───────────────────────────────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_one_person_two_blocks_of_one_corridor_counts_once(r):</span>
+<span class="d-add">+    &quot;&quot;&quot;The headline property: no double count at the route level.&quot;&quot;&quot;</span>
+<span class="d-add">+    corridor = [11, 12, 13, 14, 15]</span>
+<span class="d-add">+    # Alice opens the corridor from block 11&#x27;s card, then later from block 14&#x27;s.</span>
+<span class="d-add">+    # Two separate views of the same proposal.</span>
+<span class="d-add">+    view_counts.record_view(r, SLUG, LABEL, corridor, &quot;alice&quot;)</span>
+<span class="d-add">+    view_counts.record_view(r, SLUG, LABEL, corridor, &quot;alice&quot;)</span>
+<span class="d-add">+    assert view_counts.count_views(r, SLUG, LABEL, corridor) == (1, True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # Summing the per-block sketches — the naive implementation — would say 5.</span>
+<span class="d-add">+    assert sum(r.pfcount(view_counts.block_key(SLUG, view_counts.type_token(LABEL), b))</span>
+<span class="d-add">+               for b in corridor) == 5</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_partial_overlap_still_unions(r):</span>
+<span class="d-add">+    &quot;&quot;&quot;Two people who entered the same corridor by different blocks, when the</span>
+<span class="d-add">+    corridor is later recomputed to a different extent.&quot;&quot;&quot;</span>
+<span class="d-add">+    view_counts.record_view(r, SLUG, LABEL, [11, 12, 13], &quot;alice&quot;)</span>
+<span class="d-add">+    view_counts.record_view(r, SLUG, LABEL, [13, 14, 15], &quot;bob&quot;)</span>
+<span class="d-add">+    # A recompute lengthens the corridor. The id would have rotated; the count</span>
+<span class="d-add">+    # does not care.</span>
+<span class="d-add">+    assert view_counts.count_views(r, SLUG, LABEL, [11, 12, 13, 14, 15]) == (2, True)</span>
+<span class="d-add">+    # And a sub-corridor sees only the people whose view covered it.</span>
+<span class="d-add">+    assert view_counts.count_views(r, SLUG, LABEL, [11, 12]) == (1, True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_device_id_fragmentation_does_not_inflate(r):</span>
+<span class="d-add">+    &quot;&quot;&quot;The constraint this design was built around.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    One phone, six voter_ids in three minutes (prod 2026-08-13). Keyed on</span>
+<span class="d-add">+    device_id this reads as six people; keyed on the counting identity it is</span>
+<span class="d-add">+    one member added six times, and PFADD does not care.</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    blocks = [21, 22]</span>
+<span class="d-add">+    for _ in range(6):</span>
+<span class="d-add">+        view_counts.record_view(r, SLUG, LABEL, blocks, &quot;one-ip-hash&quot;)</span>
+<span class="d-add">+    assert view_counts.count_views(r, SLUG, LABEL, blocks) == (1, True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_types_do_not_bleed_into_each_other(r):</span>
+<span class="d-add">+    &quot;&quot;&quot;A signal-timing pin must not inherit a bike corridor&#x27;s audience.&quot;&quot;&quot;</span>
+<span class="d-add">+    view_counts.record_view(r, SLUG, &quot;Protected bike lane&quot;, [31], &quot;alice&quot;)</span>
+<span class="d-add">+    view_counts.record_view(r, SLUG, &quot;Protected bike lane&quot;, [31], &quot;bob&quot;)</span>
+<span class="d-add">+    assert view_counts.count_views(r, SLUG, &quot;Fix signal timing&quot;, [31]) == (0, True)</span>
+<span class="d-add">+    assert view_counts.count_views(r, SLUG, &quot;Protected bike lane&quot;, [31]) == (2, True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_empty_and_broken_never_invent_an_audience(r):</span>
+<span class="d-add">+    assert view_counts.count_views(r, SLUG, LABEL, []) == view_counts.COUNT_ERROR</span>
+<span class="d-add">+</span>
+<span class="d-add">+    class Broken:</span>
+<span class="d-add">+        def pfcount(self, *a):</span>
+<span class="d-add">+            raise RuntimeError(&quot;redis down&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    assert view_counts.count_views(Broken(), SLUG, LABEL, [1, 2]) == (0, True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_negative_block_ids_survive(r):</span>
+<span class="d-add">+    &quot;&quot;&quot;`blockKeyOf` returns -(edgeId + 2) for an edge in no baked block.&quot;&quot;&quot;</span>
+<span class="d-add">+    view_counts.record_view(r, SLUG, LABEL, [-7, -8], &quot;alice&quot;)</span>
+<span class="d-add">+    assert view_counts.count_views(r, SLUG, LABEL, [-7, -8]) == (1, True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_blocks_are_capped(r):</span>
+<span class="d-add">+    assert len(view_counts.normalize_blocks(range(10_000))) == \</span>
+<span class="d-add">+        view_counts.MAX_PROPOSAL_BLOCKS</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+# ── Presence ────────────────────────────────────────────────────────────────</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_presence_counts_people_not_tabs(r):</span>
+<span class="d-add">+    p = presence.Presence(r)</span>
+<span class="d-add">+    p.arrive(SLUG, &quot;alice&quot;)</span>
+<span class="d-add">+    p.arrive(SLUG, &quot;alice&quot;)   # second tab, same person</span>
+<span class="d-add">+    p.arrive(SLUG, &quot;bob&quot;)</span>
+<span class="d-add">+    assert p.count(SLUG) == 2</span>
+<span class="d-add">+</span>
+<span class="d-add">+    # Closing one of Alice&#x27;s two tabs must not remove her from the room.</span>
+<span class="d-add">+    p.depart(SLUG, &quot;alice&quot;)</span>
+<span class="d-add">+    assert p.count(SLUG) == 2</span>
+<span class="d-add">+</span>
+<span class="d-add">+    p.depart(SLUG, &quot;alice&quot;)</span>
+<span class="d-add">+    assert p.count(SLUG) == 1</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_presence_retracts_rather_than_only_expiring(r):</span>
+<span class="d-add">+    &quot;&quot;&quot;A count that stays high after everyone leaves is over-reporting, which</span>
+<span class="d-add">+    is the one direction this feature does not accept.&quot;&quot;&quot;</span>
+<span class="d-add">+    p = presence.Presence(r)</span>
+<span class="d-add">+    p.arrive(SLUG, &quot;alice&quot;)</span>
+<span class="d-add">+    assert p.count(SLUG) == 1</span>
+<span class="d-add">+    p.depart(SLUG, &quot;alice&quot;)</span>
+<span class="d-add">+    # No cache clear: a departure must be visible IMMEDIATELY, not after the</span>
+<span class="d-add">+    # memo lapses. Reporting someone who has left is over-reporting.</span>
+<span class="d-add">+    assert p.count(SLUG) == 0</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_presence_expires_stale_entries(r):</span>
+<span class="d-add">+    p = presence.Presence(r)</span>
+<span class="d-add">+    p.arrive(SLUG, &quot;ghost&quot;)</span>
+<span class="d-add">+    # A viewer whose machine slept: last heartbeat older than the TTL, no</span>
+<span class="d-add">+    # disconnect ever seen.</span>
+<span class="d-add">+    r.zadd(presence.presence_key(SLUG),</span>
+<span class="d-add">+           {&quot;ghost&quot;: __import__(&quot;time&quot;).time() - presence.PRESENCE_TTL - 5})</span>
+<span class="d-add">+    p._cache.clear()</span>
+<span class="d-add">+    assert p.count(SLUG) == 0</span>
+<span class="d-add">+    assert r.zscore(presence.presence_key(SLUG), &quot;ghost&quot;) is None</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def test_presence_returns_zero_when_redis_is_down():</span>
+<span class="d-add">+    class Broken:</span>
+<span class="d-add">+        def pipeline(self):</span>
+<span class="d-add">+            raise RuntimeError(&quot;redis down&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+    assert presence.Presence(Broken()).count(SLUG) == 0</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/view_counts.py</span>
+            <span class="stat"><span class="d-add">+202</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Server · proposal audience</span>
+        <span class="ctx-sum">How many distinct people have opened a proposal, stored as per-block sketches and unioned at read time</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">view_counts.py</span>
+        <span class="ctx-sum">new — ~200 LOC, of which the docstring is the design record</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module docstring</span><span class="ol-sum">new — why the union, why route-proposal ids can&#x27;t be used, what a &#x27;view&#x27; is, what it degrades to</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">KEY_TTL / MAX_PROPOSAL_BLOCKS / EXACT_BELOW / COUNT_ERROR</span><span class="ol-sum">new — 180d, 256 blocks, 1000, and the fail-silent tuple</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">type_token</span><span class="ol-sum">new — sha1(label)[:10]: the LABEL, not legendIdx and not a DB id</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">block_key / normalize_blocks</span><span class="ol-sum">new — pv:&lt;slug&gt;:&lt;type&gt;:&lt;block&gt;, negative block ids preserved</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">record_view</span><span class="ol-sum">new — PFADD the viewer into EVERY block the proposal spans</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">count_views</span><span class="ol-sum">new — PFCOUNT over many keys = the UNION, plus an exactness flag</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>PFCOUNT over N keys returns the cardinality of the UNION, not the sum — that single fact is what makes the route-level dedupe correct without any bookkeeping</li><li>The proposal is never named. Its identity is supplied at READ time as a set of block ids, because RouteProposal.id is a hash of the path edges and rotates on the next vote</li><li>Writing every block, not just the clicked one: anchoring on the click made a sub-corridor read 100 or 0 for the same street and readers depending on whether it contained that one block</li><li>The type is in the key so a bike-lane corridor&#x27;s readers are not reported as the audience for a signal-timing pin on the same corner</li><li>A HLL can only ever produce a count — no row per view, no timestamp, no IP, nothing enumerable, ~200 bytes for a block a few dozen people have seen</li><li>Negative block ids are legitimate: blockKeyOf returns -(edgeId + 2) on maps with no block layer, so the guard is on type and count, never on sign</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/view_counts.py b/server/view_counts.py</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..40dd60c</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/server/view_counts.py</span>
+<span class="d-hunk">@@ -0,0 +1,202 @@</span>
+<span class="d-add">+&quot;&quot;&quot;How many people have opened a proposal.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Same honesty bar as presence.py, a different time horizon: this number is</span>
+<span class="d-add">+cumulative, so it has to survive being wrong for months rather than for 35</span>
+<span class="d-add">+seconds.</span>
+<span class="d-add">+</span>
+<span class="d-add">+WHAT IS STORED — one sketch per (map, vote type, block), nothing per view</span>
+<span class="d-add">+------------------------------------------------------------------------</span>
+<span class="d-add">+`pv:&lt;slug&gt;:&lt;type&gt;:&lt;block_id&gt;` is a Redis HyperLogLog holding one member per</span>
+<span class="d-add">+person who has opened a proposal of that type covering that block. There is no</span>
+<span class="d-add">+row per view, no timestamp, no IP, no device_id, and nothing enumerable — a HLL</span>
+<span class="d-add">+is a lossy register array, so the stored bytes cannot be turned back into a list</span>
+<span class="d-add">+of who was here. The honest minimum for &quot;show a count&quot; is a structure that can</span>
+<span class="d-add">+only ever produce a count, and this is that structure. It is also ~200 bytes for</span>
+<span class="d-add">+a block a few dozen people have seen (Redis keeps small sketches sparse) against</span>
+<span class="d-add">+~40 bytes per row for the obvious alternative, so the private choice is the</span>
+<span class="d-add">+cheap one too.</span>
+<span class="d-add">+</span>
+<span class="d-add">+WHY THE ROUTE LEVEL DOES NOT DOUBLE COUNT</span>
+<span class="d-add">+-----------------------------------------</span>
+<span class="d-add">+A route proposal is a corridor of many blocks, and the same person will open it</span>
+<span class="d-add">+from two different blocks on two different days. Summing per-block counts would</span>
+<span class="d-add">+report them twice.</span>
+<span class="d-add">+</span>
+<span class="d-add">+We never sum. `PFCOUNT k1 k2 … kn` returns the cardinality of the UNION of the</span>
+<span class="d-add">+sketches, so someone present in both block A&#x27;s and block B&#x27;s sketch contributes</span>
+<span class="d-add">+exactly 1 to a proposal spanning {A, B}. The dedupe is a property of the data</span>
+<span class="d-add">+structure, not bookkeeping anyone has to keep correct.</span>
+<span class="d-add">+</span>
+<span class="d-add">+That is also what makes the feature implementable at all, because *route</span>
+<span class="d-add">+proposals have no durable id*. `RouteProposal.id` is an FNV-1a hash of the</span>
+<span class="d-add">+proposal&#x27;s sorted path edges (routeProposals.ts), so it rotates every time a</span>
+<span class="d-add">+vote lengthens, shortens or reroutes the corridor — the client uses an id change</span>
+<span class="d-add">+as the SIGNAL that a corridor moved. `legendIdx` is worse: it is assigned by</span>
+<span class="d-add">+first-encounter order while the server builds each graph-votes snapshot, so it</span>
+<span class="d-add">+can shift for everyone when one vote reorders one edge. Hanging a counter on</span>
+<span class="d-add">+either would have quietly reset every proposal&#x27;s audience to zero on the next</span>
+<span class="d-add">+vote. Here the storage key is a BLOCK id — server-owned, baked, already the unit</span>
+<span class="d-add">+of the vote system — plus the vote type&#x27;s LABEL, which is the one part of a</span>
+<span class="d-add">+proposal&#x27;s identity that is stable across recomputes and across clients. The</span>
+<span class="d-add">+corridor itself is supplied at READ time as a set of blocks. Reshape it tomorrow</span>
+<span class="d-add">+and the number reshapes with it, still deduped, with no migration and no</span>
+<span class="d-add">+backfill.</span>
+<span class="d-add">+</span>
+<span class="d-add">+WHY THE TYPE IS IN THE KEY</span>
+<span class="d-add">+--------------------------</span>
+<span class="d-add">+Without it, every proposal on a block shares one audience: the 200 people who</span>
+<span class="d-add">+read the Protected-bike-lane corridor would appear as the audience for a</span>
+<span class="d-add">+Fix-signal-timing pin on the same corner, which is a different proposal by a</span>
+<span class="d-add">+different author about a different thing. Keying by type confines any bleed to</span>
+<span class="d-add">+proposals of the SAME type overlapping the same ground — which the proposal</span>
+<span class="d-add">+layer already limits (one point winner per block per type; route proposals of a</span>
+<span class="d-add">+type are diversity-capped at Jaccard 0.5).</span>
+<span class="d-add">+</span>
+<span class="d-add">+WHAT A &quot;VIEW&quot; IS, AND WHY WE WRITE EVERY BLOCK</span>
+<span class="d-add">+----------------------------------------------</span>
+<span class="d-add">+A view is: an interactive proposal card, open and on screen, for VIEW_DWELL_MS.</span>
+<span class="d-add">+Hover cards never count — they are `pointer-events:none` transients the mouse</span>
+<span class="d-add">+crosses on the way somewhere else, and counting them would make the number</span>
+<span class="d-add">+mostly mouse trajectory. A hidden tab never counts.</span>
+<span class="d-add">+</span>
+<span class="d-add">+One view PFADDs the viewer into every block the opened proposal spans, not just</span>
+<span class="d-add">+the one they clicked. Anchoring on the clicked block alone was the first design</span>
+<span class="d-add">+and it is wrong: a 40-block corridor read by 100 people would put all 100 in one</span>
+<span class="d-add">+sketch, so a sub-corridor&#x27;s count would depend on whether it happened to contain</span>
+<span class="d-add">+that one block — 100 if it did, 0 if it didn&#x27;t, for the same street and the same</span>
+<span class="d-add">+readers. Writing every block makes each sketch a true statement on its own</span>
+<span class="d-add">+terms, and makes the count precisely sayable:</span>
+<span class="d-add">+</span>
+<span class="d-add">+    a proposal&#x27;s count = the number of people who have opened a proposal of</span>
+<span class="d-add">+    this type covering any part of this one.</span>
+<span class="d-add">+</span>
+<span class="d-add">+The UI copy is written to that sentence and does not claim more.</span>
+<span class="d-add">+</span>
+<span class="d-add">+IDENTITY, AND WHAT THIS DEGRADES TO</span>
+<span class="d-add">+-----------------------------------</span>
+<span class="d-add">+The member is the COUNTING identity votes already use (vote_identity.py): the</span>
+<span class="d-add">+hashed IP, taken from the WebSocket handshake. Explicitly NOT `device_id`, whose</span>
+<span class="d-add">+localStorage preimage is currently fragmenting — one iPhone, six voter_ids,</span>
+<span class="d-add">+three minutes (prod 2026-08-13).</span>
+<span class="d-add">+</span>
+<span class="d-add">+Keyed on device_id, that person reads as six viewers, and the count rises every</span>
+<span class="d-add">+time identity degrades further: a metric that looks healthier the more broken it</span>
+<span class="d-add">+gets, with no way to notice from outside. Keyed on an IP hash, those same six</span>
+<span class="d-add">+page loads are one member added six times to one sketch, and PFADD is</span>
+<span class="d-add">+idempotent, so the number does not move at all. Reload the tab a hundred times</span>
+<span class="d-add">+and nothing happens.</span>
+<span class="d-add">+</span>
+<span class="d-add">+What it degrades to instead:</span>
+<span class="d-add">+  · Shared egress — household, office, school, carrier NAT → many people, one</span>
+<span class="d-add">+    member, permanently UNDER-counted. Accepted: a modest true number is worth</span>
+<span class="d-add">+    more here than a large uncertain one.</span>
+<span class="d-add">+  · One person on genuinely different networks over months (home, work, phone)</span>
+<span class="d-add">+    → a few members. This is the residual inflation. It is real, but it is</span>
+<span class="d-add">+    bounded by how many networks a person uses, not by how often their storage</span>
+<span class="d-add">+    clears — a few, not dozens, and it needs a network change rather than a</span>
+<span class="d-add">+    page load.</span>
+<span class="d-add">+  · Redis unreachable → 0, which reads as &quot;say nothing&quot; at the display floor.</span>
+<span class="d-add">+    A broken cache must not be able to invent an audience.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Finally, HLL is approximate (~0.81% relative error) at large cardinality and</span>
+<span class="d-add">+effectively exact while the sketch stays sparse, which covers every number these</span>
+<span class="d-add">+maps actually produce. `count_views` returns that distinction next to the number</span>
+<span class="d-add">+so the UI can stop claiming precision it does not have.</span>
+<span class="d-add">+&quot;&quot;&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import hashlib</span>
+<span class="d-add">+import logging</span>
+<span class="d-add">+</span>
+<span class="d-add">+logger = logging.getLogger(__name__)</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Sketches for a block nobody has opened in half a year are not worth keeping.</span>
+<span class="d-add">+# Refreshed on every write, so a proposal people still read never expires.</span>
+<span class="d-add">+KEY_TTL = 180 * 86400</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Ceiling on how many blocks one message may write or union. Corridors run to a</span>
+<span class="d-add">+# few dozen blocks; this bounds the work one client can ask for per view.</span>
+<span class="d-add">+MAX_PROPOSAL_BLOCKS = 256</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Above this, stop printing an exact figure — HLL&#x27;s error stops being smaller</span>
+<span class="d-add">+# than the last digit we would be showing.</span>
+<span class="d-add">+EXACT_BELOW = 1000</span>
+<span class="d-add">+</span>
+<span class="d-add">+# Returned when Redis fails or the request is empty.</span>
+<span class="d-add">+COUNT_ERROR = (0, True)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def type_token(label: str) -&gt; str:</span>
+<span class="d-add">+    &quot;&quot;&quot;Short stable token for a vote type.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    The LABEL, not `legendIdx` (per-snapshot, shifts under everyone) and not the</span>
+<span class="d-add">+    DB `vote_type_id` (which would mean a lookup that can create rows on a path</span>
+<span class="d-add">+    driven by client messages). Hashed only to bound the key length and keep</span>
+<span class="d-add">+    arbitrary user text out of Redis key names.</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    return hashlib.sha1((label or &quot;&quot;).strip().encode(&quot;utf-8&quot;)).hexdigest()[:10]</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def block_key(slug: str, token: str, block_id: int) -&gt; str:</span>
+<span class="d-add">+    return f&quot;pv:{slug}:{token}:{int(block_id)}&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def normalize_blocks(block_ids) -&gt; list[int]:</span>
+<span class="d-add">+    &quot;&quot;&quot;De-duplicated, integer, length-capped. Block ids may legitimately be</span>
+<span class="d-add">+    NEGATIVE — `blockKeyOf` returns `-(edgeId + 2)` for an edge that belongs to</span>
+<span class="d-add">+    no baked block — so the guard is on type and count, never on sign.&quot;&quot;&quot;</span>
+<span class="d-add">+    out: list[int] = []</span>
+<span class="d-add">+    seen = set()</span>
+<span class="d-add">+    for b in block_ids or ():</span>
+<span class="d-add">+        try:</span>
+<span class="d-add">+            bid = int(b)</span>
+<span class="d-add">+        except (TypeError, ValueError):</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        if bid in seen:</span>
+<span class="d-add">+            continue</span>
+<span class="d-add">+        seen.add(bid)</span>
+<span class="d-add">+        out.append(bid)</span>
+<span class="d-add">+        if len(out) &gt;= MAX_PROPOSAL_BLOCKS:</span>
+<span class="d-add">+            break</span>
+<span class="d-add">+    return out</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def record_view(redis_client, slug: str, label: str, blocks: list[int],</span>
+<span class="d-add">+                identity: str) -&gt; None:</span>
+<span class="d-add">+    &quot;&quot;&quot;Count `identity` as having opened a proposal of type `label` spanning</span>
+<span class="d-add">+    `blocks`.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Idempotent by construction: a hundred reopens from the same identity leave</span>
+<span class="d-add">+    every sketch bit-identical, which is why no rate limit is needed to keep the</span>
+<span class="d-add">+    number honest (only to keep the work bounded).</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    if not blocks:</span>
+<span class="d-add">+        return</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        token = type_token(label)</span>
+<span class="d-add">+        pipe = redis_client.pipeline()</span>
+<span class="d-add">+        for bid in blocks:</span>
+<span class="d-add">+            key = block_key(slug, token, bid)</span>
+<span class="d-add">+            pipe.pfadd(key, identity)</span>
+<span class="d-add">+            pipe.expire(key, KEY_TTL)</span>
+<span class="d-add">+        pipe.execute()</span>
+<span class="d-add">+    except Exception as e:</span>
+<span class="d-add">+        logger.debug(f&quot;[VIEWS] pfadd failed for {slug}/{label}: {e}&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def count_views(redis_client, slug: str, label: str,</span>
+<span class="d-add">+                blocks: list[int]) -&gt; tuple[int, bool]:</span>
+<span class="d-add">+    &quot;&quot;&quot;People who have opened a proposal of this type covering any part of this</span>
+<span class="d-add">+    one. Returns `(count, exact)`.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    The UNION — not the sum — is what makes one person who opened two different</span>
+<span class="d-add">+    blocks of the same corridor count once.</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    if not blocks:</span>
+<span class="d-add">+        return COUNT_ERROR</span>
+<span class="d-add">+    token = type_token(label)</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        n = int(redis_client.pfcount(*[block_key(slug, token, b) for b in blocks]))</span>
+<span class="d-add">+    except Exception as e:</span>
+<span class="d-add">+        logger.debug(f&quot;[VIEWS] pfcount failed for {slug}: {e}&quot;)</span>
+<span class="d-add">+        return COUNT_ERROR</span>
+<span class="d-add">+    return n, n &lt; EXACT_BELOW</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>

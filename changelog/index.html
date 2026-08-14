@@ -29,6 +29,30 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-14-audience-views-and-copresence.html">
+    <div class="date">2026-08-14</div>
+    <h2>Audience: view counts and co-presence, built so the number can be believed</h2>
+    <p>Two features whose product is <strong>common knowledge</strong> — &quot;we are looking at
+    this together, and we both know it&quot; — which inverts the usual analytics instinct:
+    over-counting destroys the effect outright, under-counting costs a little, and every trade
+    resolves in that direction. Neither reads <code>device_id</code>, whose localStorage preimage is
+    currently fragmenting (<strong>one iPhone, six voter_ids, three minutes</strong> on prod); keyed
+    on it both counts would <em>rise</em> exactly as identity degrades — the failure that looks like
+    success and is invisible from outside. Both key on the hashed IP votes already count by, and on
+    nothing the client sends. The view count could not be built the obvious way: a route proposal
+    has <strong>no durable id</strong> — <code>RouteProposal.id</code> hashes the corridor's path
+    edges and rotates on the next vote, which the client already treats as its &quot;corridor
+    moved&quot; signal. So sketches are stored per <em>block</em> and the proposal is named only at
+    read time, as a set of blocks: <code>PFCOUNT</code> over many keys returns the <strong>union</strong>,
+    so one person who opens two blocks of one corridor counts once by construction. Measured on a
+    real 22-block corridor: naive sum <strong>25</strong>, union <strong>4</strong>. Co-presence is
+    a sorted set and deliberately <em>not</em> a sketch, because a room has to be able to empty —
+    hidden tabs leave immediately, departure is explicit rather than left to expiry, and the count
+    is correct across replicas. Both ride the WebSocket that already exists: four JSON messages, no
+    second channel, no codec bump. The UI draws <strong>one mark per person with yours filled</strong>,
+    so the number can be counted against the sentence.</p>
+  </a>
+
   <a class="entry" href="./2026-08-14-tactical-vote-types-and-pin-selection.html">
     <div class="date">2026-08-14</div>
     <h2>Three ways a map lied about itself</h2>
