@@ -83,7 +83,29 @@ stand up rather than lie on the roofs (on the ground plane a glyph shears in
 both axes and turns to mush at chest scale), and 02's heart is the Donate mark
 from `NavRail/icons.tsx` — the one curve in an otherwise square icon set.
 
-## A print run
+## Sending a print run to a printer
+
+```bash
+./env/bin/python build_order.py
+```
+
+Writes `out/order/usatees-order.pdf` — the single file to send. A spec page,
+then one print per page, each page exactly the physical size of the artwork on
+it and carrying nothing else: no caption, no crop marks, no filename, because a
+note in the margin is a note a printer can mistake for artwork.
+
+USA Tees publish no artwork spec, so it follows what every DTF/DTG shop asks
+for: true size, vector, transparent ground, no white plate.
+
+⚠️ **The spec page tells them not to screen print, and that is not a
+preference.** Every shirt's code is different; a screen is one image pulled
+twenty times, so a screen-printed run would be twenty shirts pointing at one
+proposal. DTF or DTG only.
+
+`seed_tees.sql` lands beside it and is **not** for the printer — it is the row
+per code the API needs before a scan can resolve.
+
+## A bigger run, as loose files
 
 ```bash
 ./env/bin/python build_sheets.py --run 10

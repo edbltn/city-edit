@@ -3,3 +3,4 @@ fonttools
 pillow
 segno
 zxing-cpp
+pypdf

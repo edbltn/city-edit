@@ -18,6 +18,8 @@ pillow==12.3.0
     #   cairosvg
 pycparser==3.0
     # via cffi
+pypdf==6.16.1
+    # via -r requirements.in
 segno==1.6.6
     # via -r requirements.in
 tinycss2==1.5.1
