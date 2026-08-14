@@ -29,6 +29,29 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-14-tactical-vote-types-and-pin-selection.html">
+    <div class="date">2026-08-14</div>
+    <h2>Three ways a map lied about itself</h2>
+    <p>Three complaints about <code>nyc-tactical</code>, and in all three the map was faithfully
+    reporting state that was itself wrong. Vote types <strong>&quot;came back&quot;</strong> that had
+    never left: row <code>xmin</code> puts the map row's last write <strong>146,000
+    transactions</strong> before the oldest vote cast on it, so the earlier removal landed in some
+    other database and printed a checkmark anyway — <code>load_dotenv()</code> supplies the local
+    url to anyone who forgets an inline prod one, and an <code>UPDATE</code> matching zero rows is
+    not an error. The CLI now names its database and reads its write back. Two tied proposals
+    <strong>12 km apart</strong> drew a single pin, and the 1 km spacing radius was innocent: the
+    per-type cap is applied <em>before</em> the spacing pass and breaks ties by edge index, which is
+    graph <em>build</em> order — so all five slots went to blocks inside a <strong>228 m</strong>
+    stretch of one cast and the other neighbourhood was never a candidate at all. Ties are the
+    normal state of a young map, where every proposal has exactly one supporter. Slots are now
+    filled with blocks that are actually apart, and the radius halves to 500 m. The third was a
+    request to give those votes a route analog, which turned out to cost <strong>five</strong>
+    changes rather than one — the binding one a corridor support floor of 101 that would have
+    silently discarded the smaller of the two casts, measured by replaying all 189 prod votes onto
+    a local graph rather than by predicting it. Both casts now draw as corridors on prod, at
+    <strong>+128</strong> and <strong>+59</strong>.</p>
+  </a>
+
   <a class="entry" href="./2026-08-13-ws-binary-vote-frames.html">
     <div class="date">2026-08-13</div>
     <h2>A binary vote frame, and a sync packet for backgrounded tabs</h2>

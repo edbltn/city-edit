@@ -1,0 +1,1182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three ways a map lied about itself — 2026-08-14</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Three ways a map lied about itself</h1>
+    <div class="dateline">2026-08-14 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#vote-types">The vote types that never left</a>
+<a href="#pins">Five slots, one neighbourhood</a>
+<a href="#convert">What a route analog actually costs</a>
+<a href="#harness">Seeing the candidates, not just the winners</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Three complaints about <code>nyc-tactical</code>, and in all three the map was telling the truth about state that was itself wrong. Vote types &quot;came back&quot; that had never been removed from prod at all — row <code>xmin</code> proves the row was untouched, so the earlier edit went to another database and said &quot;✓&quot; anyway. Two tied proposals 12 km apart drew one pin, not because the spacing radius suppressed one, but because all five of the type's candidate slots had already been spent inside a 228 m stretch of the other — the cap is applied before the spacing pass and breaks ties by edge index, which is graph build order. And giving those votes a route analog turned out to cost five changes rather than one, the binding one being a corridor support floor that would have silently discarded the smaller of the two casts.</p>
+
+  
+    <section class="card" id="vote-types">
+      <div class="tag">ISSUE 1 · THE REGISTRY</div>
+      <h2>The vote types that never left</h2>
+      <h3>Symptom</h3>
+      <p>Seven vote types were removed from <code>nyc-tactical</code>'s picker earlier in the day. They were still there afterwards, and the obvious reading was that something had put them back.</p>
+      <h3>Root cause</h3>
+      <ul><li><strong>Nothing put them back. Prod's row was never written.</strong> <code>track_commit_timestamp</code> is off, but row <code>xmin</code> still orders writes: the map row's last write is <strong>3,417,135</strong>, while the oldest vote cast on that map is <strong>3,562,860</strong> and the current txid is 3,578,411. The row's last write predates the map's own oldest vote by ~146,000 transactions</li>
+<li>Both suspects clear on inspection, not by elimination. Only two writers of <code>custom_vote_types</code> exist — this CLI and <code>create_map</code>, a plain INSERT behind <code>slug_available()</code> (a repeat POST returns 409). The weekly DOT import targets <code>MAP_SLUG=nyc-proposals</code> and writes only the <code>vote_sources</code> registry</li>
+<li><code>seed_presets()</code> <em>does</em> rewrite rows wholesale on every Flask startup — visible in the same xmin data as one contiguous block (<code>vote_type_lists</code> 3567783-85, the nine preset maps 3567786-94). But it touches only <code>PRESET_MAPS</code> slugs and never writes <code>custom_vote_types</code>. <code>nyc-tactical</code> is not a preset</li>
+<li>So the edit landed somewhere that was not prod — and every path there ends in the same cheerful checkmark. <code>load_dotenv()</code> at import silently supplies <code>server/.env</code>'s LOCAL url whenever the caller forgets an inline prod one; both databases hold maps with the same slugs; an UPDATE matching zero rows is not a SQL error</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>The CLI names its database.</strong> <code>· database: host:port/name</code> prints before every command, so a wrong-target edit is visible in the transcript instead of indistinguishable from a right one</li>
+<li><strong>And proves the write landed.</strong> It fails when the UPDATE matches anything but one row, then reads the row back and refuses to claim a write it cannot see. It cannot know which database is the right one — that is the operator's call — but it can stop lying about which one it used</li>
+<li><strong>A second, real return path is now named.</strong> The dropdown IS the legend (<code>buildVoteTypeLegend</code>): it lists a label the map authored <em>or</em> one that carries votes. Removing a <em>voted</em> label takes it out of <code>custom_vote_types</code> and it returns immediately, sourced from the votes instead. <code>remove</code> now warns with the vote count when that will happen</li>
+<li>The seven removals then ran against prod, each read back: 24 → 17 types, and none of the seven had a single vote, so nothing re-admits them</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/manage_vote_types.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="pins">
+      <div class="tag">ISSUE 3 · PIN SELECTION</div>
+      <h2>Five slots, one neighbourhood</h2>
+      <h3>Symptom</h3>
+      <p>Two litter casts on <code>nyc-tactical</code>, <strong>12 km apart</strong> and tied at one supporter each, drew a single pin between them — well past the 1 km spacing radius that was supposed to be the only thing separating them.</p>
+      <h3>Root cause</h3>
+      <ul><li>The spacing pass was not the culprit. <strong>It never saw the second cast.</strong></li>
+<li><code>TOP_PROPOSALS_PER_TYPE</code> truncates a type's candidate blocks BEFORE the spacing pass, and the truncation is a plain <code>slice()</code> over a list whose tiebreak is the edge index — which is graph BUILD order, so on any map where blocks tie it is effectively a <em>geographic</em> sort</li>
+<li>Ties are the normal state of a young map: every proposal has exactly one supporter. Here, 39 blocks all at net 1</li>
+<li>Run against live prod, all five slots landed inside a <strong>228 m stretch</strong> of one cast (edges 585714–585767). Step 4 then correctly collapsed those five near-identical pins to one. The other neighbourhood's twelve blocks were never candidates, so they had nothing to lose with</li>
+<li>Which cast won was decided by nothing more meaningful than 66 of its edges being numbered below the other's lowest — the same data replayed on a locally-built graph, where the numbering interleaves, produced two pins and hid the bug entirely</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong><code>takeSpacedBlocks</code></strong> fills a type's slots strongest-first while skipping any block within <code>TOP_PROPOSAL_MIN_SPACING_M</code> of one already taken, so <code>perTypeLimit</code> counts distinct <em>places</em> rather than distinct rows</li>
+<li>It uses the SAME radius as step 4, so it can only pre-empt suppressions that pass would have made anyway — it cannot admit a pin the finished list would reject. Cost is O(blocks × slots), not O(blocks²): the scan stops at five kept</li>
+<li><strong>Suppression radius halved, 1000 → 500 m.</strong> At a walkable grain a kilometre suppressed neighbouring streets with nothing to do with each other; 500 m is ~6 avenue blocks or ~2 crosstown ones</li>
+<li>Same prod data, after the fix: <strong>4 candidates 12.4 km apart, 4 winners</strong>, both neighbourhoods represented</li>
+<li>The fixture whose edges all join one node pair now asks for spacing 0 — with a single midpoint between them, spacing would collapse the block-grain cases those tests are actually about. Three new cases cover the spacing itself, one of which reproduces the old loss by turning step-1 spacing back off</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/topProposals.ts</li>
+<li>client-react/src/components/GraphLayer/topProposals.test.ts</li>
+<li>docs/algorithms/02-top-proposals.md</li></ul>
+    </section>
+    
+
+    <section class="card" id="convert">
+      <div class="tag">ISSUE 2 · THE CONVERSION</div>
+      <h2>What a route analog actually costs</h2>
+      <h3>Symptom</h3>
+      <p>&quot;Run a litter pickup here&quot; is point-only and needed a route analog, with the existing votes moved onto it so they could become corridors. The stated trap was that route-kind labels must sit on corridors, not on isolated points.</p>
+      <h3>Root cause</h3>
+      <ul><li><strong>The geometry was never the problem.</strong> Both casts are already corridor-shaped: 130 edges over 1,077 m spanning 15 blocks, and 59 edges over 874 m spanning 23 blocks. Both clear <code>MIN_ROUTE_EDGES=2</code> and <code>MIN_ROUTE_BLOCKS=5</code> comfortably</li>
+<li><strong>The binding constraint is the corridor support floor.</strong> A path's score is the sum of its edge nets, and every edge here has net 1, so a cast's score is capped at its edge count. With no map override, <code>minRouteScore = ROUTE_PROPOSAL_MIN_NET + 1 = 101</code>: the 128-edge cast squeaks through and the 59-edge one cannot</li>
+<li>Measured rather than assumed. All 189 prod votes were replayed onto the local NYC graph (resnapped by lat/lon, 0 unsnapped — and it reproduced prod's 39 voted blocks exactly), then run through both real pipelines. At floor 101: <strong>1 corridor, and the second cast vanishes entirely</strong>. At floor 1: <strong>2 corridors</strong></li>
+<li>A vote also lives in three Redis layers, and <code>rebuild_redis_for_map</code> rebuilt only one of them while <em>deleting</em> the revision key — sending it backwards, below what connected clients already hold</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The conversion needed five things, not one: the authored route entry, a registry row with <code>point_type='route'</code> (the CLI does not mint one), the 189 re-pointed rows, <strong><code>top_proposal_min_net = 0</code> on the map</strong>, and all three Redis layers rebuilt</li>
+<li><strong><code>rebuild_redis_for_map</code> now rebuilds every layer a vote lives in.</strong> <code>bd:</code>/<code>bagg:</code> are keyed by vote type as well as by block, so re-pointing votes left their old slots standing and stale pins kept rendering from state nothing would ever correct</li>
+<li>They are keyed by edge→block, which lives on the graph and is not available there, so they are CLEARED rather than replayed — <code>/api/graph-votes</code> rebuilds them from Postgres on the next request against the graph that instance actually has</li>
+<li><strong>The revision is INCR'd, never SET.</strong> Atomic, collision-free against a concurrent caster, and always above whatever was there. This also fixes the <code>graph_reload</code> path, where <code>_resnap_city_maps</code> reset the revision on every graph rebuild</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>server/vote_migration.py</li>
+<li>server/retype_votes.py</li></ul>
+    </section>
+    
+
+    <section class="card" id="harness">
+      <div class="tag">THE INSTRUMENT</div>
+      <h2>Seeing the candidates, not just the winners</h2>
+      <h3>Symptom</h3>
+      <p>Every surface the app offers shows the FINISHED proposal list. A candidate that was never in the running looks exactly like one that lost.</p>
+      <h3>Root cause</h3>
+      <ul><li>The pin bug is invisible from the outside: one pin where two were expected is equally consistent with &quot;spacing suppressed it&quot;, &quot;its net was lower&quot; and &quot;it was never a candidate&quot; — three very different faults</li>
+<li>It is also environment-dependent. Replaying the same votes on a locally-built graph produced the correct two pins, because local edge numbering interleaves the two casts. Only prod's numbering triggers it</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong><code>scripts/tacticalDiag.ts</code></strong> runs BOTH families for one map through the real pipelines — <code>candidatesForGraph</code> / <code>selectTopProposalsFrom</code> and <code>createRouteProposalJob</code> / <code>rankRouteProposals</code> — with exactly the options GraphLayer passes them</li>
+<li>It prints the per-type candidate set BEFORE the spacing pass alongside the finished winners, plus the max separation within each type. That one line (&quot;5 candidates, max separation 228 m&quot;) is the whole diagnosis</li>
+<li><code>API_BASE</code> points it at a local Flask or at prod, so a bug that only prod's graph numbering triggers can be reproduced without shipping anything</li>
+<li><code>MIN_NET=&lt;n&gt;</code> previews what a map-level <code>topProposalMinNet</code> override would do to both families — which is how the corridor floor was measured before touching prod, rather than after</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/scripts/tacticalDiag.ts</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li><strong>The registry claim was proved, not inferred.</strong> Row <code>xmin</code> on the <code>maps</code> row (3,417,135) sits ~146,000 transactions before the oldest vote on that map (3,562,860), so the row demonstrably was not written that day — which is what rules out a rewrite and leaves a mis-targeted edit as the only explanation.</li>
+<li><strong>The pin bug was reproduced against live prod before any change:</strong> 5 candidates, max separation <strong>228 m</strong>, 1 winner. After the fix, same prod data: 4 candidates, max separation <strong>12,434 m</strong>, 4 winners.</li>
+<li><strong>The conversion was measured on a full replay, not predicted.</strong> All 189 prod votes resnapped onto the local NYC graph (0 unsnapped) reproduced prod's 39 voted blocks exactly; at corridor floor 101 the replay yields 1 corridor, at floor 1 it yields 2.</li>
+<li><strong>The Redis rebuild was verified end to end:</strong> rev 200 → 201 (forward, not reset), <code>bagg</code> 39 → 0, and then the next <code>/api/graph-votes</code> served the stale body once (SWR) and rebuilt 39 blocks from Postgres under the new vote type.</li>
+<li><strong>567 client tests and 203 server tests pass</strong>, <code>npx tsc -b</code> is clean, and <code>scripts/check_algorithm_docs.py</code> reports <em>OK 7 dossiers, 20 bound source files</em>.</li>
+<li><strong>Prod, after the change:</strong> <code>/api/maps/nyc-tactical</code> returns 18 vote types with <code>topProposalMinNet: 0</code>; <code>/api/graph-votes</code> returns rev 3, 189 voted edges, 39 voted blocks, legend <code>['Pick up trash along here']</code>; and the diagnostic returns <strong>0 point proposals and 2 corridors</strong> (scores 128 and 59) — exactly the replay's prediction.</li>
+<li><strong>Rendered in the browser on prod:</strong> the Morningside Park cast draws as a corridor labelled <em>PICK UP TRASH ALONG HERE +128</em>, the Wyckoff Avenue cast as <em>+59</em>, and the picker shows <em>18/18</em> — 11 point, 7 route — with no chalk entries and the new type filed under ROUTE PROPOSALS at net 39.</li>
+<li><strong>Backup taken before any write</strong> (<code>~/city-edit-prod-backups/20260814T200100Z/</code>): 27 MB <code>pg_dump</code> plus targeted snapshots of the 189 vote rows, the 24-entry vote-type JSON, and the <code>ev:</code>/<code>bagg:</code>/<code>vote_rev</code> Redis state, so this is reversible without a full restore.</li>
+<li>One transient worth knowing: the legend briefly rendered <code>#44128</code>. Prod's serving revision was built 2026-08-13, a day before <code>resolve_vote_type</code> gained DB read-through, so an instance whose startup cache predates an out-of-band vote type cannot resolve it. It has since resolved consistently (10/10 samples), but it will recur for any newly-minted type until the app is deployed.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>https://cityedit.org/m/nyc-tactical</code> and confirm the picker reads <strong>18/18</strong> with no <em>Chalk…</em> entries and no <em>Activate the plaza furniture</em>.</li>
+<li>Deep-link <code>?w=40.8060,-73.9590</code> and <code>?w=40.7050,-73.9200</code> — expect a corridor at each, labelled <strong>+128</strong> (Morningside Park) and <strong>+59</strong> (Wyckoff Avenue), not square pins.</li>
+<li><code>curl -s -H 'Cache-Control: no-cache' 'https://cityedit.org/api/maps/nyc-tactical?cb=1'</code> — note the cache-buster: <code>/api/maps</code> carries <code>max-age=60</code>, and a plain curl will happily serve you the pre-change config for a minute.</li>
+<li><code>cd client-react &amp;&amp; API_BASE=https://cityedit.org node_modules/.bin/vite-node scripts/tacticalDiag.ts nyc-tactical</code> — expect <em>PBTP winners: 0</em> and <em>RBTP corridors: 2</em>.</li>
+<li>The pin fix is NOT observable on nyc-tactical any more (its only votes are route-kind now). To see it, run the same diagnostic against a map with tied point votes, or check that pins on <code>nyc-proposals</code> still land where they did.</li>
+<li><strong>Still pending:</strong> the pin fix reaches users only through a client deploy. Until then prod runs the old selection, and the 500 m radius is not live.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/scripts/tacticalDiag.ts</span>
+            <span class="stat"><span class="d-add">+99</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · diagnostics</span>
+        <span class="ctx-sum">Off-app harnesses that run the real client pipelines against a live Flask, so selection behaviour can be measured without a browser or a deploy</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">tacticalDiag.ts</span>
+        <span class="ctx-sum">99 LOC — fetch config + topology + votes, then run both proposal families</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header / usage</span><span class="ol-sum">new</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">metersBetween</span><span class="ol-sum">new — separation reporting</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">map config + kindOf</span><span class="ol-sum">new — reads pointType, the field the app actually uses</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">MIN_NET override</span><span class="ol-sum">new — previews a topProposalMinNet without setting one</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">point family: candidates, separations, winners</span><span class="ol-sum">new — prints step 1 BEFORE steps 2–5</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">corridor family: job.types → step → rank</span><span class="ol-sum">new — score, edges, blocks, length per corridor</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Printing the CANDIDATES is the entire point: the app only ever shows winners, and &quot;never a candidate&quot; is indistinguishable from &quot;lost the spacing&quot; or &quot;outranked&quot; once the list is finished</li><li>The max-separation line per type is the diagnosis in one number — 5 candidates within 228 m says the slots were spent before spacing ever ran</li><li>spatialLookup.ts imports Leaflet, which has no `window` under vite-node, so TOP_PROPOSAL_LIMIT is mirrored rather than imported (noted in-file to keep it in step)</li><li>kindOf reads `pointType`; the older routepropStats.ts harness reads a `kind` field the API does not emit, so its kind filter has always been a no-op</li><li>API_BASE targets local or prod — which is what let a bug that only prod&#x27;s edge numbering triggers be reproduced, and the fix confirmed, before anything shipped</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/scripts/tacticalDiag.ts b/client-react/scripts/tacticalDiag.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..15cb3da</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/scripts/tacticalDiag.ts</span>
+<span class="d-hunk">@@ -0,0 +1,99 @@</span>
+<span class="d-add">+// Both proposal families for one map, run through the REAL client pipelines</span>
+<span class="d-add">+// against a live local Flask — the point family (topProposals.selectTopProposals)</span>
+<span class="d-add">+// and the corridor family (routeProposals.createRouteProposalJob), with exactly</span>
+<span class="d-add">+// the options GraphLayer passes them.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// Written to diagnose &quot;two tied pins, kilometres apart, only one shows&quot;: it</span>
+<span class="d-add">+// prints the per-type candidate set BEFORE the spacing pass alongside the</span>
+<span class="d-add">+// finished winners, which is where that loss happens.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// Usage: cd client-react &amp;&amp; node_modules/.bin/vite-node scripts/tacticalDiag.ts &lt;slug&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+import {</span>
+<span class="d-add">+  candidatesForGraph, selectTopProposalsFrom, TOP_PROPOSALS_PER_TYPE,</span>
+<span class="d-add">+  TOP_PROPOSAL_MIN_SPACING_M, TOP_PROPOSAL_MIN_NET, ROUTE_PROPOSAL_MIN_NET,</span>
+<span class="d-add">+  edgeMidpointResolver,</span>
+<span class="d-add">+} from &quot;../src/components/GraphLayer/topProposals&quot;;</span>
+<span class="d-add">+import { createRouteProposalJob, rankRouteProposals } from &quot;../src/components/GraphLayer/routeProposals&quot;;</span>
+<span class="d-add">+import {</span>
+<span class="d-add">+  decodeTopologyBin, buildNodeAdj, buildBlockIndex, blockKeyOf, edgeLengthMeters,</span>
+<span class="d-add">+} from &quot;../src/components/GraphLayer/graphTopology&quot;;</span>
+<span class="d-add">+// spatialLookup.ts pulls in Leaflet (no `window` under vite-node), so the pin</span>
+<span class="d-add">+// cap is mirrored here rather than imported. Keep in step with TOP_PROPOSAL_LIMIT.</span>
+<span class="d-add">+const TOP_PROPOSAL_LIMIT = 50;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const BASE = process.env.API_BASE ?? &quot;http://localhost:5001&quot;;</span>
+<span class="d-add">+const slug = process.argv[2] ?? &quot;nyc-tactical&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+function metersBetween(a: [number, number], b: [number, number]): number {</span>
+<span class="d-add">+  const meanLatRad = (((a[0] + b[0]) / 2) * Math.PI) / 180;</span>
+<span class="d-add">+  const dLat = ((b[0] - a[0]) * Math.PI) / 180;</span>
+<span class="d-add">+  const dLng = (((b[1] - a[1]) * Math.PI) / 180) * Math.cos(meanLatRad);</span>
+<span class="d-add">+  return 6_371_000 * Math.hypot(dLat, dLng);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+const cfgAll = await (await fetch(`${BASE}/api/maps`)).json();</span>
+<span class="d-add">+const cfg = (cfgAll.maps as any[]).find((m) =&gt; m.slug === slug);</span>
+<span class="d-add">+if (!cfg) throw new Error(`map ${slug} not found`);</span>
+<span class="d-add">+</span>
+<span class="d-add">+const kinds = new Map&lt;string, &quot;point&quot; | &quot;route&quot;&gt;();</span>
+<span class="d-add">+for (const vt of [...(cfg.voteTypes ?? []), ...(cfg.searchVoteTypes ?? [])]) {</span>
+<span class="d-add">+  if (vt.label &amp;&amp; (vt.pointType === &quot;point&quot; || vt.pointType === &quot;route&quot;)) kinds.set(vt.label, vt.pointType);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+const kindOf = (label: string) =&gt; kinds.get(label) ?? null;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const topo = decodeTopologyBin(await (await fetch(`${BASE}/api/graph-topology?map=${slug}&amp;format=bin`)).arrayBuffer());</span>
+<span class="d-add">+const votes = await (await fetch(`${BASE}/api/graph-votes?map=${slug}&amp;mode=${cfg.mode}`)).json();</span>
+<span class="d-add">+const data = { ...votes, ...topo } as any;</span>
+<span class="d-add">+</span>
+<span class="d-add">+// MIN_NET=&lt;n&gt; previews what a map-level `topProposalMinNet` override would do</span>
+<span class="d-add">+// to both families, without having to set one on the map first.</span>
+<span class="d-add">+const override = process.env.MIN_NET !== undefined ? Number(process.env.MIN_NET) : cfg.topProposalMinNet;</span>
+<span class="d-add">+const pinMinNet = override ?? TOP_PROPOSAL_MIN_NET;</span>
+<span class="d-add">+const routeMinNet = override ?? ROUTE_PROPOSAL_MIN_NET;</span>
+<span class="d-add">+console.log(`\n=== ${slug} (mode=${cfg.mode}) — ${topo.nEdges} edges, ${votes.n_blocks} blocks`);</span>
+<span class="d-add">+console.log(`pin floor &gt;${pinMinNet}, corridor min score ${routeMinNet + 1}, `</span>
+<span class="d-add">+  + `perType ${TOP_PROPOSALS_PER_TYPE}, spacing ${TOP_PROPOSAL_MIN_SPACING_M}m, limit ${TOP_PROPOSAL_LIMIT}`);</span>
+<span class="d-add">+console.log(`legend: ${JSON.stringify(votes.vote_type_legend)}`);</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ── point family ──────────────────────────────────────────────────────────</span>
+<span class="d-add">+const posOf = edgeMidpointResolver(data);</span>
+<span class="d-add">+const candidates = candidatesForGraph(data, TOP_PROPOSALS_PER_TYPE, kindOf, pinMinNet);</span>
+<span class="d-add">+console.log(`\nPBTP candidates (step 1, per type ≤${TOP_PROPOSALS_PER_TYPE}): ${candidates.length}`);</span>
+<span class="d-add">+for (const c of candidates) {</span>
+<span class="d-add">+  const p = posOf(c.edgeIdx);</span>
+<span class="d-add">+  console.log(`  ${c.label}  net=${c.count}  edge=${c.edgeIdx}  block=${blockKeyOf(data, c.edgeIdx)}  `</span>
+<span class="d-add">+    + `@ ${p ? p.map((v) =&gt; v.toFixed(5)).join(&quot;,&quot;) : &quot;?&quot;}`);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+// How far apart are the candidates of each type?</span>
+<span class="d-add">+const byType = new Map&lt;number, typeof candidates&gt;();</span>
+<span class="d-add">+for (const c of candidates) byType.set(c.legendIdx, [...(byType.get(c.legendIdx) ?? []), c]);</span>
+<span class="d-add">+for (const [li, cs] of byType) {</span>
+<span class="d-add">+  let dmax = 0;</span>
+<span class="d-add">+  for (let i = 0; i &lt; cs.length; i++) for (let j = i + 1; j &lt; cs.length; j++) {</span>
+<span class="d-add">+    const a = posOf(cs[i].edgeIdx), b = posOf(cs[j].edgeIdx);</span>
+<span class="d-add">+    if (a &amp;&amp; b) dmax = Math.max(dmax, metersBetween(a, b));</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  console.log(`  → type &quot;${votes.vote_type_legend[li]}&quot;: ${cs.length} candidates, max separation ${dmax.toFixed(0)} m`);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+const winners = selectTopProposalsFrom(data, candidates, 0, TOP_PROPOSAL_LIMIT, TOP_PROPOSAL_MIN_SPACING_M);</span>
+<span class="d-add">+console.log(`\nPBTP winners (steps 2–5): ${winners.length}`);</span>
+<span class="d-add">+for (const w of winners) {</span>
+<span class="d-add">+  const p = posOf(w.edgeIdx);</span>
+<span class="d-add">+  console.log(`  ${w.label}  net=${w.count}  edge=${w.edgeIdx}  @ ${p ? p.map((v) =&gt; v.toFixed(5)).join(&quot;,&quot;) : &quot;?&quot;}`);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ── corridor family ───────────────────────────────────────────────────────</span>
+<span class="d-add">+const adj = buildNodeAdj(topo);</span>
+<span class="d-add">+const job = createRouteProposalJob(topo, adj, data, {</span>
+<span class="d-add">+  kindOf, blockIndex: buildBlockIndex(topo), minRouteScore: routeMinNet + 1,</span>
+<span class="d-add">+});</span>
+<span class="d-add">+console.log(`\nRBTP eligible types: ${job.types.map((li) =&gt; votes.vote_type_legend[li]).join(&quot;, &quot;) || &quot;(none)&quot;}`);</span>
+<span class="d-add">+const perType = job.types.map((li) =&gt; job.step(li));</span>
+<span class="d-add">+const routes = rankRouteProposals(perType);</span>
+<span class="d-add">+console.log(`RBTP corridors: ${routes.length}`);</span>
+<span class="d-add">+for (const r of routes) {</span>
+<span class="d-add">+  const len = r.edgeIds.reduce((s, e) =&gt; s + edgeLengthMeters(topo, e), 0);</span>
+<span class="d-add">+  console.log(`  ${r.label}  score=${r.score}  edges=${r.edgeIds.length}  blocks=${r.blocks.length}  len=${Math.round(len)}m`);</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/topProposals.test.ts</span>
+            <span class="stat"><span class="d-add">+76</span> / <span class="d-del">-8</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GraphLayer / proposal selection</span>
+        <span class="ctx-sum">The pure selection steps&#x27; regression suite — the only alarm on a family whose failures look like ordinary map sparsity</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">topProposals.test.ts</span>
+        <span class="ctx-sum">828 LOC — 66 cases across the five steps, the resolvers, and the knobs</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">topo() helper + step 1–5 suites</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">candidatesForGraph — resolvers not optional</span><span class="ol-sum">amended — an `unspaced` helper for its degenerate fixture</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">per-type candidate slots go to distinct PLACES</span><span class="ol-sum">NEW — three cases guarding the fix</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">spaceOutWinners / applyTopProposalLimit suites</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Every edge in the candidatesForGraph fixture joins the SAME two nodes, so all five share one midpoint — with spacing on, they collapse to a single candidate and the block-grain assertions stop testing block grain</li><li>Rather than weaken those cases, they now pass spacing 0 explicitly and the spacing gets its own describe block with real coordinates</li><li>The new fixture is two clusters of six self-loop blocks, 100 m apart within a cluster and ~12 km between them, numbered so every LOW edge index is in cluster A — the prod shape, minimised</li><li>One case asserts the FIX (both clusters represented); one reproduces the OLD loss by passing spacing 0, so the regression is pinned from both sides</li><li>A third case gives the fixture no resolvable geometry and asserts all five slots still fill — missing geometry must never look like suppression</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/topProposals.test.ts b/client-react/src/components/GraphLayer/topProposals.test.ts</span>
+<span class="d-meta">index 69c0b89..72cd2f7 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/topProposals.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/topProposals.test.ts</span>
+<span class="d-hunk">@@ -19,7 +19,7 @@ import {</span>
+<span class="d-ctx">   type EdgePosition,</span>
+<span class="d-ctx">   type VoteTypeWinner,</span>
+<span class="d-ctx"> } from &quot;./topProposals&quot;;</span>
+<span class="d-del">-import { topologyFromJson } from &quot;./graphTopology&quot;;</span>
+<span class="d-add">+import { topologyFromJson, COORD_SCALE } from &quot;./graphTopology&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> const SALT = 12345;</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -291,8 +291,14 @@ describe(&quot;candidatesForGraph — the app&#x27;s step 1, resolvers not optional&quot;, () =</span>
+<span class="d-ctx">     block_vote_types: [[[0, 1, 0]], [[0, 3, 0]]] as [number, number, number][][],</span>
+<span class="d-ctx">   };</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // Every edge in this fixture joins the same two nodes, so all five share one</span>
+<span class="d-add">+  // midpoint and the per-type spacing would collapse them to a single</span>
+<span class="d-add">+  // candidate. These cases are about the block grain, not about spacing, so</span>
+<span class="d-add">+  // they pass 0 — spacing has its own describe block below.</span>
+<span class="d-add">+  const unspaced = (minNet: number) =&gt; candidatesForGraph(data, 5, undefined, minNet, 0);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   it(&quot;ranks by deduped devices, so the 3-device block beats the 4-edge one&quot;, () =&gt; {</span>
+<span class="d-del">-    const out = candidatesForGraph(data, 5, undefined, 0);</span>
+<span class="d-add">+    const out = unspaced(0);</span>
+<span class="d-ctx">     expect(out.map((w) =&gt; ({ edgeIdx: w.edgeIdx, count: w.count })))</span>
+<span class="d-ctx">       .toEqual([{ edgeIdx: 4, count: 3 }, { edgeIdx: 0, count: 1 }]);</span>
+<span class="d-ctx">   });</span>
+<span class="d-hunk">@@ -302,20 +308,82 @@ describe(&quot;candidatesForGraph — the app&#x27;s step 1, resolvers not optional&quot;, () =</span>
+<span class="d-ctx">     const degraded = computeWinnerCandidates(</span>
+<span class="d-ctx">       data.vote_type_legend, data.edge_vote_types, 5, undefined, 0</span>
+<span class="d-ctx">     );</span>
+<span class="d-del">-    expect(degraded.map((w) =&gt; w.count)).not.toEqual(</span>
+<span class="d-del">-      candidatesForGraph(data, 5, undefined, 0).map((w) =&gt; w.count)</span>
+<span class="d-del">-    );</span>
+<span class="d-add">+    expect(degraded.map((w) =&gt; w.count)).not.toEqual(unspaced(0).map((w) =&gt; w.count));</span>
+<span class="d-ctx">     expect(degraded[0]).toMatchObject({ edgeIdx: 4, count: 3 });</span>
+<span class="d-ctx">     expect(degraded).toHaveLength(5); // five singleton &quot;blocks&quot;, not two</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   it(&quot;groups by block, so a long block yields ONE candidate not four&quot;, () =&gt; {</span>
+<span class="d-del">-    expect(candidatesForGraph(data, 5, undefined, 0)).toHaveLength(2);</span>
+<span class="d-add">+    expect(unspaced(0)).toHaveLength(2);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   it(&quot;applies the support floor to the deduped net&quot;, () =&gt; {</span>
+<span class="d-del">-    expect(candidatesForGraph(data, 5, undefined, 2).map((w) =&gt; w.edgeIdx))</span>
+<span class="d-del">-      .toEqual([4]);</span>
+<span class="d-add">+    expect(unspaced(2).map((w) =&gt; w.edgeIdx)).toEqual([4]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;per-type candidate slots go to distinct PLACES&quot;, () =&gt; {</span>
+<span class="d-add">+  // Two clusters of tied blocks far apart, numbered so that ALL of the low edge</span>
+<span class="d-add">+  // indices belong to cluster A — the nyc-tactical shape: 39 blocks tied at net</span>
+<span class="d-add">+  // 1 across two casts 12 km apart, every slot spent inside 228 m of one of</span>
+<span class="d-add">+  // them, one pin drawn.</span>
+<span class="d-add">+  const legend = [&quot;Pick up litter&quot;];</span>
+<span class="d-add">+  const CLUSTER_A_LAT = 40.81;   // Harlem</span>
+<span class="d-add">+  const CLUSTER_B_LAT = 40.70;   // Bushwick, ~12 km south</span>
+<span class="d-add">+  const N_PER_CLUSTER = 6;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Node i sits 100 m east of node i-1 within its cluster, so neighbours inside</span>
+<span class="d-add">+  // a cluster are 100 m apart and the clusters are kilometres apart.</span>
+<span class="d-add">+  const nNodes = 2 * N_PER_CLUSTER;</span>
+<span class="d-add">+  const coords = new Int32Array(2 * nNodes);</span>
+<span class="d-add">+  for (let i = 0; i &lt; N_PER_CLUSTER; i++) {</span>
+<span class="d-add">+    coords[2 * i] = Math.round(CLUSTER_A_LAT * COORD_SCALE);</span>
+<span class="d-add">+    coords[2 * i + 1] = Math.round((-73.95 + i * 0.0012) * COORD_SCALE);</span>
+<span class="d-add">+    const j = N_PER_CLUSTER + i;</span>
+<span class="d-add">+    coords[2 * j] = Math.round(CLUSTER_B_LAT * COORD_SCALE);</span>
+<span class="d-add">+    coords[2 * j + 1] = Math.round((-73.92 + i * 0.0012) * COORD_SCALE);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  // Edge i is the self-loop at node i — one edge per block, one block per node.</span>
+<span class="d-add">+  // Cluster A takes edge indices 0..5, cluster B 6..11: the build-order bias.</span>
+<span class="d-add">+  const ends = new Uint32Array(2 * nNodes);</span>
+<span class="d-add">+  for (let e = 0; e &lt; nNodes; e++) { ends[2 * e] = e; ends[2 * e + 1] = e; }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const data = {</span>
+<span class="d-add">+    nNodes, nEdges: nNodes, coords, ends,</span>
+<span class="d-add">+    edgeBlockId: Int32Array.from({ length: nNodes }, (_, e) =&gt; e),</span>
+<span class="d-add">+    nBlocks: nNodes,</span>
+<span class="d-add">+    vote_type_legend: legend,</span>
+<span class="d-add">+    // Every block: exactly one supporter. All tied.</span>
+<span class="d-add">+    edge_vote_types: Array.from({ length: nNodes },</span>
+<span class="d-add">+      () =&gt; [[0, 1, 0]]) as [number, number, number][][],</span>
+<span class="d-add">+    block_vote_type_legend: legend,</span>
+<span class="d-add">+    block_vote_types: Array.from({ length: nNodes },</span>
+<span class="d-add">+      () =&gt; [[0, 1, 0]]) as [number, number, number][][],</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;does not spend every slot on the lowest-numbered cluster&quot;, () =&gt; {</span>
+<span class="d-add">+    const winners = selectTopProposals(data, 0, 50);</span>
+<span class="d-add">+    const inA = winners.filter((w) =&gt; w.edgeIdx &lt; N_PER_CLUSTER).length;</span>
+<span class="d-add">+    const inB = winners.length - inA;</span>
+<span class="d-add">+    expect(inA).toBeGreaterThan(0);</span>
+<span class="d-add">+    expect(inB).toBeGreaterThan(0);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;without spacing in step 1, the far cluster is never a candidate&quot;, () =&gt; {</span>
+<span class="d-add">+    // The pre-fix behaviour, reproduced by turning the step-1 spacing off: the</span>
+<span class="d-add">+    // five slots go to the five lowest edge indices, all in cluster A, and the</span>
+<span class="d-add">+    // spacing pass then collapses them to one pin.</span>
+<span class="d-add">+    const unspaced = candidatesForGraph(data, TOP_PROPOSALS_PER_TYPE, undefined, 0, 0);</span>
+<span class="d-add">+    expect(unspaced.every((w) =&gt; w.edgeIdx &lt; N_PER_CLUSTER)).toBe(true);</span>
+<span class="d-add">+    const winners = selectTopProposalsFrom(data, unspaced, 0, 50);</span>
+<span class="d-add">+    expect(winners.every((w) =&gt; w.edgeIdx &lt; N_PER_CLUSTER)).toBe(true);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps blocks whose geometry can&#x27;t be resolved&quot;, () =&gt; {</span>
+<span class="d-add">+    // A winner with no midpoint must never be silently dropped for spacing.</span>
+<span class="d-add">+    const noGeom = { ...data, nNodes: 0 };</span>
+<span class="d-add">+    expect(candidatesForGraph(noGeom, TOP_PROPOSALS_PER_TYPE, undefined, 0))</span>
+<span class="d-add">+      .toHaveLength(TOP_PROPOSALS_PER_TYPE);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/topProposals.ts</span>
+            <span class="stat"><span class="d-add">+79</span> / <span class="d-del">-16</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GraphLayer / proposal selection</span>
+        <span class="ctx-sum">The point family (PBTP): pure, client-side selection of which blocks get a square pin, re-run on every vote delta with no server round-trip</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">topProposals.ts</span>
+        <span class="ctx-sum">671 LOC — the five selection steps, the block-grain resolvers, and the family&#x27;s tuning knobs</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header: the five steps</span><span class="ol-sum">amended — step 1 now documents WHY its slots must be spaced</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">shuffleKey / compareWinners</span><span class="ol-sum">unchanged — deterministic per-session tiebreak</span></li><li class="dim"><span class="ol-label">VoteTypeKindResolver / VoteTypeVisibility</span><span class="ol-sum">unchanged — kind split and legend toggle</span></li><li class="dim"><span class="ol-label">TOP_PROPOSAL_MIN_NET / ROUTE_PROPOSAL_MIN_NET</span><span class="ol-sum">unchanged — the two families&#x27; floors</span></li><li class="dim"><span class="ol-label">EdgeBlockKey / singletonBlockKey</span><span class="ol-sum">unchanged — block identity, degrading to per-edge</span></li><li class="dim"><span class="ol-label">dedupedBlockNetResolver</span><span class="ol-sum">unchanged — the honest per-device net, bridged by label</span></li><li class="dim"><span class="ol-label">BlockTally</span><span class="ol-sum">unchanged — the step-1 per-block accumulator</span></li><li class="changed"><span class="ol-label">takeSpacedBlocks</span><span class="ol-sum">NEW — fills a type&#x27;s slots with blocks that are actually apart</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">computeVoteTypeWinners / computeWinnerCandidates</span><span class="ol-sum">+2 params — positionOf and minSpacingMeters; the slice becomes takeSpacedBlocks</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">filterWinnersByVisibility / topLabelForEdges</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">steps 2–3: dedupeWinnersByEdge / ByBlock</span><span class="ol-sum">unchanged — one pin per edge, then per block</span></li><li class="dim"><span class="ol-label">metersBetween / edgeMidpointResolver</span><span class="ol-sum">unchanged — now also consumed by step 1</span></li><li class="dim"><span class="ol-label">step 4: spaceOutWinners</span><span class="ol-sum">unchanged — still the cross-type-survivor pass</span></li><li class="dim"><span class="ol-label">step 5: applyTopProposalLimit</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">TOP_PROPOSALS_PER_TYPE</span><span class="ol-sum">re-documented — now counts distinct LOCATIONS</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">TOP_PROPOSAL_MIN_SPACING_M</span><span class="ol-sum">1000 → 500 m</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">candidatesForGraph</span><span class="ol-sum">+1 param — supplies the third resolver callers kept forgetting</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">selectTopProposals / selectTopProposalsFrom</span><span class="ol-sum">threads minSpacingMeters into step 1</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>takeSpacedBlocks is generic over {edgeIdx}, so it sorts nothing itself — it consumes the ranking step 1 already produced and only decides who is admitted</li><li>It uses the SAME radius as step 4 by construction, so it can never admit a pin the finished list would reject; it only stops the losers eating the slots</li><li>O(blocks × limit), not O(blocks²): the loop breaks at `kept.length &gt;= limit`, so the cost is five distance checks per block at worst</li><li>Blocks whose midpoint cannot be resolved are KEPT, never silently dropped — the same rule step 4 already followed for missing geometry</li><li>With no positionOf (a synthetic fixture with no topology) the behaviour is exactly the former plain truncation, so the pure function stays honest about degrading</li><li>candidatesForGraph now supplies THREE resolvers rather than two; its whole reason for existing is that omitting any of them silently demotes the ranking with no type error and no warning</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/topProposals.ts b/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-meta">index 84f6470..4d1163e 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-hunk">@@ -24,7 +24,10 @@</span>
+<span class="d-ctx"> //      arrays. Block net ≤ 0 is excluded, and so are ROUTE-kind types (they</span>
+<span class="d-ctx"> //      surface as RBTPs; a route type&#x27;s hot edge is a corridor fragment, not a</span>
+<span class="d-ctx"> //      point proposal). Types of unknown kind (legacy suggestions never</span>
+<span class="d-del">-//      flagged) stay eligible.</span>
+<span class="d-add">+//      flagged) stay eligible. The `perTypeLimit` slots go to blocks that are</span>
+<span class="d-add">+//      genuinely APART (takeSpacedBlocks): ranking alone hands every slot to</span>
+<span class="d-add">+//      one neighbourhood whenever the blocks tie, since the tiebreak is the</span>
+<span class="d-add">+//      edge index and edge indices follow the graph build order.</span>
+<span class="d-ctx"> //   2. dedupeWinnersByEdge   — collapse winners that share an edge to a single</span>
+<span class="d-ctx"> //      representative (tiebreak), so one edge shows one indicator and occupies</span>
+<span class="d-ctx"> //      one slot.</span>
+<span class="d-hunk">@@ -194,6 +197,52 @@ interface BlockTally {</span>
+<span class="d-ctx">   edgeNet: number;  // that edge&#x27;s own net, kept only to compare the next one</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Fill one vote type&#x27;s `limit` candidate slots with blocks that are actually in</span>
+<span class="d-add">+ * DIFFERENT PLACES: walk the ranked blocks strongest-first and skip any within</span>
+<span class="d-add">+ * `minSpacingMeters` of one already taken.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Without this the cap was a plain `slice(limit)` over a list whose tiebreak is</span>
+<span class="d-add">+ * the edge index, and edge indices follow the graph BUILD order — so a type</span>
+<span class="d-add">+ * whose blocks tie on net (the normal state of a young map: every proposal has</span>
+<span class="d-add">+ * exactly one supporter) spent all of its slots on whichever neighbourhood the</span>
+<span class="d-add">+ * graph builder happened to number first. Step 4&#x27;s spacing pass then collapsed</span>
+<span class="d-add">+ * that one neighbourhood to a single pin, and every other place asking for the</span>
+<span class="d-add">+ * same thing was never a candidate at all. Observed on nyc-tactical: 39 blocks</span>
+<span class="d-add">+ * tied at net 1 across two casts 12 km apart, all five slots inside a 228 m</span>
+<span class="d-add">+ * stretch of one of them, one pin drawn.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Spacing here uses the SAME radius as step 4, so this only ever pre-empts</span>
+<span class="d-add">+ * suppressions that pass would have made anyway — it cannot admit a pin the</span>
+<span class="d-add">+ * finished list would have rejected, it just stops the losers from eating the</span>
+<span class="d-add">+ * slots. Blocks whose position can&#x27;t be resolved are kept (never silently</span>
+<span class="d-add">+ * dropped on missing geometry), and with no resolver the behaviour is the</span>
+<span class="d-add">+ * former plain truncation.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Cost is O(blocks × limit), not O(blocks²): the scan stops at `limit` kept.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+function takeSpacedBlocks&lt;T extends { edgeIdx: number }&gt;(</span>
+<span class="d-add">+  ranked: T[],</span>
+<span class="d-add">+  limit: number,</span>
+<span class="d-add">+  positionOf?: EdgePosition,</span>
+<span class="d-add">+  minSpacingMeters = 0</span>
+<span class="d-add">+): T[] {</span>
+<span class="d-add">+  if (!positionOf || minSpacingMeters &lt;= 0) return ranked.slice(0, limit);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const kept: T[] = [];</span>
+<span class="d-add">+  const keptPos: [number, number][] = [];</span>
+<span class="d-add">+  for (const block of ranked) {</span>
+<span class="d-add">+    if (kept.length &gt;= limit) break;</span>
+<span class="d-add">+    const pos = positionOf(block.edgeIdx);</span>
+<span class="d-add">+    if (pos) {</span>
+<span class="d-add">+      if (keptPos.some((p) =&gt; metersBetween(p, pos) &lt; minSpacingMeters)) continue;</span>
+<span class="d-add">+      keptPos.push(pos);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    kept.push(block);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return kept;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /**</span>
+<span class="d-ctx">  * Step 1 — for each vote type, the top `perTypeLimit` blocks by DEDUPED net</span>
+<span class="d-ctx">  * support (highest first). Vote types with no block above max(0, minNet) are</span>
+<span class="d-hunk">@@ -238,7 +287,9 @@ export function computeWinnerCandidates(</span>
+<span class="d-ctx">   kindOf?: VoteTypeKindResolver,</span>
+<span class="d-ctx">   minNet = 0,</span>
+<span class="d-ctx">   blockKeyOfEdge: EdgeBlockKey = singletonBlockKey,</span>
+<span class="d-del">-  blockNetOf?: BlockNetResolver</span>
+<span class="d-add">+  blockNetOf?: BlockNetResolver,</span>
+<span class="d-add">+  positionOf?: EdgePosition,</span>
+<span class="d-add">+  minSpacingMeters = 0</span>
+<span class="d-ctx"> ): VoteTypeWinner[] {</span>
+<span class="d-ctx">   if (!legend.length || !edgeVoteTypes.length) return [];</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -306,7 +357,9 @@ export function computeWinnerCandidates(</span>
+<span class="d-ctx">       if (net &gt; floor) blocks.push({ edgeIdx: tally.edgeIdx, net });</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     blocks.sort((a, b) =&gt; b.net - a.net || a.edgeIdx - b.edgeIdx);</span>
+<span class="d-del">-    for (const { edgeIdx, net } of blocks.slice(0, perTypeLimit)) {</span>
+<span class="d-add">+    for (const { edgeIdx, net } of takeSpacedBlocks(</span>
+<span class="d-add">+      blocks, perTypeLimit, positionOf, minSpacingMeters</span>
+<span class="d-add">+    )) {</span>
+<span class="d-ctx">       winners.push({ legendIdx, label, edgeIdx, count: net });</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">   }</span>
+<span class="d-hunk">@@ -498,22 +551,26 @@ export function applyTopProposalLimit(</span>
+<span class="d-ctx">     .slice(0, limit);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-// Up to this many BLOCKS per vote type feed the spacing step, so a popular type</span>
+<span class="d-del">-// can surface several distinct LOCATIONS (not just its single best block). The</span>
+<span class="d-del">-// spacing pass then collapses any that land on the same corridor. Five rather</span>
+<span class="d-del">-// than the six of the edge-grain era: a block already absorbs the near-duplicate</span>
+<span class="d-del">-// candidates (both directions of a street, both halves of a split segment) that</span>
+<span class="d-del">-// the sixth slot used to spend itself on.</span>
+<span class="d-add">+// Up to this many DISTINCT LOCATIONS per vote type feed the spacing step, so a</span>
+<span class="d-add">+// popular type can surface several places asking for it (not just its single</span>
+<span class="d-add">+// best block). Five rather than the six of the edge-grain era: a block already</span>
+<span class="d-add">+// absorbs the near-duplicate candidates (both directions of a street, both</span>
+<span class="d-add">+// halves of a split segment) that the sixth slot used to spend itself on.</span>
+<span class="d-add">+// `takeSpacedBlocks` is what makes these five distinct locations rather than</span>
+<span class="d-add">+// five entries from one corridor — see its comment for what that cost us.</span>
+<span class="d-ctx"> export const TOP_PROPOSALS_PER_TYPE = 5;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> // Two top proposals of the SAME vote type closer than this collapse to the</span>
+<span class="d-ctx"> // stronger one — kills the &quot;3 identical pins stacked on one avenue&quot; look.</span>
+<span class="d-del">-// Deliberately much wider than the cross-type grain (one pin per block, see</span>
+<span class="d-add">+// Deliberately wider than the cross-type grain (one pin per block, see</span>
+<span class="d-ctx"> // dedupeWinnersByBlock): identical pins carry zero extra information nearby,</span>
+<span class="d-ctx"> // while different-type pins are distinct proposals and only collapse when they</span>
+<span class="d-del">-// share a block. A kilometre is ~12 NYC avenue blocks — wide enough that one</span>
+<span class="d-del">-// popular type spreads across neighbourhoods instead of pooling in one.</span>
+<span class="d-del">-export const TOP_PROPOSAL_MIN_SPACING_M = 1000;</span>
+<span class="d-add">+// share a block. 500 m is ~6 NYC avenue blocks or ~2 crosstown ones — far</span>
+<span class="d-add">+// enough that a pin means a place rather than a segment, close enough that two</span>
+<span class="d-add">+// genuinely different corners keep their own pins. It was 1 km, which on a</span>
+<span class="d-add">+// walkable grain suppressed neighbouring streets that had nothing to do with</span>
+<span class="d-add">+// each other.</span>
+<span class="d-add">+export const TOP_PROPOSAL_MIN_SPACING_M = 500;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /**</span>
+<span class="d-ctx">  * Step 1 for a REAL graph — `computeWinnerCandidates` with the block-grain</span>
+<span class="d-hunk">@@ -537,7 +594,8 @@ export function candidatesForGraph(</span>
+<span class="d-ctx">     | &quot;block_vote_types&quot; | &quot;block_vote_type_legend&quot;&gt; &amp; GraphTopology,</span>
+<span class="d-ctx">   perTypeLimit = TOP_PROPOSALS_PER_TYPE,</span>
+<span class="d-ctx">   kindOf?: VoteTypeKindResolver,</span>
+<span class="d-del">-  minNet = TOP_PROPOSAL_MIN_NET</span>
+<span class="d-add">+  minNet = TOP_PROPOSAL_MIN_NET,</span>
+<span class="d-add">+  minSpacingMeters = TOP_PROPOSAL_MIN_SPACING_M</span>
+<span class="d-ctx"> ): VoteTypeWinner[] {</span>
+<span class="d-ctx">   return computeWinnerCandidates(</span>
+<span class="d-ctx">     data.vote_type_legend ?? [],</span>
+<span class="d-hunk">@@ -547,7 +605,12 @@ export function candidatesForGraph(</span>
+<span class="d-ctx">     minNet,</span>
+<span class="d-ctx">     // Votes live on edges but count on BLOCKS, by distinct device.</span>
+<span class="d-ctx">     (edgeIdx) =&gt; blockKeyOf(data, edgeIdx),</span>
+<span class="d-del">-    dedupedBlockNetResolver(data)</span>
+<span class="d-add">+    dedupedBlockNetResolver(data),</span>
+<span class="d-add">+    // A type&#x27;s slots go to distinct PLACES, not to whichever blocks the graph</span>
+<span class="d-add">+    // builder numbered first — the third resolver this entry point exists to</span>
+<span class="d-add">+    // stop callers forgetting.</span>
+<span class="d-add">+    edgeMidpointResolver(data),</span>
+<span class="d-add">+    minSpacingMeters</span>
+<span class="d-ctx">   );</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -577,7 +640,7 @@ export function selectTopProposals(</span>
+<span class="d-ctx">   if (!data) return [];</span>
+<span class="d-ctx">   return selectTopProposalsFrom(</span>
+<span class="d-ctx">     data,</span>
+<span class="d-del">-    candidatesForGraph(data, TOP_PROPOSALS_PER_TYPE, kindOf, minNet),</span>
+<span class="d-add">+    candidatesForGraph(data, TOP_PROPOSALS_PER_TYPE, kindOf, minNet, minSpacingMeters),</span>
+<span class="d-ctx">     salt, limit, minSpacingMeters, isVisible</span>
+<span class="d-ctx">   );</span>
+<span class="d-ctx"> }</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">docs/algorithms/02-top-proposals.md</span>
+            <span class="stat"><span class="d-add">+17</span> / <span class="d-del">-5</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · algorithm dossiers</span>
+        <span class="ctx-sum">Source-bound dossiers: each names the symbols it explains, and check_algorithm_docs.py fails when one drifts from the code</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">02-top-proposals.md</span>
+        <span class="ctx-sum">222 lines — why the family exists, its pseudocode, knobs, invariants, and past failures</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">front matter: bound anchors</span><span class="ol-sum">+takeSpacedBlocks</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Why it exists / Inputs and outputs</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">Pseudocode step 1</span><span class="ol-sum">rewritten — ranking, then spaced slot-filling</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Pseudocode steps 2–5</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">Tuning knobs table</span><span class="ol-sum">TOP_PROPOSALS_PER_TYPE and MIN_SPACING_M re-described</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Invariants / past failures</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The anchor list is enforced: adding takeSpacedBlocks to the dossier is what binds the doc to the new symbol</li><li>The pseudocode now separates RANKING from ADMISSION, because conflating them is exactly the bug — the ranking was always right</li><li>The knob table records the dated failure (39 blocks tied, all five slots inside 228 m, one pin) so the next person tuning these numbers knows which one is load-bearing</li><li>MIN_SPACING_M is now noted as applied TWICE — once filling slots, once across survivors — which is not obvious from either call site alone</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/algorithms/02-top-proposals.md b/docs/algorithms/02-top-proposals.md</span>
+<span class="d-meta">index 7510138..4b5f70f 100644</span>
+<span class="d-meta">--- a/docs/algorithms/02-top-proposals.md</span>
+<span class="d-meta">+++ b/docs/algorithms/02-top-proposals.md</span>
+<span class="d-hunk">@@ -3,7 +3,7 @@ title: Top proposals — point-based (PBTP)</span>
+<span class="d-ctx"> description: How a handful of square pins are chosen out of every voted edge on the map.</span>
+<span class="d-ctx"> sources:</span>
+<span class="d-ctx">   - path: client-react/src/components/GraphLayer/topProposals.ts</span>
+<span class="d-del">-    anchors: [selectTopProposals, computeVoteTypeWinners, computeWinnerCandidates, dedupedBlockNetResolver, dedupeWinnersByEdge, dedupeWinnersByBlock, spaceOutWinners, applyTopProposalLimit, compareWinners, shuffleKey, topLabelForEdges, edgeMidpointResolver, TOP_PROPOSAL_MIN_NET, ROUTE_PROPOSAL_MIN_NET, TOP_PROPOSALS_PER_TYPE, TOP_PROPOSAL_MIN_SPACING_M]</span>
+<span class="d-add">+    anchors: [selectTopProposals, computeVoteTypeWinners, computeWinnerCandidates, dedupedBlockNetResolver, dedupeWinnersByEdge, dedupeWinnersByBlock, spaceOutWinners, takeSpacedBlocks, applyTopProposalLimit, compareWinners, shuffleKey, topLabelForEdges, edgeMidpointResolver, TOP_PROPOSAL_MIN_NET, ROUTE_PROPOSAL_MIN_NET, TOP_PROPOSALS_PER_TYPE, TOP_PROPOSAL_MIN_SPACING_M]</span>
+<span class="d-ctx">   - path: client-react/src/components/GraphLayer/spatialLookup.ts</span>
+<span class="d-ctx">     anchors: [TOP_PROPOSAL_LIMIT]</span>
+<span class="d-ctx"> ---</span>
+<span class="d-hunk">@@ -64,9 +64,21 @@ selectTopProposals(data, salt, limit, minSpacing, kindOf, minNet, isVisible):</span>
+<span class="d-ctx">                block.net = dedupedBlockNet(block, type) # distinct DEVICES</span>
+<span class="d-ctx">                         ?? block.edgeSum                # only when there is no</span>
+<span class="d-ctx">                                                         # deduped row to read</span>
+<span class="d-del">-           keep its top TOP_PROPOSALS_PER_TYPE blocks by net, where net &gt; minNet</span>
+<span class="d-add">+           rank the blocks with net &gt; minNet by net desc, edge id asc</span>
+<span class="d-add">+           takeSpacedBlocks: fill TOP_PROPOSALS_PER_TYPE slots strongest-first,</span>
+<span class="d-add">+               skipping any block within TOP_PROPOSAL_MIN_SPACING_M of one</span>
+<span class="d-add">+               already taken</span>
+<span class="d-ctx">        # per-type, not global: a popular type can surface several distinct</span>
+<span class="d-del">-       # LOCATIONS rather than only its single best block.</span>
+<span class="d-add">+       # LOCATIONS rather than only its single best block. The spacing is what</span>
+<span class="d-add">+       # makes them distinct LOCATIONS: the ranking tiebreak is the edge id and</span>
+<span class="d-add">+       # edge ids follow the graph BUILD order, so on a map where blocks tie —</span>
+<span class="d-add">+       # a young map, where every proposal has exactly one supporter — a plain</span>
+<span class="d-add">+       # truncation handed every slot to whichever neighbourhood the builder</span>
+<span class="d-add">+       # numbered first, and step 4 then collapsed that neighbourhood to one</span>
+<span class="d-add">+       # pin. nyc-tactical, 2026-08-14: 39 blocks tied at net 1 across two</span>
+<span class="d-add">+       # casts 12 km apart, all five slots inside a 228 m stretch of one of</span>
+<span class="d-add">+       # them, one pin drawn. Cost is O(blocks × slots) — the scan stops at</span>
+<span class="d-add">+       # five kept, so this is linear, not the O(n²) of step 4.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   2. dedupeWinnersByEdge</span>
+<span class="d-ctx">        winners sharing an edge collapse to one representative (compareWinners)</span>
+<span class="d-hunk">@@ -147,8 +159,8 @@ RBTP&#x27;s blocks already cover are dropped downstream by `dropPointsCoveredByRoutes</span>
+<span class="d-ctx"> | `TOP_PROPOSAL_MIN_NET` | `0` | `topProposals.ts` | The pin support floor, applied strictly (`net &gt; floor`) to a BLOCK&#x27;s DEDUPED net — so it now reads as &quot;more than this many people&quot;, not &quot;more than this many vote rows&quot;. Zero since 2026-08-12: a single net vote earns a pin, and the ranking plus `TOP_PROPOSAL_LIMIT` decides who keeps one. A map can raise it for itself (`topProposalMinNet`); a raised floor is meaningfully HARDER to clear than it was at edge grain, where a lone route-length cast could clear it alone. |</span>
+<span class="d-ctx"> | `ROUTE_PROPOSAL_MIN_NET` | `100` | `topProposals.ts` | The corridor floor, as a minimum path score — where the shared floor used to sit. Corridors keep it because a route grown from one or two votes wanders; a map&#x27;s `topProposalMinNet` override still wins (`nyc-proposals` sets 0). |</span>
+<span class="d-ctx"> | `TOP_PROPOSAL_LIMIT` | `50` | `spatialLookup.ts` | Global cap on rendered pins, applied last, by net descending. With no support floor this is the legibility control. RBTP corridors are capped separately (`DEFAULT_LIMIT`, `routeProposals.ts`). |</span>
+<span class="d-del">-| `TOP_PROPOSALS_PER_TYPE` | `5` | `topProposals.ts` | How many BLOCKS per type reach the spacing step. Raise it and a popular type surfaces more distinct locations — at the cost of crowding other types out of the final `limit`. Dropped from 6 with the move to block grain (2026-08-12): the slot that used to be eaten by a street&#x27;s second direction now doesn&#x27;t exist. |</span>
+<span class="d-del">-| `TOP_PROPOSAL_MIN_SPACING_M` | `1000` | `topProposals.ts` | Same-type non-max suppression radius, ≈ 12 NYC avenue blocks. Lower it and a hot avenue grows a stack of identical pins; raise it and a genuinely city-wide demand shows up as one pin in one neighbourhood. Tune for denser or sparser networks. |</span>
+<span class="d-add">+| `TOP_PROPOSALS_PER_TYPE` | `5` | `topProposals.ts` | How many DISTINCT LOCATIONS per type reach the spacing step (`takeSpacedBlocks`; before 2026-08-14 it was the top five blocks by rank, which on tied nets meant five entries from one corridor). Raise it and a popular type surfaces more places — at the cost of crowding other types out of the final `limit`. Dropped from 6 with the move to block grain (2026-08-12): the slot that used to be eaten by a street&#x27;s second direction now doesn&#x27;t exist. |</span>
+<span class="d-add">+| `TOP_PROPOSAL_MIN_SPACING_M` | `500` | `topProposals.ts` | Same-type suppression radius, ≈ 6 NYC avenue blocks or 2 crosstown ones. Applied TWICE: once when step 1 fills a type&#x27;s slots, once in step 4 across the survivors. Lower it and a hot avenue grows a stack of identical pins; raise it and a genuinely city-wide demand shows up as one pin in one neighbourhood. Halved from 1000 on 2026-08-14 — at a walkable grain a kilometre suppressed neighbouring streets with nothing to do with each other. Tune for denser or sparser networks. |</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> The families no longer share one bar (2026-08-12): `createRouteProposalJob` is</span>
+<span class="d-ctx"> called with `minRouteScore = routeProposalMinNet + 1`, which resolves to a map&#x27;s</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">docs/algorithms/README.md</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · algorithm dossiers</span>
+        <span class="ctx-sum">The dossier index and the consolidated knob table across all seven algorithms</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">README.md</span>
+        <span class="ctx-sum">154 lines — index, reading order, and every tuning knob in one place</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">index / reading order</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">consolidated knob table</span><span class="ol-sum">TOP_PROPOSAL_MIN_SPACING_M 1000 → 500</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The same knob is stated in two places by design — a reader tuning proposals starts here, not in the dossier</li><li>Left drifting, this table is worse than no table: it is the one a hurried change consults</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/algorithms/README.md b/docs/algorithms/README.md</span>
+<span class="d-meta">index cd83399..88c9055 100644</span>
+<span class="d-meta">--- a/docs/algorithms/README.md</span>
+<span class="d-meta">+++ b/docs/algorithms/README.md</span>
+<span class="d-hunk">@@ -65,7 +65,7 @@ header is `Knob`:</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> | Knob | Value | Defined in | What breaks if you change it |</span>
+<span class="d-ctx"> |---|---|---|---|</span>
+<span class="d-del">-| `TOP_PROPOSAL_MIN_SPACING_M` | `1000` | `topProposals.ts` | Lower it and a hot avenue grows a stack of identical pins. |</span>
+<span class="d-add">+| `TOP_PROPOSAL_MIN_SPACING_M` | `500` | `topProposals.ts` | Lower it and a hot avenue grows a stack of identical pins. |</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> The checker parses the first three columns and compares the documented value</span>
+<span class="d-ctx"> against the literal in the source, so a knob tuned in code and not in prose is a</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">docs/three-layer-model.md</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · architecture</span>
+        <span class="ctx-sum">The storage/aggregation/proposal model — what a vote IS at each of the three layers, and the PBTP/RBTP vocabulary</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">three-layer-model.md</span>
+        <span class="ctx-sum">405 lines — the three layers, their invariants, and the terms the rest of the docs use</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">PBTP / RBTP definitions</span><span class="ol-sum">spacing figure updated to 500 m</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Layer 1–3 / invariants</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The definition quotes the spacing figure inline, so the number lives in three files and all three had to move together</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/three-layer-model.md b/docs/three-layer-model.md</span>
+<span class="d-meta">index 14d268e..27ea877 100644</span>
+<span class="d-meta">--- a/docs/three-layer-model.md</span>
+<span class="d-meta">+++ b/docs/three-layer-model.md</span>
+<span class="d-hunk">@@ -31,7 +31,7 @@ Layer 1  Edge/node graph   OSRM pathfinding + votable topology · votes stored</span>
+<span class="d-ctx"> &gt;   **square** pin at the edge midpoint. Selected by</span>
+<span class="d-ctx"> &gt;   `topProposals.selectTopProposals` (client) — at most **one pin per block**</span>
+<span class="d-ctx"> &gt;   across all vote types, and same-type pins at least</span>
+<span class="d-del">-&gt;   `TOP_PROPOSAL_MIN_SPACING_M` (1000 m) apart — drawn by GraphLayer&#x27;s</span>
+<span class="d-add">+&gt;   `TOP_PROPOSAL_MIN_SPACING_M` (500 m) apart — drawn by GraphLayer&#x27;s</span>
+<span class="d-ctx"> &gt;   `indicatorMarkers`.</span>
+<span class="d-ctx"> &gt; - **RBTP** — **route-based top proposal**: a hot **corridor** (Layer 3 below),</span>
+<span class="d-ctx"> &gt;   rendered as a **diamond** pin at its middle path edge. Computed by</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/manage_vote_types.py</span>
+            <span class="stat"><span class="d-add">+58</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Server · admin CLI</span>
+        <span class="ctx-sum">The only path that edits a map&#x27;s authored vote types — deliberately not an HTTP endpoint, since the list is what the heatmap MEANS</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">manage_vote_types.py</span>
+        <span class="ctx-sum">286 LOC — load/save against maps.custom_vote_types, plus list/add/remove</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">module docstring</span><span class="ol-sum">unchanged — usage and the two deliberate non-behaviours</span></li><li class="changed"><span class="ol-label">_target</span><span class="ol-sum">NEW — host:port/name of the database about to be edited</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_require_db</span><span class="ol-sum">now prints the target before every command</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">_load</span><span class="ol-sum">unchanged — refuses maps inheriting a shared preset list</span></li><li class="changed"><span class="ol-label">_save</span><span class="ol-sum">now checks rowcount and reads the row back</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_vote_rows</span><span class="ol-sum">NEW — how many votes the map still carries under a label</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">cmd_list / cmd_add</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">cmd_remove</span><span class="ol-sum">warns when the legend will re-admit the label</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">main / argparse</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The failure this script is most likely to have is not a bad edit — it is a good edit against the wrong database, and nothing in the output distinguished them</li><li>load_dotenv() at import is the trap: forget the inline prod url and server/.env&#x27;s LOCAL one is supplied silently, against a database holding maps with the same slugs</li><li>rowcount != 1 is fatal now; an UPDATE matching no row is not a SQL error and was previously reported as success</li><li>The read-back compares LABELS in order, so it catches a write that landed somewhere else as well as one that did not land</li><li>_target strips the password before printing — the point is which host, not the credential</li><li>The remove warning exists because the dropdown IS the legend: a voted label taken out of custom_vote_types comes straight back, sourced from the votes, which reads as a failed removal</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/manage_vote_types.py b/server/manage_vote_types.py</span>
+<span class="d-meta">index 202dde5..ee241c7 100644</span>
+<span class="d-meta">--- a/server/manage_vote_types.py</span>
+<span class="d-meta">+++ b/server/manage_vote_types.py</span>
+<span class="d-hunk">@@ -51,9 +51,28 @@ from database import DATABASE_URL, get_cursor, normalize_point_type  # noqa: E40</span>
+<span class="d-ctx"> VALID_KINDS = (&quot;point&quot;, &quot;route&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-add">+def _target() -&gt; str:</span>
+<span class="d-add">+    &quot;&quot;&quot;The database this run will edit, as host:port/name — password stripped.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Printed before every command because the failure this script is most likely</span>
+<span class="d-add">+    to have is not a bad edit, it is a good edit against the wrong database.</span>
+<span class="d-add">+    `load_dotenv()` above silently supplies server/.env&#x27;s LOCAL url whenever the</span>
+<span class="d-add">+    caller forgets to pass a prod one, and both databases hold maps with the</span>
+<span class="d-add">+    same slugs, so a mistake looks exactly like a success. Naming the target</span>
+<span class="d-add">+    turns that into something you can see in the transcript afterwards.</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-add">+    try:</span>
+<span class="d-add">+        from urllib.parse import urlsplit</span>
+<span class="d-add">+        u = urlsplit(DATABASE_URL)</span>
+<span class="d-add">+        return f&quot;{u.hostname}:{u.port or 5432}{u.path}&quot;</span>
+<span class="d-add">+    except Exception:</span>
+<span class="d-add">+        return &quot;(unparseable DATABASE_URL)&quot;</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> def _require_db() -&gt; None:</span>
+<span class="d-ctx">     if not DATABASE_URL:</span>
+<span class="d-ctx">         sys.exit(&quot;DATABASE_URL is not set — point it at the target database first.&quot;)</span>
+<span class="d-add">+    print(f&quot;· database: {_target()}&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def _load(slug: str) -&gt; list[dict]:</span>
+<span class="d-hunk">@@ -78,11 +97,38 @@ def _load(slug: str) -&gt; list[dict]:</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def _save(slug: str, types: list[dict]) -&gt; None:</span>
+<span class="d-add">+    &quot;&quot;&quot;Write the list, then read it straight back and prove it landed.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    An UPDATE that matches no row is not an error in SQL, and neither is one</span>
+<span class="d-add">+    committed to a database that is not the one you meant. Both were how a</span>
+<span class="d-add">+    removal from this map&#x27;s picker reached a &quot;✓ removed&quot; line and left prod</span>
+<span class="d-add">+    untouched. Nothing here can tell which database is the RIGHT one — that is</span>
+<span class="d-add">+    the operator&#x27;s call — but it can refuse to claim a write it cannot see.</span>
+<span class="d-add">+    &quot;&quot;&quot;</span>
+<span class="d-ctx">     with get_cursor() as cursor:</span>
+<span class="d-ctx">         cursor.execute(</span>
+<span class="d-ctx">             &quot;UPDATE maps SET custom_vote_types = %s WHERE slug = %s&quot;,</span>
+<span class="d-ctx">             (json.dumps(types), slug),</span>
+<span class="d-ctx">         )</span>
+<span class="d-add">+        if cursor.rowcount != 1:</span>
+<span class="d-add">+            sys.exit(f&quot;UPDATE matched {cursor.rowcount} rows for &#x27;{slug}&#x27; on &quot;</span>
+<span class="d-add">+                     f&quot;{_target()} — nothing was changed.&quot;)</span>
+<span class="d-add">+    labels_after = [t.get(&quot;label&quot;) for t in _load(slug)]</span>
+<span class="d-add">+    if labels_after != [t.get(&quot;label&quot;) for t in types]:</span>
+<span class="d-add">+        sys.exit(f&quot;Read-back on {_target()} does not match what was written to &quot;</span>
+<span class="d-add">+                 f&quot;&#x27;{slug}&#x27;. The database now holds: {labels_after}&quot;)</span>
+<span class="d-add">+</span>
+<span class="d-add">+</span>
+<span class="d-add">+def _vote_rows(slug: str, label: str) -&gt; int:</span>
+<span class="d-add">+    &quot;&quot;&quot;How many votes this map still carries under `label`.&quot;&quot;&quot;</span>
+<span class="d-add">+    with get_cursor() as cursor:</span>
+<span class="d-add">+        cursor.execute(</span>
+<span class="d-add">+            &quot;&quot;&quot;SELECT COUNT(*) FROM edge_votes ev</span>
+<span class="d-add">+                 JOIN vote_types vt ON vt.id = ev.vote_type_id</span>
+<span class="d-add">+                WHERE ev.map_slug = %s AND vt.label = %s&quot;&quot;&quot;,</span>
+<span class="d-add">+            (slug, label),</span>
+<span class="d-add">+        )</span>
+<span class="d-add">+        return cursor.fetchone()[0]</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def cmd_list(args: argparse.Namespace) -&gt; None:</span>
+<span class="d-hunk">@@ -183,9 +229,20 @@ def cmd_remove(args: argparse.Namespace) -&gt; None:</span>
+<span class="d-ctx">     kept = [t for t in types if t.get(&quot;label&quot;) != args.label]</span>
+<span class="d-ctx">     if len(kept) == len(types):</span>
+<span class="d-ctx">         sys.exit(f&quot;&#x27;{args.label}&#x27; is not on &#x27;{args.slug}&#x27;&quot;)</span>
+<span class="d-add">+    rows = _vote_rows(args.slug, args.label)</span>
+<span class="d-ctx">     _save(args.slug, kept)</span>
+<span class="d-del">-    print(f&quot;✓ removed &#x27;{args.label}&#x27; from &#x27;{args.slug}&#x27; ({len(kept)} types left)&quot;)</span>
+<span class="d-add">+    print(f&quot;✓ removed &#x27;{args.label}&#x27; from &#x27;{args.slug}&#x27; on {_target()} &quot;</span>
+<span class="d-add">+          f&quot;({len(kept)} types left)&quot;)</span>
+<span class="d-ctx">     print(&quot;  Votes already cast under that label are untouched and still render.&quot;)</span>
+<span class="d-add">+    if rows:</span>
+<span class="d-add">+        # The legend is the picker (VoteTypeSelector / buildVoteTypeLegend), and</span>
+<span class="d-add">+        # it lists a label when the map authored it OR when the label carries</span>
+<span class="d-add">+        # votes here. So taking a voted label out of custom_vote_types does not</span>
+<span class="d-add">+        # take it out of the dropdown — it comes straight back, sourced from the</span>
+<span class="d-add">+        # votes instead. Say so, rather than let it look like a failed removal.</span>
+<span class="d-add">+        print(f&quot;  ⚠ &#x27;{args.label}&#x27; still has {rows} vote(s) on this map, so the &quot;</span>
+<span class="d-add">+              f&quot;legend will keep listing it. Move or delete those votes to &quot;</span>
+<span class="d-add">+              f&quot;retire the label completely.&quot;)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def main() -&gt; None:</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/retype_votes.py</span>
+            <span class="stat"><span class="d-add">+9</span> / <span class="d-del">-5</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Server · admin CLI</span>
+        <span class="ctx-sum">Moves a map&#x27;s votes from one vote type to another across all four layers — landed the same day from a concurrent line of work</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">retype_votes.py</span>
+        <span class="ctx-sum">226 LOC — the four-layer write, ordered so the map is never inconsistent</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module docstring</span><span class="ol-sum">corrected — the helper it cites is no longer a trap</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">layer walk / dry-run plumbing</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">Postgres → ev: → bd:/bagg: → vote_rev</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Its docstring named rebuild_redis_for_map&#x27;s two defects as its reason for existing; both are now fixed, so the two files would otherwise contradict each other</li><li>The distinction that survives is real and worth keeping: this script MOVES the block slots and leaves the map correct on the very next read, while the helper CLEARS them and defers the rebuild to the next /api/graph-votes</li><li>No code depends on the old behaviour — the reference was documentation only</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/retype_votes.py b/server/retype_votes.py</span>
+<span class="d-meta">index da8d78a..1b5aded 100644</span>
+<span class="d-meta">--- a/server/retype_votes.py</span>
+<span class="d-meta">+++ b/server/retype_votes.py</span>
+<span class="d-hunk">@@ -8,11 +8,15 @@ means pointing its rows at the canonical vote type — a *retype*, not a re-vote</span>
+<span class="d-ctx"> nobody&#x27;s vote is created or destroyed, it just says the map&#x27;s word for the thing.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> The catch is that a vote lives in FOUR places, and the obvious ones are not all</span>
+<span class="d-del">-of them. `vote_migration.rebuild_redis_for_map` rebuilds the edge aggregate only</span>
+<span class="d-del">-(and resets the revision to 1, which sends it BACKWARDS and can 304-pin stale</span>
+<span class="d-del">-bodies on connected clients), so a DB-level retype done that way leaves the block</span>
+<span class="d-del">-layers keyed on the old type and stale pins keep rendering. Every layer, in the</span>
+<span class="d-del">-order this script writes them:</span>
+<span class="d-add">+of them. `vote_migration.rebuild_redis_for_map` used to rebuild the edge</span>
+<span class="d-add">+aggregate only, and to reset the revision to 1 — sending it BACKWARDS, which can</span>
+<span class="d-add">+304-pin stale bodies on connected clients — so a DB-level retype done that way</span>
+<span class="d-add">+left the block layers keyed on the old type and stale pins kept rendering. That</span>
+<span class="d-add">+helper now clears the block layers and bumps the revision forward, so it is no</span>
+<span class="d-add">+longer a trap; it still CLEARS rather than moves, leaving the rebuild to the next</span>
+<span class="d-add">+`/api/graph-votes`, where this script writes the new slots itself and keeps the</span>
+<span class="d-add">+map correct on the very next read. Every layer, in the order this script writes</span>
+<span class="d-add">+them:</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   1. Postgres `edge_votes.vote_type_id`        — canonical (database.remap_edge_vote_type)</span>
+<span class="d-ctx">   2. Redis `ev:&lt;slug&gt;`                         — edge aggregate; the type is packed</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">server/vote_migration.py</span>
+            <span class="stat"><span class="d-add">+40</span> / <span class="d-del">-13</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill on">Redis</span><span class="pill ">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Server · vote migration</span>
+        <span class="ctx-sum">Keeps Redis&#x27;s derived vote state aligned with canonical Postgres — after a graph rebuild, a resnap, or any DB-level change to votes</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">vote_migration.py</span>
+        <span class="ctx-sum">137 LOC — resnap, Redis rebuild, orphaned-type repair, and the per-map driver</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">module docstring</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">resnap_map</span><span class="ol-sum">unchanged — lat/lon anchors → current edge ids</span></li><li class="changed"><span class="ol-label">rebuild_redis_for_map</span><span class="ol-sum">rebuilt: all three layers, revision INCR&#x27;d not deleted</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">repair_vote_types</span><span class="ol-sum">unchanged — orphaned ids → real labels</span></li><li class="dim"><span class="ol-label">migrate_map</span><span class="ol-sum">unchanged — repair → resnap → rebuild</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>A vote lives in THREE Redis layers; this rebuilt one of them, which is the only reason anyone calls it</li><li>bd:/bagg: are keyed by VOTE TYPE as well as by block, so re-pointing or deleting votes left the old slots standing and the pins kept rendering from state nothing would ever correct</li><li>They are keyed by edge→block, which lives on the graph and is not available here — so they are CLEARED, and /api/graph-votes rebuilds them from Postgres against the graph that instance actually has (app.py, bagg_cold)</li><li>Deleting the revision key sent it back to 1 on the next cast — BELOW what connected clients and cached bodies hold, so a client comparing revisions concludes it is current and 304-pins itself to a body describing votes that no longer exist</li><li>INCR is the only safe move: atomic, collision-free against a concurrent caster, and always above whatever was there</li><li>This also fixes the graph_reload path, where _resnap_city_maps reset the revision on EVERY graph rebuild — a live bug independent of any manual use</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/server/vote_migration.py b/server/vote_migration.py</span>
+<span class="d-meta">index af92583..2531538 100644</span>
+<span class="d-meta">--- a/server/vote_migration.py</span>
+<span class="d-meta">+++ b/server/vote_migration.py</span>
+<span class="d-hunk">@@ -15,6 +15,7 @@ live in database.resnap_edge_votes.</span>
+<span class="d-ctx"> &quot;&quot;&quot;</span>
+<span class="d-ctx"> import logging</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+import block_votes</span>
+<span class="d-ctx"> import database</span>
+<span class="d-ctx"> import vote_store</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -44,26 +45,52 @@ def resnap_map(cg, slug: str) -&gt; dict:</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> def rebuild_redis_for_map(redis_client, slug: str, mode_int: int) -&gt; int:</span>
+<span class="d-del">-    &quot;&quot;&quot;Rebuild a map&#x27;s Redis aggregate hash from the (now re-snapped) DB rows.</span>
+<span class="d-del">-</span>
+<span class="d-del">-    Drops the stale hash + revision, then replays the per-(edge, type, direction)</span>
+<span class="d-del">-    counts. Returns the number of fields written.</span>
+<span class="d-add">+    &quot;&quot;&quot;Rebuild ALL of a map&#x27;s Redis serving state from the canonical DB rows.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Postgres is canonical; Redis holds three derived layers, and a DB-level</span>
+<span class="d-add">+    change to a vote invalidates every one of them:</span>
+<span class="d-add">+</span>
+<span class="d-add">+      * ``ev:&lt;slug&gt;``            the per-(edge, type, direction) aggregate</span>
+<span class="d-add">+      * ``bd:&lt;slug&gt;:&lt;mode&gt;:…``   the per-block identity hashes</span>
+<span class="d-add">+      * ``bagg:&lt;slug&gt;:&lt;mode&gt;``   the deduped per-block aggregate</span>
+<span class="d-add">+</span>
+<span class="d-add">+    This used to rebuild only the first. The block layers are keyed by VOTE TYPE</span>
+<span class="d-add">+    as well as by block, so re-pointing votes at a different type (or deleting</span>
+<span class="d-add">+    them) left the old slots standing and the pins kept rendering from state</span>
+<span class="d-add">+    nothing would ever correct — the heatmap and the proposal pins disagreeing</span>
+<span class="d-add">+    about which votes exist. The block layers are keyed by edge→block, which</span>
+<span class="d-add">+    lives on the graph and is not available here, so they are CLEARED rather</span>
+<span class="d-add">+    than replayed: `/api/graph-votes` rebuilds them from Postgres on the next</span>
+<span class="d-add">+    request, against the graph that instance actually has (app.py, `bagg_cold`).</span>
+<span class="d-add">+</span>
+<span class="d-add">+    The revision is bumped FORWARD, never reset. Dropping the key sent it back</span>
+<span class="d-add">+    to 1 on the next cast, which is lower than the revision connected clients</span>
+<span class="d-add">+    and cached bodies already hold — so a client comparing revisions concludes</span>
+<span class="d-add">+    it is up to date and 304-pins itself to a body describing votes that no</span>
+<span class="d-add">+    longer exist. INCR is the only safe move: it is atomic, it cannot collide</span>
+<span class="d-add">+    with a concurrent caster, and it always lands above whatever was there.</span>
+<span class="d-add">+</span>
+<span class="d-add">+    Returns the number of edge-aggregate fields written.</span>
+<span class="d-ctx">     &quot;&quot;&quot;</span>
+<span class="d-ctx">     if redis_client is None:</span>
+<span class="d-ctx">         return 0</span>
+<span class="d-ctx">     redis_client.delete(vote_store.hash_key(slug))</span>
+<span class="d-del">-    redis_client.delete(vote_store.revision_key(slug))</span>
+<span class="d-add">+    # Derived block state — dropped here so it can&#x27;t outlive the votes it was</span>
+<span class="d-add">+    # built from. Cheap and idempotent when the map has no block layer.</span>
+<span class="d-add">+    block_votes.clear(redis_client, slug, mode_int)</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     rows = database.aggregate_votes_for_replay(slug)  # [(slug, edge, vt, dir, cnt)]</span>
+<span class="d-del">-    if not rows:</span>
+<span class="d-del">-        return 0</span>
+<span class="d-del">-    pipe = redis_client.pipeline(transaction=False)</span>
+<span class="d-ctx">     n = 0</span>
+<span class="d-del">-    for _slug, edge_id, vt_id, direction, cnt in rows:</span>
+<span class="d-del">-        field = vote_store.redis_field(edge_id, mode_int, vt_id, direction)</span>
+<span class="d-del">-        pipe.hset(vote_store.hash_key(slug), str(field), int(cnt))</span>
+<span class="d-del">-        n += 1</span>
+<span class="d-del">-    pipe.execute()</span>
+<span class="d-add">+    if rows:</span>
+<span class="d-add">+        pipe = redis_client.pipeline(transaction=False)</span>
+<span class="d-add">+        for _slug, edge_id, vt_id, direction, cnt in rows:</span>
+<span class="d-add">+            field = vote_store.redis_field(edge_id, mode_int, vt_id, direction)</span>
+<span class="d-add">+            pipe.hset(vote_store.hash_key(slug), str(field), int(cnt))</span>
+<span class="d-add">+            n += 1</span>
+<span class="d-add">+        pipe.execute()</span>
+<span class="d-add">+</span>
+<span class="d-add">+    rev = redis_client.incr(vote_store.revision_key(slug))</span>
+<span class="d-add">+    logger.info(f&quot;[REBUILD:{slug}] {n} edge fields, block state cleared, revision → {rev}&quot;)</span>
+<span class="d-ctx">     return n</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
