@@ -19,7 +19,17 @@ import math
 from palette import is_dark
 from typo import face, text
 
-K = math.cos(math.radians(30))
+# Horizontal foreshortening, moved toward the QR city's (isoqr uses ~0.517) and
+# away from the textbook 30° isometric this used to draw (0.866). With the two
+# far apart the front and back read as two different worlds — same palette, same
+# blocks, still obviously not the same city.
+#
+# It stops partway on purpose. Matching the code exactly was tried and made the
+# wordmark illegible: the letters stand in the wall plane, where +x maps to
+# (K, ½), so shrinking K steepens their baseline until CITY EDIT looks like it
+# is falling over. 0.70 is as square as the grid gets while the letters still
+# read, which is the whole reason they were stood up.
+K = 0.70
 
 # The logo, cell for cell: "X" crossed, "." empty, anything else a letter.
 # Row 3's last cell is the logo's BETA box — merch shouldn't carry a version

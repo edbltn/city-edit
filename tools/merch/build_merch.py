@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import back  # noqa: E402
 import iso  # noqa: E402
 import qr_tee  # noqa: E402
+from typo import text  # noqa: E402
 from palette import (  # noqa: E402
     ACCENT, GARMENT_BLACK, GARMENT_WHITE, INK_ON_BLACK, INK_ON_WHITE, svg,
 )
@@ -96,6 +97,51 @@ def render(product, suffix, spec, previews):
     return slug, w, h, png_path.stat().st_size
 
 
+def build_proof_pdf() -> Path:
+    """
+    The proof sheet as a page you can print or attach.
+
+    One landscape page, four shirts across, front over back, each on the garment
+    it prints on. Same previews the HTML sheet uses, so the two cannot disagree.
+    """
+    W, H = 17 * DPI, 11 * DPI
+    cols = [("tee-one-note", "black"), ("tee-one-note", "white"),
+            ("tee-isogrid", "black"), ("tee-isogrid", "white")]
+    grounds = {"black": GARMENT_BLACK, "white": GARMENT_WHITE}
+    labels = {"tee-one-note": "I LOVE THIS CITY", "tee-isogrid": "CITY EDIT"}
+
+    pad, top = 90, 560
+    cell_w = (W - pad * (len(cols) + 1)) / len(cols)
+    cell_h = (H - top - pad * 2) / 2
+    body = [f'<rect width="{W}" height="{H}" fill="#ffffff"/>',
+            text("CITY EDIT — MERCH PROOF", pad, 200, 76, weight=600, fill="#000"),
+            text("4 shirts · front over back · shown on the garment each prints on",
+                 pad, 300, 34, fill="#555")]
+
+    for i, (design, way) in enumerate(cols):
+        x = pad + i * (cell_w + pad)
+        body.append(text(f"{labels[design]} — {way}", x, top - 110, 30,
+                         weight=600, fill="#000"))
+        for j, slug in enumerate((f"{design}--{way}", f"tee-isoback--{way}")):
+            png = OUT / "preview" / f"{slug}.png"
+            y = top + j * (cell_h + pad)
+            body.append(f'<rect x="{x:.0f}" y="{y:.0f}" width="{cell_w:.0f}" '
+                        f'height="{cell_h:.0f}" fill="{grounds[way]}"/>')
+            with Image.open(png) as im:
+                ar = im.width / im.height
+            iw = min(cell_w - 40, (cell_h - 40) * ar)
+            ih = iw / ar
+            body.append(
+                f'<image x="{x + (cell_w - iw) / 2:.0f}" y="{y + (cell_h - ih) / 2:.0f}" '
+                f'width="{iw:.0f}" height="{ih:.0f}" href="{data_uri(png, "image/png")}"/>')
+
+    page = (f'<svg xmlns="http://www.w3.org/2000/svg" width="17in" height="11in" '
+            f'viewBox="0 0 {W} {H}">{"".join(body)}</svg>')
+    path = OUT / "proof-sheet.pdf"
+    cairosvg.svg2pdf(bytestring=page.encode(), write_to=str(path))
+    return path
+
+
 def data_uri(path: Path, mime: str) -> str:
     return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode()
 
@@ -159,7 +205,16 @@ def main():
     qr_tee.DEFAULT_URL = args.qr_url
 
     if args.clean and OUT.exists():
-        shutil.rmtree(OUT)
+        # Only what this script owns. out/ is also home to the print run and the
+        # printer's order file, which take minutes to rebuild and which --clean
+        # used to delete without mentioning it.
+        for path in OUT.glob("*.png"):
+            path.unlink()
+        for path in OUT.glob("*.svg"):
+            path.unlink()
+        for path in (OUT / "lookbook.html", OUT / "proof-sheet.pdf"):
+            path.unlink(missing_ok=True)
+        shutil.rmtree(OUT / "preview", ignore_errors=True)
     OUT.mkdir(exist_ok=True)
 
     previews = args.previews or args.lookbook
@@ -173,6 +228,8 @@ def main():
     if args.lookbook:
         path = build_lookbook()
         print(f"proof sheet        → {path}  ({path.stat().st_size / 1024:.0f} KB)")
+        pdf = build_proof_pdf()
+        print(f"proof sheet (pdf)  → {pdf}  ({pdf.stat().st_size / 1024:.0f} KB)")
 
 
 if __name__ == "__main__":

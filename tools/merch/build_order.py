@@ -99,14 +99,12 @@ def spec_page(rows: list[dict], path: Path) -> None:
         y += dy
 
     line("CITY EDIT — PRINT ORDER", 46, 600, 70)
-    line("20 shirts · 2 designs · 10 each · 5 per colourway", 26, 400, 60)
+    line("20 shirts. Every shirt is one front + one back.", 26, 400, 38)
+    line("10 shirts:  front = I LOVE THIS CITY   back = PLS FIX", 26, 400, 38)
+    line("10 shirts:  front = CITY EDIT          back = PLS FIX", 26, 400, 38)
+    line("Each pair is two consecutive pages: front, then its back.", 26, 400, 56)
 
-    line("PRINT METHOD", 26, 600, 46, gap=30)
-    line("DTF or DTG. NOT screen print.", 30, 600, 42)
-    line("Every shirt's QR code is different — see the code column below.", 26)
-    line("A screen would put the same code on all 20, which breaks them.", 26)
-
-    line("GARMENTS", 26, 600, 46, gap=34)
+    line("GARMENTS", 26, 600, 46, gap=30)
     line("10 x black tee   (blank as close to #17171A as stocked)", 26)
     line("10 x white tee   (#FFFFFF)", 26)
     line("Sizes: to be confirmed — please quote on a standard S–XXL spread.", 26)
@@ -148,34 +146,25 @@ def main():
             url = tee_codes.url_for(code)
             shirt = f"{design['key'][:3].upper()}{i + 1:02d}"
 
-            faces = ["front", "back"] if design["key"] == "one-note" else ["back"]
-            # The isometric front carries no code, so it is one page printed ten
-            # times rather than ten pages.
-            for face in faces:
+            # Both faces for every shirt, front page then back page — even
+            # though the ten CITY EDIT fronts are the same artwork. Ten repeats
+            # of one page is cheap; a printer working out which back belongs to
+            # which front from a footnote is not.
+            for face in ("front", "back"):
                 w, h, markup = art_for(design["key"], face, way, url)
                 path = tmp / f"p{page_no:03d}.pdf"
                 art_page(svg(w, h, markup), w, h, path)
                 pages.append(path)
                 rows.append({"page": page_no, "shirt": shirt, "way": way,
                              "face": face, "size": f"{w / DPI:.0f}x{h / DPI:.0f}",
-                             "code": code})
+                             "code": code if (design["key"] == "one-note"
+                                              or face == "back") else ""})
                 page_no += 1
 
             seed_rows.append({"code": code.lower(), "map_slug": SCAN_MAP,
                               "vote_type": SCAN_VOTE_TYPE,
                               "headline": design["label"],
                               "src_tag": f"tee-{design['key']}"})
-
-    # The uncoded isometric front: one page, printed on all ten of that design.
-    for way in WAYS:
-        w, h, markup = art_for("isogrid", "front", way, None)
-        path = tmp / f"p{page_no:03d}.pdf"
-        art_page(svg(w, h, markup), w, h, path)
-        pages.append(path)
-        rows.append({"page": page_no, "shirt": "ISO x5", "way": way,
-                     "face": "front", "size": f"{w / DPI:.0f}x{h / DPI:.0f}",
-                     "code": ""})
-        page_no += 1
 
     spec = tmp / "p001.pdf"
     spec_page(rows, spec)

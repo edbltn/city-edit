@@ -94,6 +94,11 @@ then one print per page, each page exactly the physical size of the artwork on
 it and carrying nothing else: no caption, no crop marks, no filename, because a
 note in the margin is a note a printer can mistake for artwork.
 
+Pages run **front, back, front, back** — one consecutive pair per shirt, even
+though the ten CITY EDIT fronts are the same artwork ten times. Ten repeats of
+one page costs nothing; a printer working out which back belongs to which front
+from a footnote costs a rerun.
+
 USA Tees publish no artwork spec, so it follows what every DTF/DTG shop asks
 for: true size, vector, transparent ground, no white plate.
 
@@ -101,6 +106,9 @@ for: true size, vector, transparent ground, no white plate.
 preference.** Every shirt's code is different; a screen is one image pulled
 twenty times, so a screen-printed run would be twenty shirts pointing at one
 proposal. DTF or DTG only.
+
+`build_merch.py --lookbook` also writes `out/proof-sheet.pdf` — the same four
+shirts, front over back, one landscape page.
 
 `seed_tees.sql` lands beside it and is **not** for the printer — it is the row
 per code the API needs before a scan can resolve.

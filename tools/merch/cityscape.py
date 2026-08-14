@@ -88,6 +88,22 @@ LOT = 2
 EMPTY_EVERY = 7
 
 
+def _hash2(a: int, b: int, salt: int) -> int:
+    """
+    A scalar hash of two grid coordinates.
+
+    Not `(a*3 + b*7) % n`. That form looks like a hash and is a diagonal stripe:
+    with a stride sharing a factor with the modulus, one coordinate drops out
+    entirely — the first version of this made every third ROW two storeys tall,
+    the whole way along, which is exactly the clustering it was meant to avoid.
+    """
+    h = (a * 73856093) ^ (b * 19349663) ^ (salt * 83492791)
+    h &= 0xFFFFFFFF
+    h ^= h >> 13
+    h = (h * 1274126177) & 0xFFFFFFFF
+    return h ^ (h >> 16)
+
+
 def _rand(seed: int):
     state = seed
 
@@ -157,9 +173,9 @@ def scene(url: str, ground: str, ink: str, *, seed: int = 20260813,
             # stays together.
             on_v = c % ROAD_EVERY == ROAD_PHASE
             on_h = r % ROAD_EVERY == ROAD_PHASE
-            if on_v and (c // ROAD_EVERY * 31 + r // ROAD_EVERY * 17) % ROAD_KEPT:
+            if on_v and _hash2(c // ROAD_EVERY, r // ROAD_EVERY, 1) % ROAD_KEPT:
                 continue
-            if on_h and (r // ROAD_EVERY * 23 + c // ROAD_EVERY * 13) % ROAD_KEPT:
+            if on_h and _hash2(r // ROAD_EVERY, c // ROAD_EVERY, 2) % ROAD_KEPT:
                 continue
 
             fade = (1.0 - t) ** 1.15
@@ -174,9 +190,9 @@ def scene(url: str, ground: str, ink: str, *, seed: int = 20260813,
             # One height per 2×2 lot, so four cells share a roof and read as a
             # single building rather than four separate posts.
             lot = (c // LOT, r // LOT)
-            if (lot[0] * 11 + lot[1] * 4) % EMPTY_EVERY == 0:
+            if _hash2(lot[0], lot[1], 3) % EMPTY_EVERY == 0:
                 continue
-            height = HEIGHTS[(lot[0] * 3 + lot[1] * 7) % len(HEIGHTS)]
+            height = HEIGHTS[_hash2(lot[0], lot[1], 4) % len(HEIGHTS)]
             cells.append((c, r, height, _fade_tones(ground, ink, fade)))
 
     # Painter's order over the WHOLE scene, code and district together: depth
