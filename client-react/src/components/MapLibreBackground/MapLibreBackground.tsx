@@ -757,6 +757,90 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
     // onReady is a stable callback (useCallback) so it won't re-init the map.
   }, [mapStyle, onReady]);
 
+  // Keep the GL canvas the size of its container.
+  //
+  // MapLibre sizes its own canvas from an internal ResizeObserver, and that
+  // observer has two properties that combine badly: deliveries are frame-driven
+  // (a backgrounded or occluded tab produces no frames, so nothing arrives),
+  // and it deliberately discards the FIRST entry it is ever handed. So a size
+  // change that lands while the tab isn't rendering — a window resize, a Cmd-+
+  // page zoom, an iOS URL bar collapsing — can be dropped outright, and then
+  // the canvas keeps its old size for the whole life of the page. The container
+  // still tracks the viewport, so `--paper` shows through as a strip along the
+  // bottom and the right of the map. Leaflet listens to `window.resize`
+  // directly and stays correct, which is exactly why only the GL layers came up
+  // short: the strip is the width of the base map's own gap.
+  //
+  // Observed on prod: a 1800x945 container holding an 1636x859 canvas — the
+  // viewport as it was at 110% zoom, kept after the zoom went back to 100%.
+  //
+  // So measure rather than trust. On every signal that the viewport may have
+  // moved, compare the canvas against its container and resize only when they
+  // actually disagree — a no-op in the overwhelming majority of calls.
+  // `visibilitychange` is the one that has to be here: it is the first moment a
+  // tab that missed a resize while hidden is rendering again.
+  useEffect(() => {
+    let pending: ReturnType<typeof setTimeout> | null = null;
+
+    const syncSize = () => {
+      pending = null;
+      const ml = mapRef.current;
+      const el = containerRef.current;
+      if (!ml || !el) return;
+      // A zoom ride hands the container to a CSS transform (handleZoomAnim):
+      // it is being scaled, not resized, and endZoomRide reconciles after it.
+      if (el.style.transform) return;
+      const canvas = ml.getCanvas();
+      const cssWidth = parseFloat(canvas.style.width) || 0;
+      const cssHeight = parseFloat(canvas.style.height) || 0;
+      // Sub-pixel container sizes are normal (fractional viewports), so only a
+      // whole pixel of disagreement counts as a gap worth repainting for.
+      if (Math.abs(cssWidth - el.clientWidth) <= 1
+        && Math.abs(cssHeight - el.clientHeight) <= 1) return;
+      dlog(
+        "maplibre",
+        `canvas ${cssWidth}x${cssHeight} in a ${el.clientWidth}x${el.clientHeight}`
+        + " container — resizing",
+      );
+      ml.resize();
+      // Re-measure Leaflet in the same breath. It tracks `window.resize` on its
+      // own, so it is almost always already right — but a container that
+      // changed WITHOUT the window changing would otherwise leave the two maps
+      // disagreeing about their size, and every Leaflet-drawn layer sliding off
+      // the base map is a worse bug than the strip. A no-op when the size is
+      // unchanged (Leaflet returns early).
+      leafletMap?.invalidateSize({ animate: false, pan: false });
+    };
+
+    // Trailing-edge only: a window drag fires resize at frame rate, and each
+    // one would otherwise reallocate the GL drawing buffer. Deliberately a
+    // timer rather than rAF — the tab that most needs this isn't painting yet.
+    const schedule = () => {
+      if (pending === null) pending = setTimeout(syncSize, 50);
+    };
+
+    const onVisibility = () => {
+      if (!document.hidden) schedule();
+    };
+
+    const observer = new ResizeObserver(schedule);
+    if (containerRef.current) observer.observe(containerRef.current);
+    window.addEventListener("resize", schedule);
+    window.addEventListener("orientationchange", schedule);
+    window.visualViewport?.addEventListener("resize", schedule);
+    document.addEventListener("visibilitychange", onVisibility);
+    schedule();
+
+    return () => {
+      if (pending !== null) clearTimeout(pending);
+      observer.disconnect();
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("orientationchange", schedule);
+      window.visualViewport?.removeEventListener("resize", schedule);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [leafletMap]);
+
   // Sync camera from Leaflet
   useEffect(() => {
     if (!leafletMap) return;
