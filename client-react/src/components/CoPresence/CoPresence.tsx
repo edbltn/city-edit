@@ -3,11 +3,26 @@ import "./CoPresence.css";
 
 /** Below this we say nothing.
  *
- *  The brief: show it only when there is more than one OTHER viewer. So two
- *  others, plus you, is three marks — the smallest arrangement that is a room
- *  rather than a coincidence. One other person is a pair, and a pair does not
- *  need to be told it is a pair. */
-const MIN_TOTAL = 3;
+ *  This was 3 — the brief asked for more than one OTHER viewer, on the reading
+ *  that a pair does not need to be told it is a pair. Measured against how
+ *  people are actually COUNTED, that reading does not survive: presence dedupes
+ *  on a hash of the client IP (presence.py), so a household, an office or a
+ *  carrier NAT is ONE member. Three marks therefore needs three separate
+ *  networks with the same map open inside the same two-second push — a bar this
+ *  map's traffic is unlikely to clear, and one the owner cannot clear on
+ *  purpose even with three devices, because they all leave by the same egress.
+ *  (That is a prediction, not a measurement: this has not been deployed yet, so
+ *  there is no live traffic to have observed. Revisit it against real numbers
+ *  once there are some.)
+ *
+ *  A ritual nobody attends produces no common knowledge at all, which is the
+ *  only thing this component was built to make. Two is where the product
+ *  actually starts: "someone else is here, right now, looking at what you are
+ *  looking at" is the whole claim, and it is no less true of one other person —
+ *  a pair is exactly the case where each of them can be sure of the other. The
+ *  under-count baked into the identity key also means a shown 2 is a floor, not
+ *  a guess: the real room is 2 or more, never fewer. */
+const MIN_TOTAL = 2;
 
 /** Past this many marks the row stops being countable at a glance, which is
  *  the entire reason it is drawn as marks. Beyond it, the marks become a

@@ -33,11 +33,14 @@
    bug to behave. Step above whatever is in that slot; the notice is
    dismissible, and the strip drops back when it goes.
 
-   Matching both class names on purpose: that component is mid-rename
-   (event-banner → map-notice), and this rule must not silently stop applying
-   when the rename lands. */
-#app:has(.map-notice) .copresence,
-#app:has(.event-banner) .copresence {
+   Scoped to `body` rather than to the `#app` wrapper, because the wrapper is
+   not a safe anchor even though it exists: this app's cards and notices portal
+   to document.body (see MapNotice.tsx), so a wrapper-scoped :has() would go
+   silently quiet the moment one of them moved out — and a rule that stops
+   matching without failing is the kind that ships a collision unnoticed.
+   `body` is an ancestor of every mount point, portalled or not. */
+body:has(.map-notice) .copresence,
+body:has(.event-banner) .copresence {
   bottom: calc(var(--space-5) + 56px);   /* notice: 24px offset + 40px tall */
 }
 
@@ -102,8 +105,8 @@
 
   /* A notice goes near-full-width and can wrap to several lines on a phone,
      so clear it by more than the desktop step. */
-  #app:has(.map-notice) .copresence,
-  #app:has(.event-banner) .copresence {
+  body:has(.map-notice) .copresence,
+  body:has(.event-banner) .copresence {
     bottom: calc(var(--space-2) + 84px);
   }
 
