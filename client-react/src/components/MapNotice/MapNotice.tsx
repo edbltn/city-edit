@@ -13,9 +13,11 @@ import "./MapNotice.css";
 //
 // Two rules this base enforces that neither could enforce alone:
 //
-//   1. It sits BELOW the map's cards (pinned proposal 1100, route summary
-//      1300, hover card 1400). A transient notice must never be the reason a
-//      selected proposal is unreadable.
+//   1. It sits BELOW the map's cards (--z-map-notice, under --z-map-card and
+//      its two elevations). A transient notice must never be the reason a
+//      selected proposal is unreadable. That claim only became true once the
+//      cards were portaled OUT of the map's stacking context: numbered above
+//      the notice but sealed inside `.leaflet-container`, they lost to it.
 //   2. The strip itself is transparent to the pointer; only its controls take
 //      clicks. Even where a notice overlaps a card, the card underneath stays
 //      clickable — which z-index alone can't promise, since the cards portal

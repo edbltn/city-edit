@@ -2,7 +2,7 @@
 
 .vote-type-selector {
   position: relative;
-  z-index: 1;
+  z-index: var(--z-dropdown);
   flex: 1;
   min-width: 0;
   text-align: left !important;
@@ -53,12 +53,14 @@
   border-color: rgba(212, 212, 212, 0.5);
 }
 
+/* The open selector, one step over its sibling controls — everything here is
+   sealed inside the topbar's stacking context either way. */
 .vote-type-selector.active {
-  z-index: 1000;
+  z-index: calc(var(--z-dropdown) + 1);
 }
 
 .vote-type-selector.active .vote-type-dropdown {
-  z-index: 1000;
+  z-index: var(--z-dropdown);
 }
 
 .vote-type-input {

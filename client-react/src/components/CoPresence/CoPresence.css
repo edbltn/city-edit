@@ -1,17 +1,28 @@
 /* ==========================================================================
    Co-presence — who else has this map open right now
 
-   Bottom-left, the one free corner (zoom + attribution both sit bottom-right).
+   Bottom-left, the quiet corner (zoom + attribution both sit bottom-right).
    Deliberately the quietest fixed element on the map: it is a fact about the
    room, not a control, and it must never compete with the proposal it is
    telling you other people are reading.
+
+   Not an EMPTY corner, though: the selection-history control claims exactly
+   this spot with the same two offsets, and the bottom-centre notice reaches
+   into it on a laptop. So the strip's distance from the bottom is one variable
+   rather than a `bottom` rewritten per case — the clearances add up instead of
+   overriding each other, and a third occupant is one more term.
    ========================================================================== */
 
 .copresence {
   position: fixed;
-  bottom: var(--space-5);
+  /* Always clearing the history control's slot (28px + its border, + a gap),
+     whether or not it is showing: it appears the moment you have any history,
+     and a strip that jumps 38px when you press Back is worse than one sitting
+     a little high on a fresh map. */
+  --copresence-lift: 38px;
+  bottom: calc(var(--space-5) + var(--copresence-lift));
   left: var(--space-5);
-  z-index: 900;                    /* under every card (1100+) and the topbar */
+  z-index: var(--z-map-notice);    /* a bottom strip, like the notice it dodges */
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -41,7 +52,7 @@
    every mount point either way. */
 body:has(.map-notice) .copresence,
 body:has(.event-banner) .copresence {
-  bottom: calc(var(--space-5) + 56px);   /* notice: 24px offset + 40px tall */
+  --copresence-lift: calc(38px + 56px);   /* history + notice (24px offset + 40px tall) */
 }
 
 .copresence-marks {
@@ -93,7 +104,7 @@ body:has(.event-banner) .copresence {
    "people are here", and they say it in the width of a thumbnail. */
 @media (max-width: 600px) {
   .copresence {
-    bottom: var(--space-2);
+    bottom: calc(var(--space-2) + var(--copresence-lift));
     left: var(--space-2);
     padding: 5px 8px;
     font-size: 10px;
@@ -107,7 +118,7 @@ body:has(.event-banner) .copresence {
      so clear it by more than the desktop step. */
   body:has(.map-notice) .copresence,
   body:has(.event-banner) .copresence {
-    bottom: calc(var(--space-2) + 84px);
+    --copresence-lift: calc(38px + 84px);
   }
 
   /* With the sentence gone the marks carry the whole message, so lift them

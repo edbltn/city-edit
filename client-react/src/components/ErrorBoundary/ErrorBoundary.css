@@ -1,7 +1,9 @@
 .error-boundary {
   position: fixed;
   inset: 0;
-  z-index: 10000;
+  /* Top of the ladder on purpose: whatever crashed, this is the one thing
+     that must be readable over it. */
+  z-index: var(--z-crash, 1300);
   display: flex;
   align-items: center;
   justify-content: center;

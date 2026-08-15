@@ -1134,8 +1134,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // The hover card additionally dodges the OPEN modal (pinned point card or
   // route-summary card — whichever registered pinnedModalElRef), so browsing
   // proposals never papers over the selection you're working with. When every
-  // quadrant collides it still pops OVER the modal (z-index 1400 beats the
-  // route card's 1300) rather than hiding under it.
+  // quadrant collides it still pops OVER the modal (--z-map-card-hover beats
+  // --z-map-card-elevated) rather than hiding under it.
   const getHoverAvoidRects = useCallback((): AvoidRect[] => {
     const rects = getWaypointAvoidRects();
     const modalEl = pinnedModalElRef.current;
@@ -3469,7 +3469,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // Render
   // -------------------------------------------------------------------------
 
-  const mapContainer = map.getContainer();
+  // Where the cards mount. document.body, NOT the Leaflet container — see the
+  // z-index ladder at the top of globals.css. `#map` and `.leaflet-container`
+  // each create a stacking context on purpose (it is what contains the marker
+  // zIndexOffsets below, which run into the hundreds of thousands), so a card
+  // mounted inside the map is sealed at the MAP's rung and loses to every fixed
+  // strip in the app no matter what number it carries. Numbered 1100-1400 and
+  // mounted in there, these cards were painted over by a 990 event banner.
+  //
+  // Free to move, because the cards are already positioned in VIEWPORT
+  // coordinates (`rect.left + pt.x`, `position: fixed`): the portal target is a
+  // stacking decision and nothing else. Two knock-on effects, both wanted —
+  // clicks on a card can no longer reach the map at all (Leaflet's listener is
+  // on the container, so disableClickPropagation is belt-and-braces now), and
+  // the map fires `mouseout` when the pointer moves onto an open card, which
+  // drops the hover highlight. That is right: the pointer has left the map.
+  const cardRoot = document.body;
   // The hover card shows for any hovered segment/node — top proposal or not —
   // but NOT for the proposal that's currently pinned/selected: that one already
   // has its interactive card, so its hover version is suppressed. Hover only
@@ -4808,7 +4823,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             }
           }}
         />,
-        mapContainer
+        cardRoot
       )}
       {showHoverTooltip && createPortal(
         <ProposalCard
@@ -4824,7 +4839,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           // target stays put — re-place the hover card when that happens.
           avoidKey={`${pinnedScreenPos?.x},${pinnedScreenPos?.y};${routeCardPos?.x},${routeCardPos?.y}`}
         />,
-        mapContainer
+        cardRoot
       )}
       {/* Diamond (RBTP) hover card — the route counterpart of the square's
           hover card above: same anchor (the icon), same transient styling,
@@ -4859,7 +4874,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           getAvoidRects={getHoverAvoidRects}
           avoidKey={`${pinnedScreenPos?.x},${pinnedScreenPos?.y};${routeCardPos?.x},${routeCardPos?.y}`}
         />,
-        mapContainer
+        cardRoot
       )}
       {/* Route-summary card — the modal for a FULL route selection (start+end),
           which the pinned card (lone point) never covers. Summarizes the blocks
@@ -4933,7 +4948,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
             }
           }}
         />,
-        mapContainer
+        cardRoot
       )}
     </>
   );

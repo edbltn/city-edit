@@ -49,18 +49,47 @@
   --radius-lg: 0;
   --radius-xl: 0;
 
-  /* Z-index scale */
-  --z-map: 1;
-  --z-topbar: 100;
-  --z-dropdown: 200;
-  --z-autocomplete: 300;
-  --z-modal: 400;
-  --z-pac-container: 500;
-  /* Bottom-centre notices (error toast, event announcement). Deliberately
-     BELOW the map's own cards — pinned proposal (1100), route summary (1300),
-     hover card (1400) — so a transient strip is never the reason a selected
-     proposal can't be read. See MapNotice.css. */
-  --z-map-notice: 1050;
+  /* ==========================================================================
+     Z-index — ONE ladder, bottom to top. Read it as the answer to "what is
+     allowed to cover what", because that is the only question z-index answers.
+
+     Rules of the road:
+
+     1. Nothing in the app writes a raw z-index. Every layered element takes a
+        token from this list; the order lives here and nowhere else. A rung
+        earns its name from what it IS, not from what it currently needs to
+        beat — the moment a value is chosen to win one specific fight, the next
+        fight is won by picking a bigger number, and that is how a scale rots
+        into 990 / 1000 / 1050 / 1100 / 1300 / 1400 / 3000 / 9999 / 10000.
+     2. Rungs are 100 apart. A variant that must sit just above its own siblings
+        writes `calc(var(--rung) + 1)`; a whole new tier gets a NAME here, not a
+        bigger number at the call site.
+     3. A token is only a promise between SIBLINGS IN ONE STACKING CONTEXT. An
+        element sealed inside a context can never outrank anything outside it,
+        whatever number it carries. The map is the sealed box in this app:
+        `#map` and `.leaflet-container` each create a context deliberately —
+        that containment is what keeps Leaflet's marker `zIndexOffset`s (which
+        run into the hundreds of thousands, see GraphLayer) from painting over
+        the entire application. So anything that must outrank app chrome has to
+        be PORTALED OUT of the map. It cannot be given a bigger number inside
+        it. The proposal cards learned this the hard way: numbered 1100–1400 but
+        mounted in the Leaflet container, they were sealed at the map's own
+        rung and the 990 event banner painted straight over them.
+     ========================================================================== */
+  --z-map: 1;                     /* the map: canvas, tiles, panes, markers */
+  --z-map-overlay: 100;           /* map furniture: hover tooltip, selection history, ghost pin */
+  --z-map-notice: 200;            /* bottom strips: event banner, error toast, co-presence */
+  --z-map-card: 300;              /* the pinned proposal card */
+  --z-map-card-elevated: 400;     /* the route summary, over the pinned card */
+  --z-map-card-hover: 500;        /* the transient hover card, over both */
+  --z-chrome: 600;                /* persistent chrome: the topbar and its rows */
+  --z-dropdown: 700;              /* menus opened from chrome: map picker, vote types, nav tips */
+  --z-autocomplete: 800;          /* suggestions, over the field's own dropdown */
+  --z-splash: 900;                /* the bootstrap loader (and the gate's backdrop) */
+  --z-modal: 1000;                /* full-screen dialogs and their backdrops */
+  --z-pac-container: 1100;        /* Google's places list, opened inside a dialog */
+  --z-ribbon: 1200;               /* the staging watermark */
+  --z-crash: 1300;                /* the error boundary — above everything, always */
 
   /* Layout */
   --topbar-height: auto;
@@ -167,7 +196,10 @@ body {
 .map-bootstrap {
   position: fixed;
   inset: 0;
-  z-index: 5000; /* above the map + its controls while it loads behind us */
+  /* Above the map and its chrome while it loads behind us — but BELOW
+     --z-modal, because this same sheet is the backdrop the passcode gate is
+     read against, and a backdrop that outranks its dialog hides it. */
+  z-index: var(--z-splash);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -243,7 +275,7 @@ body {
   background: var(--paper);
   border-bottom: 1px solid var(--hairline);
   position: relative;
-  z-index: var(--z-topbar);
+  z-index: var(--z-chrome);
 }
 
 .topbar-content {
@@ -492,11 +524,13 @@ body {
   visibility: visible;
   transform: translateY(0);
   transition: opacity 0.15s ease, transform 0.15s ease, visibility 0s;
-  z-index: 9999 !important;
+  z-index: calc(var(--z-dropdown) + 1);
 }
 
+/* The open menu, one step over its sibling controls — not a big number over
+   the whole app: it is sealed inside the topbar's context either way. */
 .mode-selector.active {
-  z-index: 9999 !important;
+  z-index: calc(var(--z-dropdown) + 1);
 }
 
 .mode-option {
@@ -786,6 +820,13 @@ body {
    Map
    ========================================================================== */
 
+/* Both of these z-indexes create a stacking context, and BOTH are load-bearing:
+   they are the box that contains Leaflet's marker `zIndexOffset`s, which
+   GraphLayer sets in the hundreds of thousands to rank proposal pins against
+   each other. Sealed in here those numbers are harmless; flattened, a single
+   pin would paint over the topbar, the dialogs and the crash screen alike.
+   The price is that nothing INSIDE the map can outrank anything outside it —
+   which is why the proposal cards are portaled to document.body. */
 #map {
   position: absolute;
   top: 0;
@@ -884,7 +925,7 @@ body.maplibre-active .leaflet-container {
   position: absolute;
   left: var(--space-5);
   bottom: var(--space-5);
-  z-index: 1000;
+  z-index: var(--z-map-overlay);
   display: flex;
   border: 1px solid var(--hairline);
   background: var(--paper);
@@ -1052,7 +1093,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   top: 0;
   left: 0;
   pointer-events: none;
-  z-index: 1000;
+  z-index: var(--z-map-overlay);
   margin-left: -13px;
   margin-top: -38px;
   will-change: transform;
@@ -1579,9 +1620,10 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 
 .graph-tooltip {
   position: fixed;
-  /* Above leaflet marker pane (default z-index 600) so vote-type indicator
-     icons don't occlude the hover tooltip they trigger. */
-  z-index: 1000;
+  /* Above the Leaflet marker pane so vote-type indicator icons don't occlude
+     the hover tooltip they trigger. Map furniture: it lives inside the map's
+     stacking context, so this only orders it against the map's own layers. */
+  z-index: var(--z-map-overlay);
   background: var(--paper);
   border: 1px solid var(--hairline);
   padding: 4px 8px;
@@ -1826,10 +1868,16 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 
 /* Expanded modal shown when a vote-type indicator icon is hovered.
    Anchors at the icon's screen position; the icon "expands" into this panel
-   visually via the entrance scale animation. */
+   visually via the entrance scale animation.
+
+   These cards are portaled to document.body rather than into the Leaflet
+   container (GraphLayer), and that is what makes the rung below mean anything:
+   inside the map they were sealed in its stacking context, so 1100 lost to a
+   990 banner. They are positioned in viewport coordinates already, so the
+   portal target is a stacking decision and nothing else. */
 .graph-indicator-modal {
   position: fixed;
-  z-index: 1100;
+  z-index: var(--z-map-card);
   background: var(--paper);
   border: 1px solid var(--ink);
   padding: 10px 12px;
@@ -1845,13 +1893,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   animation: indicator-modal-in 120ms ease-out;
 }
 
-/* The route-summary card sits above the pinned modal (1100). Portals mount at
-   different times, so DOM order can't order them. The transient hover card
-   (1400) tops both open modals — it actively dodges them via the avoid-rects
-   pass in ProposalCard, so it only overlaps when no quadrant is clear, and
-   then the card under the cursor is the one that must stay readable. */
+/* The route-summary card sits above the pinned one. Portals mount at different
+   times, so DOM order can't order them. The transient hover card tops both open
+   modals — it actively dodges them via the avoid-rects pass in ProposalCard, so
+   it only overlaps when no quadrant is clear, and then the card under the
+   cursor is the one that must stay readable. */
 .graph-indicator-modal.is-elevated {
-  z-index: 1300;
+  z-index: var(--z-map-card-elevated);
 }
 
 @keyframes indicator-modal-in {
@@ -2017,12 +2065,12 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   user-select: text;
 }
 
-/* Transient hover card sits above BOTH open modals — the pinned card (1100)
-   and the route summary (1300) — so when its dodge pass finds no clear
-   quadrant and it must overlap one, the card under the cursor stays readable
-   rather than sliding underneath. */
+/* Transient hover card sits above BOTH open modals — the pinned card and the
+   route summary — so when its dodge pass finds no clear quadrant and it must
+   overlap one, the card under the cursor stays readable rather than sliding
+   underneath. */
 .graph-proposal-card.is-hover {
-  z-index: 1400;
+  z-index: var(--z-map-card-hover);
 }
 
 /* Per-vote-type rows: label on the left, a connected −/net/+ control on the right. */
@@ -2273,12 +2321,13 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 /* Leaflet paints EVERY anchor inside the map container its own link blue
-   (`.leaflet-container a` — specificity 0-2-0). These cards portal INTO that
-   container, so a plain class rule on a card link loses the cascade and comes
-   out blue; that is what was happening to the source markers below, whose
-   `color: inherit` never stood a chance. Reset it once here, above Leaflet's
-   reach, and let each card link style itself from the card's own ink. */
-.leaflet-container .graph-proposal-card a {
+   (`.leaflet-container a` — specificity 0-2-0), and while these cards mounted
+   inside that container a plain class rule on a card link lost the cascade and
+   came out blue — which is what was happening to the source markers below,
+   whose `color: inherit` never stood a chance. The cards portal to
+   document.body now, outside Leaflet's reach, so one unscoped rule does it and
+   it no longer depends on where they hang. */
+.graph-proposal-card a {
   color: inherit;
 }
 
@@ -2649,7 +2698,7 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
   position: fixed;
   left: 10px;
   bottom: 10px;
-  z-index: 3000;
+  z-index: var(--z-ribbon);
   padding: 3px 10px;
   border: 1px solid rgba(0, 0, 0, 0.25);
   border-radius: 4px;
