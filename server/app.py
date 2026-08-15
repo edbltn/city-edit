@@ -24,6 +24,9 @@ load_dotenv()
 from flask import Flask, Response, jsonify, request, send_from_directory
 from flask_cors import CORS
 from flask_sock import Sock
+# flask-sock's transport. Raised by ws.receive() the moment the peer closes —
+# the WS loop needs the type, not a substring match on the message.
+from simple_websocket import ConnectionClosed
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -1464,6 +1467,21 @@ def ws(ws):
                 inbound = ws.receive(timeout=0)
                 if inbound:
                     _ws_handle_inbound(ws, slug, sub, inbound, conn)
+            except ConnectionClosed:
+                # The client is GONE, and this is the only place we find out
+                # promptly — the close frame arrives on the inbound pump.
+                #
+                # It used to fall into the filter below, where "connection
+                # closed" is on the ignore list, so the loop kept spinning and
+                # the handler only unwound ~30s later when the keepalive send
+                # finally raised. Harmless when this loop only pushed votes.
+                # Not harmless now: for those 30 seconds the departed viewer
+                # was still in the presence room, so everyone left on the map
+                # was told they had company that had closed the tab. Measured
+                # at 30.2s against a real browser close before this line
+                # existed. Leaving now makes `finally`'s ZREM what the design
+                # says it is — an explicit departure, not an expiry.
+                break
             except Exception as e:
                 s = str(e).lower()
                 if "timed out" not in s and "no data" not in s and "connection closed" not in s:
@@ -1486,11 +1504,16 @@ def ws(ws):
             if conn["visible"] and now - last_presence_poll >= presence.PUSH_INTERVAL:
                 last_presence_poll = now
                 n = presence_registry.count(slug)
-                # Edge-triggered: a steady room sends nothing at all.
+                # Edge-triggered: a steady room sends nothing at all. Which is
+                # also why the send has to succeed BEFORE we record it as sent
+                # — marking it first means one dropped frame is remembered as
+                # delivered, and the client is then stuck on the previous
+                # number until the room's size happens to change again. On a
+                # small map that can be forever.
                 if n != conn["last_presence_sent"]:
-                    conn["last_presence_sent"] = n
                     try:
                         ws.send(json.dumps({"type": "presence", "n": n}))
+                        conn["last_presence_sent"] = n
                         last_push = now
                     except Exception:
                         pass

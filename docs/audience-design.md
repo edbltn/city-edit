@@ -183,7 +183,22 @@ worse claim.
 
 > "You're looking at this with 3 other people."
 
-Shown only when there are at least **two** other viewers, per the brief.
+Shown from **one** other viewer up (`MIN_TOTAL = 2` in `CoPresence.tsx`).
+
+The brief asked for two others, and that was the shipped behaviour from
+2026-08-14 until it was changed — during which the strip was never once seen.
+The reason is in §1: the counting identity is a hash of the client IP, so a
+household, an office or a carrier NAT is **one** member. Three marks therefore
+needs three separate *networks* on the same map inside the same two-second
+push. That was verified rather than assumed — three real browsers on one
+machine are pushed `n=1`; it takes three distinct source IPs to be pushed
+`n=3` — so the owner could not reach the old threshold even deliberately,
+because every device in the house leaves by the same egress.
+
+A ritual nobody attends produces no common knowledge, which is the only thing
+the feature is for. One other person is where the claim starts, and the
+under-count above means a displayed 2 is a floor: the real room is two or more,
+never fewer. Raising it back is a one-line change to `MIN_TOTAL`.
 
 ### Structure: a sorted set, deliberately not a HyperLogLog
 
@@ -200,6 +215,17 @@ the exact failure this feature cannot survive.
   pruned at read.
 - **Departure is explicit** (`ZREM`), not left to expiry. A count that stays
   high for 35 seconds after everyone leaves is over-reporting.
+
+  This did not hold as shipped. The `ZREM` runs in the WS handler's `finally`,
+  and the handler only learns the peer is gone from `ws.receive()` raising
+  `ConnectionClosed` — which the inbound pump's exception filter swallowed by
+  substring ("connection closed" is on its ignore list, alongside the benign
+  no-data cases). So the loop kept spinning and only unwound when a keepalive
+  `send` failed, up to `KEEPALIVE` seconds later: **measured at 30.2s** between
+  a real browser closing and the `ZREM`, with every remaining viewer told for
+  that whole time that they had company who had left. The pump now catches the
+  type and breaks; the same measurement is ~1.1s. Explicit departure is only as
+  explicit as the close detection under it.
 - A per-process refcount means closing one of a person's two tabs does not
   evict them; closing the last one does.
 - The set stays small — its cardinality is people on one map now, not people

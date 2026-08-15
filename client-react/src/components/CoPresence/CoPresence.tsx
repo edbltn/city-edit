@@ -11,9 +11,11 @@ import "./CoPresence.css";
  *  networks with the same map open inside the same two-second push — a bar this
  *  map's traffic is unlikely to clear, and one the owner cannot clear on
  *  purpose even with three devices, because they all leave by the same egress.
- *  (That is a prediction, not a measurement: this has not been deployed yet, so
- *  there is no live traffic to have observed. Revisit it against real numbers
- *  once there are some.)
+ *  That last part is measured, not assumed: three real browsers on one machine
+ *  are pushed n=1, and it takes three genuinely separate source IPs to be told
+ *  n=3. What has NOT been measured is the live arrival rate — the ceiling this
+ *  argument rests on is a prediction, so revisit it against real numbers if
+ *  the map ever gets busy.
  *
  *  A ritual nobody attends produces no common knowledge at all, which is the
  *  only thing this component was built to make. Two is where the product

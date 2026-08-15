@@ -73,8 +73,8 @@ function AppContent() {
       {/* Mounted only once the splash is gone: the strip animates itself in, and
           that entrance is wasted behind the full-screen loader. */}
       {!isInitialLoading && <EventBanner />}
-      {/* Renders itself only when there are at least two other people here, so
-          it costs nothing on a quiet map. Mounted behind the splash for the
+      {/* Renders itself only once at least one other person is here, so it
+          costs nothing on a quiet map. Mounted behind the splash for the
           same reason the banner is: its entrance is wasted under the loader. */}
       {!isInitialLoading && <CoPresence />}
       <PasscodeGate />

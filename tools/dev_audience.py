@@ -7,8 +7,13 @@ incognito window is ONE person. That is the feature working: it is exactly what
 stops a fragmenting device_id from inventing an audience. It also means you
 cannot see either number on your own machine, because:
 
-  · co-presence renders only from 3 distinct people (you + two others), and
+  · co-presence renders only from 2 distinct people (you + one other), and
   · a view count renders only from 2.
+
+The same arithmetic is why the strip went unseen on prod for its whole first
+run at the old threshold of 3: an IP hash makes a household one member, so
+"you + two others" meant three separate networks on one map in one two-second
+window. See docs/audience-design.md §3.
 
 This script supplies the other people. It does NOT bypass the identity rule —
 it satisfies it, by opening real WebSocket connections that arrive with

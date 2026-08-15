@@ -33,12 +33,12 @@
    bug to behave. Step above whatever is in that slot; the notice is
    dismissible, and the strip drops back when it goes.
 
-   Scoped to `body` rather than to the `#app` wrapper, because the wrapper is
-   not a safe anchor even though it exists: this app's cards and notices portal
-   to document.body (see MapNotice.tsx), so a wrapper-scoped :has() would go
-   silently quiet the moment one of them moved out — and a rule that stops
-   matching without failing is the kind that ships a collision unnoticed.
-   `body` is an ancestor of every mount point, portalled or not. */
+   Scoped to `body` rather than to the `#app` wrapper. #app does exist and the
+   notice renders inside it today, so this is not a bug fix — it is removing a
+   dependency on both of those staying true. Several of this app's overlays are
+   portalled to document.body, and a wrapper-scoped :has() stops matching
+   without failing the moment one more of them moves; `body` is an ancestor of
+   every mount point either way. */
 body:has(.map-notice) .copresence,
 body:has(.event-banner) .copresence {
   bottom: calc(var(--space-5) + 56px);   /* notice: 24px offset + 40px tall */
