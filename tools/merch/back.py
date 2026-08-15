@@ -57,15 +57,20 @@ def tee_back_isogrid(ink: str, ground: str, *,
     qr_body, qr_w, qr_h = cityscape.block_for_width(
         url, ground, ink, SCENE_WIDTH)
 
-    gap = 200
-    total = head_size * cap + gap + qr_h
+    gap, gap_url = 200, 150
+    total = head_size * cap + gap + qr_h + gap_url + 64
     top = (H - total) / 2
 
     y = top + head_size * cap
+    scene_y = y + gap
     body = [
         text(HEADLINE, W / 2, y, head_size, weight=600, fill=ink,
              tracking=0.08, anchor="middle"),
-        f'<g transform="translate({(W - qr_w) / 2:.2f},{y + gap:.2f})">{qr_body}</g>',
+        f'<g transform="translate({(W - qr_w) / 2:.2f},{scene_y:.2f})">{qr_body}</g>',
+        # Quiet, and below the district rather than beside it — a legible URL
+        # for anyone who reads the shirt without reaching for a phone.
+        text("CITYEDIT.ORG", W / 2, scene_y + qr_h + gap_url, 64, fill=ink,
+             tracking=0.42, anchor="middle", opacity=0.5),
     ]
     return W, H, "".join(body)
 
