@@ -9,8 +9,10 @@ import { VoteTypeSelector } from "../VoteTypeSelector";
 import { AddressSearch } from "../AddressSearch";
 import { NavRail } from "../NavRail";
 import { Logo } from "../Logo";
+import { chromeMode } from "../../utils/chromeMode";
 import type { LatLng } from "../../types";
 import "./TopBar.css";
+import "./TopBarFloat.css";
 
 export const TopBar = memo(function TopBar() {
   const [showHowItWorks, setShowHowItWorks] = useState(false);
@@ -115,7 +117,10 @@ export const TopBar = memo(function TopBar() {
   };
 
   return (
-    <header className="topbar">
+    // data-chrome selects the whole top-chrome treatment: "float" lays the
+    // controls on the map as plates, "banner" is the original opaque strip.
+    // Every floating rule is scoped to this attribute (TopBarFloat.css).
+    <header className="topbar" data-chrome={chromeMode()}>
       <h1 onClick={goToLanding} className="logo-container">
         <Logo className="logo-img" />
       </h1>
