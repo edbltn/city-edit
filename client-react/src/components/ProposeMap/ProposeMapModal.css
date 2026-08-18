@@ -42,7 +42,7 @@
   border: none;
   background: none;
   font-family: var(--font-main);
-  font-size: 22px;
+  font-size: var(--glyph-lg);
   line-height: 1;
   cursor: pointer;
   color: var(--ink);
@@ -158,7 +158,7 @@
   background: none;
   color: var(--ink);
   cursor: pointer;
-  font-size: 16px;
+  font-size: var(--glyph-md);
   padding: 0 var(--space-2);
 }
 

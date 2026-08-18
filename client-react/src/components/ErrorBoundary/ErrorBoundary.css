@@ -18,14 +18,14 @@
 
 .error-boundary-title {
   margin: 0 0 12px;
-  font-size: 22px;
+  font-size: var(--font-display);
   font-weight: 600;
   color: var(--ink, #111);
 }
 
 .error-boundary-body {
   margin: 0 0 20px;
-  font-size: 15px;
+  font-size: var(--font-body);
   line-height: 1.5;
   color: var(--ink, #111);
   opacity: 0.75;
@@ -33,7 +33,7 @@
 
 .error-boundary-button {
   padding: 10px 20px;
-  font-size: 15px;
+  font-size: var(--font-body);
   color: var(--paper, #fbfbf8);
   background: var(--ink, #111);
   border: none;

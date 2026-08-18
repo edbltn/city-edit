@@ -28,13 +28,19 @@
 
 .landing {
   /* ---- Type scale, landing-local ------------------------------------------
-     Four steps, each an alias for a globals.css token. Re-pointed as a group
-     at the narrow breakpoint, so the ratios between them survive the shrink
-     (22/19/17/14 -> 19/17/14/13) instead of one element moving alone. */
-  --landing-display: var(--font-size-lg);   /* the tagline — the page's hero */
-  --landing-title: var(--font-size-base);   /* map card names */
-  --landing-body: var(--font-size-sm);      /* map card taglines */
-  --landing-ui: var(--font-size-xs);        /* search, footer, tooltip */
+     THREE steps, because this page only says three kinds of thing: what the
+     site is, which map a card is, and everything else. It used four, and the
+     fourth (a separate size for card taglines, one step under card names) was
+     the kind of near-duplicate that makes a page look like nothing lines up —
+     a one-line caption under a title is the same class of text as the footer
+     and the search field, so it is sized like them.
+
+     Each step is a role token from globals.css, re-pointed as a GROUP at the
+     narrow breakpoint so the page shrinks as a unit and the gaps between the
+     three survive (22/18/13 -> 18/15/11). */
+  --landing-display: var(--font-display);   /* the tagline — the page's hero */
+  --landing-title: var(--font-heading);     /* map card names */
+  --landing-ui: var(--font-secondary);      /* card taglines, search, footer, nav */
 
   /* The nav rail is shared with the map topbar, so it rides
      `--control-font-size` — the correct knob for it, and NOT something to
@@ -45,7 +51,7 @@
      compacts on mobile because the *map* header is fighting for room at that
      size, and this page is not. (Safe to scope: nothing else rendered under
      .landing reads this token — the propose modal sizes itself entirely from
-     the --font-size-* scale.) */
+     the role scale.) */
   --control-font-size: var(--landing-ui);
 
   /* ---- Surfaces -----------------------------------------------------------
@@ -414,7 +420,7 @@
 
 .landing-card-tagline {
   flex: 1;
-  font-size: var(--landing-body);
+  font-size: var(--landing-ui);
   line-height: 1.4;
   opacity: 0.88;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
@@ -442,10 +448,9 @@
      breakpoints, so re-pointing the aliases is the only way a non-topbar
      surface can shrink as a unit. */
   .landing {
-    --landing-display: var(--font-size-base);
-    --landing-title: var(--font-size-sm);
-    --landing-body: var(--font-size-xs);
-    --landing-ui: var(--font-size-2xs);
+    --landing-display: var(--font-heading);
+    --landing-title: var(--font-body);
+    --landing-ui: var(--font-caption);
     --landing-symbol: 48px;
     --landing-logo: clamp(112px, 34vw, 190px);
   }

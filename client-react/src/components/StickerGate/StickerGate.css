@@ -35,7 +35,7 @@
 }
 
 .sticker-gate-spinner {
-  font-size: 28px;
+  font-size: var(--glyph-lg);
   line-height: 1;
   color: var(--color-start);
 }

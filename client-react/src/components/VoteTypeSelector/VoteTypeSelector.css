@@ -118,7 +118,7 @@
 
 .vote-type-display .vote-type-icon {
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: var(--glyph-sm);
   line-height: 1;
 }
 
@@ -473,6 +473,6 @@
   }
 
   .vote-type-option .vote-type-icon {
-    font-size: 12px;
+    font-size: var(--glyph-sm);
   }
 }

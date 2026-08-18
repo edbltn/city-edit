@@ -159,7 +159,7 @@
   border: none;
   background: transparent;
   font-family: var(--font-main);
-  font-size: 16px;
+  font-size: var(--glyph-md);
   line-height: 1;
   color: color-mix(in srgb, var(--ink) 45%, transparent);
   cursor: pointer;
@@ -219,7 +219,7 @@
   .map-notice-close {
     width: 32px;
     height: 32px;
-    font-size: 18px;
+    font-size: var(--glyph-md);
   }
 }
 

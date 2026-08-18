@@ -8,33 +8,83 @@
   /* Typography — monospace only */
   --font-main: "Red Hat Mono", "Courier New", Courier, monospace;
 
-  /* Typography Scale (desktop) */
-  --font-size-2xs: 13px;
-  --font-size-xs: 14px;
-  --font-size-sm: 17px;
-  --font-size-sm-mobile: 14px;
-  --font-size-md: 18px;
-  --font-size-base: 19px;
-  /* The display step. Additive: it names a size the app was already using as a
-     literal in three places (the landing tagline and card names, the propose
-     modal's close glyph) rather than changing any existing step. */
-  --font-size-lg: 22px;
+  /* ==========================================================================
+     THE TYPE SCALE — five steps, and that is the whole list.
+
+     This replaced a set of seven tokens whose values were 13/14/17/18/19/22:
+     six sizes, but only three or four distinguishable ones, because 13 next to
+     14 and 17 next to 18 next to 19 are not steps — they are the same step
+     written three ways. A reader cannot see a 1px difference as hierarchy; they
+     just see text that does not line up. Every pair here is at least 2px and
+     ~1.15x apart, so each step is a decision rather than a rounding.
+
+     Roles, not sizes. Pick the one that says what the text IS; never reach for
+     the number. Every step also lands at or below the size it replaced, which
+     is the "step the app down a pip or two" half of the change.
+
+       display    the one big thing on a page (the landing hero)     22  (was 22)
+       heading    titles: modal headers, card names                  18  (was 18/19)
+       body       default reading size, desktop control text         15  (was 17)
+       secondary  subtitles, captions, dense fields, footers         13  (was 14)
+       caption    fine print, control text once space is tight       11  (was 13, and
+                                                                         9/10/11 all
+                                                                         collapse here)
+
+     The floor is `caption`. Nothing in the app renders text smaller: below
+     ~11px Red Hat Mono stops being reliably legible on a phone, and the three
+     near-identical sizes that used to live under it (9/10/11) were the single
+     biggest source of the "sizes everywhere" problem. ========================= */
+  --font-display: 22px;
+  --font-heading: 18px;
+  --font-body: 15px;
+  --font-secondary: 13px;
+  --font-caption: 11px;
+
+  /* ---- Glyph sizes ---------------------------------------------------------
+     A character used as an ICON — the legend's diamonds, the cast +/-, a close
+     x, the ASCII spinner. These are sized by `font-size` but they are not text
+     and they must not be picked from the reading hierarchy: an icon answers to
+     the control it sits in, not to how loud it should read. Kept as their own
+     names so the two families can move independently, but deliberately POINTED
+     AT scale steps, so tokenising the app's ~25 icon-glyphs added no new
+     rendered size. ========================================================== */
+  --glyph-sm: var(--font-secondary);
+  --glyph-md: var(--font-heading);
+  --glyph-lg: var(--font-display);
+
+  /* ---- Legacy aliases ------------------------------------------------------
+     The old --font-size-* names, kept so the components that already read them
+     keep working, each folded onto the role it always meant. New code should
+     use the role names above. ============================================== */
+  /* 2xs was 13px and is read text — dropdown subtitles, modal field labels,
+     the notice banner. It folds onto `secondary`, NOT `caption`: caption is
+     reserved for genuine fine print and for control text once the viewport is
+     too narrow to afford more, and pushing a banner meant to be read down to
+     11px on a 1440 desktop is not a step down, it is a different decision. */
+  --font-size-2xs: var(--font-secondary);
+  --font-size-xs: var(--font-secondary);
+  --font-size-sm: var(--font-body);
+  --font-size-sm-mobile: var(--font-secondary);
+  --font-size-md: var(--font-heading);
+  --font-size-base: var(--font-heading);
+  --font-size-lg: var(--font-display);
 
   /* One knob for ALL topbar control text — mode/vote selectors, their dropdown
      options (label, subtitle, vote count, search field, empty state) and the
      How-it-Works/Clear/Cast labels. Every control reads this token, so a
      breakpoint resizes them together via a single `--control-font-size`
      override instead of a per-element font list that drifts out of sync.
-     Do NOT style topbar control text with the static `--font-size-*` scale
-     tokens below: those are frozen across breakpoints, so an element using them
-     stays at desktop size while its neighbours shrink on mobile. */
-  --control-font-size: var(--font-size-sm);
+     Do NOT style topbar control text with the static role tokens above: those
+     are frozen across breakpoints, so an element using them stays at desktop
+     size while its neighbours shrink on mobile. */
+  --control-font-size: var(--font-body);
   /* Compact sibling for dense topbar fields — the address-search input, its
-     autocomplete results, and the legend coordinate/address slots. Smaller than
-     --control-font-size on desktop (data density), but converges to the SAME
-     mobile sizes so every topbar control + field shrinks together. Same rule:
-     never size these with a frozen --font-size-*; use a --control-font-size* token. */
-  --control-font-size-compact: var(--font-size-xs);
+     autocomplete results, and the legend coordinate/address slots. One step
+     below --control-font-size on desktop (data density), converging with it at
+     the narrow breakpoint so every topbar control + field shrinks together.
+     Same rule: never size these with a frozen role token; use a
+     --control-font-size* token. */
+  --control-font-size-compact: var(--font-secondary);
 
   /* Control Heights */
   --control-height: 44px;
@@ -216,7 +266,7 @@ body {
 
 /* ASCII (| / - \) spinner, sized up to match the splash. */
 .map-bootstrap-spinner {
-  font-size: 28px;
+  font-size: var(--glyph-lg);
   line-height: 1;
   color: var(--color-start);
 }
@@ -295,7 +345,7 @@ body {
 .topbar h1 {
   margin: 0;
   font-family: var(--font-main);
-  font-size: 22px;
+  font-size: var(--font-display);
   font-weight: 400;
   letter-spacing: 0;
   white-space: nowrap;
@@ -568,7 +618,7 @@ body {
 
 .mode-option .check-icon {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--font-caption);
   font-weight: 400;
   opacity: 0;
 }
@@ -646,20 +696,20 @@ body {
    markers (.ascii-marker) so the legend reads as the same color. */
 .legend-char-start {
   color: var(--color-start);
-  font-size: 14px;
+  font-size: var(--glyph-sm);
   line-height: 1;
   filter: brightness(0.9);
 }
 
 .legend-char-end {
   color: var(--color-end);
-  font-size: 14px;
+  font-size: var(--glyph-sm);
   line-height: 1;
   filter: brightness(0.9);
 }
 
 .legend-char-route {
-  font-size: 13px;
+  font-size: var(--glyph-sm);
   line-height: 1;
   letter-spacing: -1px;
   opacity: 0.9;
@@ -667,7 +717,7 @@ body {
 
 .legend-char-selection {
   color: var(--selection);
-  font-size: 12px;
+  font-size: var(--glyph-sm);
   line-height: 1;
   opacity: 0.8;
   filter: brightness(0.9);
@@ -781,7 +831,7 @@ body {
   border: 1px solid var(--hairline);
   background: var(--paper);
   font-family: var(--font-main);
-  font-size: 20px;
+  font-size: var(--glyph-md);
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
@@ -914,9 +964,17 @@ body.maplibre-active .leaflet-container {
   border-bottom: none !important;
 }
 
+/* Leaflet draws its zoom +/- from its own stylesheet at a size that happens to
+   match our display step. Claim it, so the match is a decision and survives a
+   Leaflet upgrade. */
+.leaflet-control-zoom-in,
+.leaflet-control-zoom-out {
+  font-size: var(--glyph-lg);
+}
+
 .leaflet-control-attribution {
   font-family: var(--font-main) !important;
-  font-size: 11px !important;
+  font-size: var(--font-caption) !important;
   letter-spacing: 0 !important;
   opacity: 0.35 !important;
   background: var(--paper) !important;
@@ -942,7 +1000,7 @@ body.maplibre-active .leaflet-container {
   width: 28px;
   height: 28px;
   padding: 0;
-  font-size: 20px;
+  font-size: var(--glyph-md);
   line-height: 1;
   color: var(--ink);
   background: var(--paper);
@@ -1036,7 +1094,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 .ascii-kite {
-  font-size: 22px;
+  font-size: var(--glyph-lg);
   line-height: 1;
   /* Contrast ring around the glyph (dark on dark themes, light on light). The
      four offsets approximate a uniform 1px outline. */
@@ -1219,7 +1277,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 
 .pac-item {
   padding: var(--space-2) var(--space-3) !important;
-  font-size: 14px !important;
+  font-size: var(--font-secondary) !important;
   color: var(--ink) !important;
   background: var(--paper) !important;
   cursor: pointer !important;
@@ -1267,7 +1325,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 .pac-item-query {
-  font-size: 14px !important;
+  font-size: var(--font-secondary) !important;
   color: var(--ink) !important;
   font-family: var(--font-main) !important;
 }
@@ -1331,7 +1389,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .modal-header h2 {
   margin: 0;
   font-family: var(--font-main);
-  font-size: 18px;
+  font-size: var(--font-heading);
   font-weight: 400;
   letter-spacing: 0;
 }
@@ -1341,7 +1399,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   height: 32px;
   border: 1px solid var(--hairline);
   background: transparent;
-  font-size: 20px;
+  font-size: var(--glyph-md);
   line-height: 1;
   color: var(--ink);
   cursor: pointer;
@@ -1371,7 +1429,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .input-group label {
   display: block;
   margin-bottom: var(--space-2);
-  font-size: 15px;
+  font-size: var(--font-body);
   font-weight: 400;
   color: var(--ink);
   opacity: 0.8;
@@ -1383,7 +1441,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   border: 1px solid var(--hairline);
   background: var(--paper);
   font-family: var(--font-main);
-  font-size: 16px;
+  font-size: var(--font-body);
   color: var(--ink);
   box-sizing: border-box;
   transition: border-color 0.15s ease;
@@ -1464,8 +1522,11 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   :root {
     --control-height: 36px;
     --logo-width: 80px;
-    --control-font-size: 11px;
-    --control-font-size-compact: 11px;
+    /* Both to `caption`, written as ONE value for the pair: their converging
+       here is the point of having two of them, not a coincidence of two
+       numbers that happened to match. */
+    --control-font-size: var(--font-caption);
+    --control-font-size-compact: var(--font-caption);
   }
 
   .topbar {
@@ -1515,7 +1576,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 
   .mode-icon {
-    font-size: 13px;
+    font-size: var(--glyph-sm);
   }
 
   /* The Cast/Clear group stays in the DOM (just .hidden-reserve'd) with no
@@ -1544,8 +1605,9 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   :root {
     --control-height: 34px;
     --logo-width: 60px;
-    --control-font-size: 10px;
-    --control-font-size-compact: 10px;
+    /* No third size here. This breakpoint used to drop the pair again, from
+       11px to 10px — a step nobody can see and a whole extra size in the
+       inventory. It keeps `caption` like every other narrow width. */
   }
 
   .topbar {
@@ -1557,7 +1619,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 
   .topbar h1 {
-    font-size: 14px;
+    font-size: var(--font-secondary);
   }
 
   .btn-header,
@@ -1578,7 +1640,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 @media (max-height: 500px) and (orientation: landscape) {
   :root {
     --control-height: 32px;
-    --control-font-size: 12px;
+    --control-font-size: var(--font-caption);
   }
 
   .topbar {
@@ -1587,7 +1649,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   }
 
   .topbar h1 {
-    font-size: 14px;
+    font-size: var(--font-secondary);
     flex-shrink: 0;
   }
 
@@ -1632,7 +1694,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   border: 1px solid var(--hairline);
   padding: 4px 8px;
   font-family: var(--font-main);
-  font-size: 11px;
+  font-size: var(--font-caption);
   pointer-events: none;
   white-space: nowrap;
   color: var(--ink);
@@ -1689,7 +1751,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-main);
-  font-size: 9px;
+  font-size: var(--glyph-sm);
   line-height: 1;
   cursor: pointer;
   pointer-events: auto;
@@ -1714,7 +1776,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   .vote-type-indicator-x {
     width: 20px;
     height: 20px;
-    font-size: 13px;
+    font-size: var(--glyph-sm);
   }
 }
 
@@ -1859,7 +1921,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 .vote-type-indicator-glyph {
-  font-size: 16px;
+  font-size: var(--glyph-md);
   line-height: 1;
 }
 
@@ -1886,7 +1948,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   border: 1px solid var(--ink);
   padding: 10px 12px;
   font-family: var(--font-main);
-  font-size: 12px;
+  font-size: var(--font-secondary);
   pointer-events: none;
   white-space: nowrap;
   color: var(--ink);
@@ -1933,7 +1995,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   align-items: center;
   justify-content: center;
   border: 1px solid var(--hairline);
-  font-size: 16px;
+  font-size: var(--glyph-md);
   line-height: 1;
   flex-shrink: 0;
 }
@@ -1953,7 +2015,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 .graph-indicator-modal-eyebrow {
-  font-size: 10px;
+  font-size: var(--font-caption);
   font-weight: 400;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1961,14 +2023,14 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 }
 
 .graph-indicator-modal-label {
-  font-size: 13px;
+  font-size: var(--font-secondary);
   font-weight: 400;
   white-space: normal;
   line-height: 1.3;
 }
 
 .graph-indicator-modal-body {
-  font-size: 11px;
+  font-size: var(--font-caption);
 }
 
 .graph-indicator-modal-body .graph-tooltip-name {
@@ -2176,7 +2238,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .graph-proposal-row-cover {
   flex: 0 0 var(--cover-col, 44px);
   width: var(--cover-col, 44px);
-  font-size: 10px;
+  font-size: var(--font-caption);
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
   text-align: center;
@@ -2214,7 +2276,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   align-items: flex-end;
   gap: 12px;
   margin-bottom: 4px;
-  font-size: 10px;
+  font-size: var(--font-caption);
   text-transform: uppercase;
   color: color-mix(in srgb, var(--ink) 45%, transparent);
 }
@@ -2250,7 +2312,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   border-color: transparent;
   color: inherit;
   /* Must match the real control's metrics exactly or the mirror is a lie. */
-  font-size: 11px;
+  font-size: var(--font-caption);
   letter-spacing: normal;
 }
 
@@ -2280,7 +2342,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  font-size: 10px;
+  font-size: var(--font-caption);
   line-height: 1.2;
   letter-spacing: 0.08em;
 }
@@ -2319,7 +2381,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   flex: 0 0 auto;
   display: flex;
   gap: 0 5px;
-  font-size: 10px;
+  font-size: var(--font-caption);
   line-height: 1.3;
   white-space: nowrap;
 }
@@ -2361,7 +2423,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 .graph-proposal-row-fund {
   flex: 0 0 auto;
   opacity: 0.35;
-  font-size: 10px;
+  font-size: var(--font-caption);
   line-height: 1.3;
   text-decoration: none;
   white-space: nowrap;
@@ -2393,7 +2455,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   .graph-proposal-row-link,
   .graph-proposal-row-fund {
     padding: 4px 0;
-    font-size: 11px;
+    font-size: var(--font-caption);
   }
 }
 
@@ -2410,7 +2472,7 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   --vote-border: 1px;
   border: var(--vote-border) solid var(--hairline);
   font-variant-numeric: tabular-nums;
-  font-size: 11px;
+  font-size: var(--font-caption);
   line-height: 1;
   white-space: nowrap;
   /* Cell padding as a token, because the min-widths below have to add it back
@@ -2535,7 +2597,7 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
   padding: 0;
   border: 1px solid var(--hairline);
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: var(--font-secondary);
   line-height: 1;
   color: var(--ink);
   background: none;
@@ -2554,7 +2616,7 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
 /* The minimize "–" glyph sits high in its em box; nudge it onto the optical
    centre so it matches the ✕ and copy icons. */
 .graph-proposal-minimize {
-  font-size: 15px;
+  font-size: var(--glyph-sm);
   line-height: 0;
 }
 
@@ -2600,7 +2662,7 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
   padding-top: 2px;
   border-top: 1px solid var(--hairline);
   color: color-mix(in srgb, var(--ink) 75%, transparent);
-  font-size: 10px;
+  font-size: var(--font-caption);
   line-height: 1.5;
 }
 
@@ -2627,7 +2689,7 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
   .graph-indicator-modal {
     min-width: 180px;
     padding: 8px 10px;
-    font-size: 11px;
+    font-size: var(--font-caption);
   }
 
   .graph-indicator-modal-glyph {
@@ -2641,21 +2703,21 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
   }
 
   .graph-indicator-modal-eyebrow {
-    font-size: 9px;
+    font-size: var(--font-caption);
   }
 
   .graph-indicator-modal-label {
-    font-size: 10px;
+    font-size: var(--font-caption);
   }
 
   .graph-indicator-modal-body {
-    font-size: 10px;
+    font-size: var(--font-caption);
   }
 
   /* Only the padding token changes — both min-width formulas derive from it,
      so the columns stay true floors at phone size too. */
   .graph-vote {
-    font-size: 10px;
+    font-size: var(--font-caption);
     --vote-pad-x: 5px;
   }
 
@@ -2669,7 +2731,7 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
 
   .graph-proposal-head {
     gap: 8px;
-    font-size: 9px;
+    font-size: var(--font-caption);
   }
 
   /* Down to the caption size its VOTERS twin already uses. The data cells stay
@@ -2677,17 +2739,17 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
      and two captions in one row that share a bottom edge have to share a size
      or their baselines part again. */
   .graph-proposal-head .graph-proposal-row-cover {
-    font-size: 9px;
+    font-size: var(--font-caption);
     letter-spacing: 0.04em;
   }
 
   /* Track the phone-sized vote cells, so the mirror still matches. */
   .graph-vote.is-head {
-    font-size: 10px;
+    font-size: var(--font-caption);
   }
 
   .graph-proposal-head-caption {
-    font-size: 9px;
+    font-size: var(--font-caption);
     letter-spacing: 0.04em;
   }
 }
@@ -2707,7 +2769,7 @@ html:not(.hover-off) .graph-vote-cell.is-down.is-btn:hover:not(:disabled) {
   border: 1px solid rgba(0, 0, 0, 0.25);
   border-radius: 4px;
   font-family: var(--font-ui, system-ui, sans-serif);
-  font-size: 11px;
+  font-size: var(--font-caption);
   font-weight: 700;
   letter-spacing: 0.12em;
   color: #5c3d00;
