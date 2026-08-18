@@ -226,12 +226,13 @@ def init_db():
             # 0.2ms with it). The identity key can't help: it leads with edge_id.
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_map_vt_device "
                            "ON edge_votes(map_slug, vote_type_id, device_id)")
-            # "Has this person ever voted?" (database.has_voted_before), asked
-            # once per visit on the page-load path by the first-run flow. Both
-            # probes are single-column EXISTS lookups; the composite index above
-            # can't serve them because it leads with map_slug and the question
-            # is deliberately map-agnostic — somebody who voted on the bikes map
-            # is not a first-timer on the trees one.
+            # "Has this person ever voted?" — the backfill half of
+            # database.note_map_open, asked once per visit on the page-load path
+            # by the first-run flow. Both probes are single-column EXISTS
+            # lookups; the composite index above can't serve them because it
+            # leads with map_slug and the question is deliberately map-agnostic
+            # — somebody who voted on the bikes map is not a first-timer on the
+            # trees one.
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_device "
                            "ON edge_votes(device_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_ip "
@@ -394,6 +395,29 @@ def init_db():
                 "CREATE INDEX IF NOT EXISTS idx_sticker_codes_campaign "
                 "ON sticker_codes(campaign, resolved_at)"
             )
+
+            # ── Who has opened a map before ─────────────────────────────
+            # The first-run wall's whole trigger, and the reason it is a TABLE
+            # rather than a reading of something we already have: the app's
+            # existing record of map opens is the [MAPLOAD] log line, which is a
+            # monitoring metric with no queryable store behind it.
+            #
+            # One row per counting key (vote_identity), not per open and not per
+            # map: the question is "has this person ever opened a map of ANY
+            # kind", so a second map must find the row the first one wrote.
+            # `opens` and `last_seen` are kept because they cost one UPDATE that
+            # was happening anyway and answer "how many of our visitors come
+            # back" without a second table.
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS map_visitors (
+                    key_kind TEXT NOT NULL,
+                    key_value TEXT NOT NULL,
+                    first_seen TIMESTAMP NOT NULL DEFAULT NOW(),
+                    last_seen TIMESTAMP NOT NULL DEFAULT NOW(),
+                    opens INT NOT NULL DEFAULT 1,
+                    PRIMARY KEY (key_kind, key_value)
+                )
+            """)
 
             logger.info("[DB] Database schema initialized successfully")
             return True
@@ -703,44 +727,77 @@ def count_unique_voters_for_edges(
     return count_unique_voters_for_edge_sets(map_slug, [list(edge_ids)])[0]
 
 
-def has_voted_before(device_id: str, ip_hash: Optional[str]) -> tuple[bool, Optional[str]]:
-    """Has the person behind this request ever cast a vote — on any map?
+def note_map_open(device_id: str, ip_hash: Optional[str]) -> tuple[bool, Optional[str]]:
+    """Record that this person just opened a map — and say whether they had ever
+    opened one BEFORE this call.
 
-    The question the first-run flow asks, and it is asked on the COUNTING
-    identity (vote_identity) rather than on the browser, for the reason that
-    module exists: `device_id` fragments, and a first run keyed on something that
-    fragments repeats itself at exactly the people it should leave alone.
+    The first-run wall hangs off the answer, so the ordering inside is the whole
+    function: READ, THEN WRITE, and return what the read said. Recording first
+    (or letting the [MAPLOAD] beacon do the recording and reading separately)
+    means every visitor's very first probe finds their own current visit already
+    on file, answers "yes, you have been here", and nobody is ever welcomed.
 
-    Two indexed EXISTS probes rather than one on COALESCE(ip_hash, device_id) —
-    a functional expression can't use the plain column indexes, and this has to
-    stay cheap enough to sit on the page-load path. Under the "device" counting
-    scheme only the device is probed, so the answer always means the same thing
-    the block layer means.
+    Keyed on the COUNTING identity (vote_identity), the same key and the same
+    probe order the vote counter itself uses, for the same reason: a
+    browser's `voter_id` fragments — six ids from one iPhone in three minutes on
+    2026-08-13 — and a welcome keyed on something that fragments repeats itself
+    at the people it should leave alone.
 
-    Returns (voted, by) where `by` is "ip" | "device" | None — which key
-    answered, so an operator reading a log can tell a returning browser from a
-    co-NAT stranger.
+    One deliberate widening of the read: somebody who has ever CAST a vote has
+    obviously opened a map, whether or not this table was around when they did.
+    Without that clause the day this ships hands a newcomer's wall to every
+    veteran voter on the site, because their opens all predate the table.
+
+    Returns (visited_before, by) where `by` is "ip" | "device" | "vote" | None —
+    which key answered, so an operator reading a log can tell a returning browser
+    from a co-NAT stranger from a backfilled voter.
     """
     if not DATABASE_URL:
         return False, None
+    keys: list[tuple[str, str]] = []
+    if vote_identity.COUNT_BY == "ip" and ip_hash:
+        keys.append(("ip", ip_hash))
+    keys.append(("device", device_id))
     try:
         with get_cursor() as cursor:
-            if vote_identity.COUNT_BY == "ip" and ip_hash:
+            before: Optional[str] = None
+            for kind, value in keys:
                 cursor.execute(
-                    "SELECT EXISTS (SELECT 1 FROM edge_votes WHERE ip_hash = %s)",
-                    (ip_hash,),
+                    "SELECT 1 FROM map_visitors WHERE key_kind = %s AND key_value = %s",
+                    (kind, value),
                 )
-                if cursor.fetchone()[0]:
-                    return True, "ip"
-            cursor.execute(
-                "SELECT EXISTS (SELECT 1 FROM edge_votes WHERE device_id = %s)",
-                (device_id,),
-            )
-            return (True, "device") if cursor.fetchone()[0] else (False, None)
+                if cursor.fetchone():
+                    before = kind
+                    break
+            if before is None:
+                # Two indexed EXISTS probes on the same two keys, run on THIS
+                # cursor rather than through a second get_cursor(): that context
+                # holds a pooled connection for its whole body, and nesting one
+                # would hold two per request on the page-load path.
+                for kind, value in keys:
+                    column = "ip_hash" if kind == "ip" else "device_id"
+                    cursor.execute(
+                        f"SELECT EXISTS (SELECT 1 FROM edge_votes WHERE {column} = %s)",
+                        (value,),
+                    )
+                    if cursor.fetchone()[0]:
+                        before = "vote"
+                        break
+            # Write both keys, always: an identity that arrives on a new network
+            # must leave a mark on the device key too, or clearing storage on the
+            # old network reads as a brand-new person.
+            for kind, value in keys:
+                cursor.execute(
+                    "INSERT INTO map_visitors (key_kind, key_value) VALUES (%s, %s) "
+                    "ON CONFLICT (key_kind, key_value) DO UPDATE "
+                    "SET last_seen = NOW(), opens = map_visitors.opens + 1",
+                    (kind, value),
+                )
+            return (before is not None), before
     except Exception as e:
         # Never let this decide anything by failing: the caller treats an error
         # as "returning visitor" (see the client's fail-closed rule).
-        logger.warning(f"[DB] has_voted_before failed: {e}")
+        logger.warning(f"[DB] note_map_open failed: {e}")
         raise
 
 

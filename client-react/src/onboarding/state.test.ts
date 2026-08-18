@@ -53,7 +53,7 @@ describe("a route-kind sentence must reach a corridor before it can cast", () =>
   });
 });
 
-describe("a generic sentence asks for an end but takes no for an answer", () => {
+describe("a label of unknown kind asks for an end but takes no for an answer", () => {
   const generic = facts({ pointType: null, hasStart: true });
 
   it("asks", () => {
@@ -83,18 +83,20 @@ describe("station maps vote on one fixed point", () => {
 
 describe("who sees the flow", () => {
   const trigger = {
-    hasVotedBefore: false,
+    hasVisitedBefore: false,
     suppressed: false,
     pendingSticker: false,
     dismissed: false,
   };
 
-  it("runs for somebody with no vote to their counting identity", () => {
+  it("runs on the first map this counting identity has ever opened", () => {
     expect(shouldOnboard(trigger)).toBe(true);
   });
 
-  it("stays away from anyone who has voted before", () => {
-    expect(shouldOnboard({ ...trigger, hasVotedBefore: true })).toBe(false);
+  it("stays away from anyone who has opened a map before — voted or not", () => {
+    // The point of the key change: a lurker who reads maps and never votes is a
+    // returning visitor, and the old question said they were a newcomer.
+    expect(shouldOnboard({ ...trigger, hasVisitedBefore: true })).toBe(false);
   });
 
   it("stays away from a browser that waved it off", () => {
@@ -105,7 +107,7 @@ describe("who sees the flow", () => {
     // That visit's first vote is what pins the code for everyone who scans it
     // afterwards — and the veteran is the person most likely to pin it right.
     expect(
-      shouldOnboard({ ...trigger, hasVotedBefore: true, suppressed: true, pendingSticker: true })
+      shouldOnboard({ ...trigger, hasVisitedBefore: true, suppressed: true, pendingSticker: true })
     ).toBe(true);
   });
 

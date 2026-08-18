@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildTiles } from "./tiles";
-import { GENERIC, openerFor } from "./phrasebook";
+import { openerFor } from "./phrasebook";
 import type { MapConfig, MapVoteType } from "../map/runtime";
 
 function mapWith(voteTypes: MapVoteType[]): MapConfig {
@@ -41,26 +41,23 @@ describe("the wall comes from the map, not from this repo", () => {
   });
 });
 
-describe("generic sentences", () => {
-  it("ride alongside a map that has its own types", () => {
-    const tiles = buildTiles(mapWith([vt("Add crosswalk", "route")]));
-    const generic = tiles.filter((t) => !t.voteType);
-    expect(generic.length).toBeGreaterThan(0);
-    expect(generic.length).toBeLessThan(GENERIC.length);
-    // A generic slip commits to no vote type and no kind — the flow asks for an
-    // end anyway and lets it be skipped.
-    expect(generic[0].pointType).toBeNull();
+describe("a map with no vote types of its own", () => {
+  it("gets no wall at all, rather than a wall of sentences that cast nothing", () => {
+    // nyc-ebike-charging authors zero vote types. The earlier design appended
+    // twelve type-less openers here; every slip now has to be a vote type, so an
+    // empty list is the honest answer and the flow checks for it before it opens
+    // (components/Onboarding/Onboarding.tsx) rather than rendering an empty wall.
+    expect(buildTiles(mapWith([]))).toEqual([]);
+    expect(buildTiles(null)).toEqual([]);
   });
 
-  it("carry the whole wall for a map that authored none", () => {
-    // nyc-ebike-charging authors no vote types at all; the wall must still work.
-    const tiles = buildTiles(mapWith([]));
-    expect(tiles.length).toBe(GENERIC.length);
-    expect(tiles.every((t) => t.voteType === null)).toBe(true);
-  });
-
-  it("still produces a wall with no map at all", () => {
-    expect(buildTiles(null).length).toBeGreaterThan(0);
+  it("shows a fully custom set anyway, overlapping no preset", () => {
+    // The presets are the vocabulary the CURATED sentences are written for, not
+    // a whitelist the wall is filtered by: a custom type is a real vote type,
+    // and its slip casts a real vote. It gets a derived sentence, not silence.
+    const tiles = buildTiles(mapWith([vt("Add ferry landing", "point")]));
+    expect(tiles.map((t) => t.voteType)).toEqual(["Add ferry landing"]);
+    expect(tiles[0].text).toBe(openerFor("Add ferry landing"));
   });
 });
 

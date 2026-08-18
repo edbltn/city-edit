@@ -8,12 +8,12 @@ import { AddressSearch } from "../AddressSearch";
 import { MapNotice } from "../MapNotice";
 import { OpenerWall } from "./OpenerWall";
 import { openerFor } from "../../onboarding/phrasebook";
-import type { OpenerTile } from "../../onboarding/tiles";
+import { buildTiles, type OpenerTile } from "../../onboarding/tiles";
 import {
   endIsOptional, onboardingStep, requiresEnd, shouldOnboard,
   type OnboardingFacts,
 } from "../../onboarding/state";
-import { hasVotedBefore, isSuppressed, suppress } from "../../onboarding/firstRun";
+import { hasVisitedBefore, isSuppressed, suppress } from "../../onboarding/firstRun";
 import { setOnboardingActive, useOnboardingRequests } from "../../onboarding/active";
 import type { LatLng } from "../../types";
 import "./Onboarding.css";
@@ -23,8 +23,11 @@ import "./Onboarding.css";
 // ==========================================================================
 // Two ways in, one flow:
 //
-//   · Nobody at this counting identity has ever voted → the wall of sentences
-//     opens over the map, and picking one starts the flow at its first blank.
+//   · The map OPEN itself, the first time anybody at this counting identity has
+//     opened one → the wall opens over the map, and picking a sentence starts
+//     the flow at its first blank. Once ever, on any map, and never behind a
+//     menu: the suppressant goes down the moment the wall is on screen, so a
+//     reload does not repeat it and the second map does not either.
 //   · The visit came from a scan of a sticker nobody has voted from yet → the
 //     sentence was chosen by the object in their hand and travelled here in the
 //     URL (`?vt=`), so the wall is skipped and the flow starts already picked.
@@ -35,9 +38,8 @@ import "./Onboarding.css";
 // each step is derived from the same Selection the map, the topbar and the URL
 // are derived from (onboarding/state.ts), so anything the user does by other
 // means — the legend, the back button, a shared link — moves the flow with it.
-// The only two bits of state that belong to the flow are "a generic sentence was
-// chosen" and "the optional end was declined", and neither holds a fact the
-// selection also holds.
+// The only bit of state that belongs to the flow is "the optional end was
+// declined", and it holds no fact the selection also holds.
 //
 // The strip is a MapNotice: the app has exactly one place it speaks from, and a
 // first-run coach is not special enough to earn a second. That also inherits the
@@ -75,17 +77,31 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   // cast, and this must not change under the flow half way through it.
   const pendingSticker = useMemo(() => hasPendingSticker(), []);
 
+  // Every slip on the wall is one of the map's own vote types, so a map that
+  // authors none has no wall to show (onboarding/tiles.ts). Checked BEFORE the
+  // probe rather than after it, and that ordering is the point: the probe is
+  // also what records the open, so probing on a map that cannot show a wall
+  // would spend this visitor's one first run on nothing. A sticker scan is the
+  // exception — it arrives with the sentence already chosen, so it never needed
+  // the wall in the first place.
+  const tiles = useMemo(() => buildTiles(map), [map]);
+  const hasWall = tiles.length > 0;
+
   // null = the visitor probe hasn't answered yet. Nothing renders until it has:
   // a wall that appears and then vanishes is worse than one that arrives late.
   // Two answers need no probe at all — a browser already told to stop (the
   // suppressant is local and free, and the probe is a request on the load path),
   // and a flow the user just asked for by hand.
-  const [visitorVoted, setVisitorVoted] = useState<boolean | null>(() => {
+  //
+  // Read ONCE, in a lazy initializer, because the flow writes the suppressant to
+  // itself the moment the wall appears: a live isSuppressed() here would see that
+  // write on the next render and take the wall back off the screen.
+  const [wasSuppressed] = useState(() => !openedByHand && isSuppressed());
+  const [visitedBefore, setVisitedBefore] = useState<boolean | null>(() => {
     if (openedByHand) return false;
     return isSuppressed() && !hasPendingSticker() ? true : null;
   });
   const [dismissed, setDismissed] = useState(false);
-  const [genericPick, setGenericPick] = useState<OpenerTile | null>(null);
   const [endSkipped, setEndSkipped] = useState(false);
   // Which step's address field is open, rather than a bare boolean: the field
   // closes by itself when the flow moves under it, with no effect to keep in
@@ -104,22 +120,23 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   const [arrivedWithSelection] = useState(() => !!start.coords);
 
   useEffect(() => {
-    if (visitorVoted !== null) return;
+    if (visitedBefore !== null || !(hasWall || pendingSticker)) return;
     let cancelled = false;
-    hasVotedBefore().then((voted) => {
-      if (!cancelled) setVisitorVoted(voted);
+    hasVisitedBefore().then((visited) => {
+      if (!cancelled) setVisitedBefore(visited);
     });
     return () => { cancelled = true; };
-  }, [visitorVoted]);
+  }, [visitedBefore, hasWall, pendingSticker]);
 
   const active =
-    visitorVoted !== null &&
+    (hasWall || pendingSticker) &&
+    visitedBefore !== null &&
     !finished &&
     shouldOnboard({
-      hasVotedBefore: visitorVoted,
+      hasVisitedBefore: visitedBefore,
       // A hand-opened flow overrules both keys: the person in front of the
       // screen has just said they want it.
-      suppressed: openedByHand ? false : isSuppressed(),
+      suppressed: wasSuppressed,
       pendingSticker,
       dismissed,
     });
@@ -132,9 +149,7 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
     : null;
 
   const facts: OnboardingFacts = {
-    picked:
-      !forcedWall &&
-      (!!pickedLabel || !!genericPick || arrivedWithSelection),
+    picked: !forcedWall && (!!pickedLabel || arrivedWithSelection),
     pointType: pickedKind,
     isStationNetwork,
     hasStart: !!start.coords,
@@ -169,8 +184,20 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
     if (active && step === "end") setActiveTool("end");
   }, [active, step, setActiveTool]);
 
-  // A cast finishes the flow. Suppress first (this browser has now been shown
-  // it), then let the closing line stand for a few seconds and leave.
+  // Shown once, ever. The mark goes down the moment the WALL is on screen, not
+  // when the flow is finished with: a reload is a second map open, and a wall
+  // that only suppresses itself on dismissal or on a cast greets anybody who
+  // refreshes before they have chosen anything. `wasSuppressed` is frozen above
+  // precisely so this write cannot pull the wall back off the screen.
+  useEffect(() => {
+    if (!active || step !== "wall") return;
+    dlog("onboard", "wall shown — not offering it again");
+    suppress();
+  }, [active, step]);
+
+  // A cast finishes the flow. Suppress again (harmless, and the wall may have
+  // been skipped entirely on a sticker scan), then let the closing line stand
+  // for a few seconds and leave.
   useEffect(() => {
     if (!active || step !== "done") return;
     dlog("onboard", "first vote landed — flow complete");
@@ -182,16 +209,12 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   const handlePick = useCallback((tile: OpenerTile) => {
-    dlog("onboard", `picked "${tile.text}"`, tile.voteType ?? "(no vote type)");
+    dlog("onboard", `picked "${tile.text}"`, tile.voteType);
     setForcedWall(false);
-    if (tile.voteType) {
-      // Straight into the canonical selection — which also writes it to the URL,
-      // so a reload or a shared link resumes at the same sentence.
-      setVoteType(tile.voteType);
-      setGenericPick(null);
-    } else {
-      setGenericPick(tile);
-    }
+    // Straight into the canonical selection — which also writes it to the URL,
+    // so a reload or a shared link resumes at the same sentence. Every tile
+    // carries a vote type now, so there is no other branch to take.
+    setVoteType(tile.voteType);
   }, [setVoteType]);
 
   const handleDismiss = useCallback(() => {
@@ -215,16 +238,20 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   if (!active) return null;
 
   if (step === "wall") {
+    // Nothing to put on it — a sticker scan onto a map that authors no vote
+    // types. Never an empty wall.
+    if (!hasWall) return null;
     // A selection that arrived in the URL counts as a choice already made, so
     // the wall never opens over somebody's shared link.
-    return <OpenerWall map={map} onPick={handlePick} onDismiss={handleDismiss} />;
+    return (
+      <OpenerWall map={map} tiles={tiles} onPick={handlePick} onDismiss={handleDismiss} />
+    );
   }
 
-    // The sentence the flow is carrying: a generic tile's own words, or the
-  // phrasebook's line for whichever label the selection holds — a tile pick, a
-  // sticker's vote type, or a deep link's `vt=`. One lookup, so a sticker scan
-  // and a wall pick read identically.
-  const sentence = genericPick?.text ?? (pickedLabel ? openerFor(pickedLabel) : null);
+  // The sentence the flow is carrying: the phrasebook's line for whichever label
+  // the selection holds — a tile pick, a sticker's vote type, or a deep link's
+  // `vt=`. One lookup, so a sticker scan and a wall pick read identically.
+  const sentence = pickedLabel ? openerFor(pickedLabel) : null;
   const optionalEnd = endIsOptional(facts);
 
   return (
@@ -323,10 +350,9 @@ function ask(
       // written as work orders ("Add crosswalk", "Fix curb cut") and no wording
       // makes every one of them read as a verb phrase in the middle of a
       // question. Quoted, it also shows exactly what the vote will be recorded
-      // as — including when a generic sentence resolved to the map's default.
-      // A generic sentence named no vote type, so the map's default resolved
-      // one — say so, and say where to change it. This is the only place the
-      // app tells a newcomer that the Proposal picker is theirs to move.
+      // as — including when a label of unknown kind let the map's default
+      // resolve one. Say so, and say where to change it: this is the only place
+      // the app tells a newcomer that the Proposal picker is theirs to move.
       const tail = facts.pointType === null ? " — or pick another above." : "";
       return facts.hasEnd
         ? `“${effectiveVoteType}”, all along this stretch?${tail}`

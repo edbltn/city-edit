@@ -98,17 +98,19 @@ export const HowItWorksModal = memo(function HowItWorksModal({ isOpen, onClose }
             </p>
           </section>
 
-          {/* The way back into the first-run flow. It exists because the flow's
-              "have you been here before?" key is the IP hash, which deliberately
-              treats a new person on a network somebody else voted from as a
-              returning visitor (onboarding/firstRun.ts). Rather than loosen a
-              key that was chosen to stop real users being onboarded twice, the
-              wall is one click away for anyone who wants it. */}
+          {/* The way back into the first-run wall — which opens by itself on a
+              person's first map and never again, so this is the only way back to
+              it. It exists because the flow's "have you been here before?" key is
+              the IP hash, which deliberately treats a new person on a network
+              somebody else has used as a returning visitor
+              (onboarding/firstRun.ts). Rather than loosen a key that was chosen
+              to stop real users being onboarded twice, the wall is one click
+              away for anyone who wants it. */}
           <section className="how-it-works-section">
             <h3>Not sure where to start?</h3>
             <p>
-              Pick a sentence and finish it on the map — it walks you through one
-              vote from start to cast.
+              Say what needs fixing, then point at the place on the map — it walks
+              you through one vote from start to cast.
             </p>
             <button
               type="button"
@@ -118,7 +120,7 @@ export const HowItWorksModal = memo(function HowItWorksModal({ isOpen, onClose }
                 onClose();
               }}
             >
-              Start a sentence →
+              What needs fixing? →
             </button>
           </section>
 

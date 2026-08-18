@@ -16,11 +16,10 @@
 //
 // Two flags are genuinely the flow's own, and neither carries any truth the
 // selection also holds:
-//   · `picked`     — a wall tile was chosen. When it names a vote type this is
-//                    itself derived (the label is in the Selection, and in the
-//                    URL). Only a GENERIC tile, which names no type, needs the
-//                    local bit, and losing it just reopens the wall.
-//   · `endSkipped` — the user declined the optional end on a generic sentence.
+//   · `picked`     — a wall tile was chosen. Every tile names a vote type, so
+//                    this is itself derived: the label is in the Selection, and
+//                    in the URL.
+//   · `endSkipped` — the user declined an end that was only worth asking for.
 //                    "Stop asking", not "there is no end": place one anyway and
 //                    the route appears, because the selection is still the truth.
 // ==========================================================================
@@ -29,9 +28,10 @@
 export type OnboardingStep = "wall" | "start" | "end" | "cast" | "done";
 
 export interface OnboardingFacts {
-  /** A sentence has been chosen (typed tile ⇒ the selection carries its label). */
+  /** A sentence has been chosen (⇒ the selection carries its vote-type label). */
   picked: boolean;
-  /** The chosen type's kind, or null for a generic sentence. */
+  /** The chosen type's kind, or null when nothing on the map, the map's own set
+   *  or the presets knows which kind that label is. */
   pointType: "route" | "point" | null;
   /** The map votes on fixed stations (ebikes): one point, never a route. */
   isStationNetwork: boolean;
@@ -59,8 +59,8 @@ export function requiresEnd(facts: OnboardingFacts): boolean {
   return facts.pointType === "route";
 }
 
-/** Whether an end point is worth asking for but fine to skip — a generic
- *  sentence, whose vote type isn't decided until the cast. */
+/** Whether an end point is worth asking for but fine to skip — a label of
+ *  unknown kind, which might be a corridor and might be a spot. */
 export function endIsOptional(facts: OnboardingFacts): boolean {
   return !facts.isStationNetwork && facts.pointType === null;
 }
@@ -78,9 +78,10 @@ export function onboardingStep(facts: OnboardingFacts): OnboardingStep {
 // ── Who sees this at all ───────────────────────────────────────────────────
 
 export interface TriggerFacts {
-  /** Server's answer for this visitor's COUNTING identity: has a vote ever been
-   *  cast by them? See firstRun.ts for why it is not a localStorage flag. */
-  hasVotedBefore: boolean;
+  /** Server's answer for this visitor's COUNTING identity: had they opened a map
+   *  before this one? See firstRun.ts for why it is not a localStorage flag, and
+   *  why the question is opens rather than votes. */
+  hasVisitedBefore: boolean;
   /** A local "don't show me again" mark. Only ever suppresses. */
   suppressed: boolean;
   /** This visit arrived from a scan of a sticker that nobody has voted from yet
@@ -93,8 +94,11 @@ export interface TriggerFacts {
 /**
  * Two triggers, one rule each:
  *
- *   FIRST USE   Nobody at this counting identity has ever cast a vote, and this
- *               browser hasn't been told to stop asking.
+ *   MAP OPEN    Nobody at this counting identity has opened a map before this
+ *               one, and this browser hasn't been told to stop asking. It fires
+ *               on the open itself, for any map — not from behind a menu — and
+ *               the suppressant written when the wall appears is what makes it
+ *               once ever rather than once per map.
  *
  *   UNLINKED QR A scan of a sticker that is still unbound. That visit is being
  *               asked to do something extra — its first vote is what pins the
@@ -106,5 +110,5 @@ export interface TriggerFacts {
 export function shouldOnboard(facts: TriggerFacts): boolean {
   if (facts.dismissed) return false;
   if (facts.pendingSticker) return true;
-  return !facts.hasVotedBefore && !facts.suppressed;
+  return !facts.hasVisitedBefore && !facts.suppressed;
 }
