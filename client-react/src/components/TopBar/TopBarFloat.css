@@ -104,16 +104,26 @@
     0 16px 40px -12px rgba(0, 0, 0, 0.28);
 }
 
-/* One definition of "a thing floating on the map", worn by every plate. */
+/* ONE definition of "a thing floating on the map", worn by every plate, and
+   the only place a shadow is written in this sheet.
+
+   The list is CONTAINERS ONLY. A shadow is cast by an object onto what is
+   behind it, so two cells of one surface can never shade each other — when
+   they appear to, the shadow is on the wrong element. That is what had
+   happened to the -/+ pair: making each cell its own plate to get true squares
+   also gave each its own shadow, and the plus visibly shaded the minus.
+
+   The rule this list encodes: an element that is a CHILD of another floating
+   element gets no shadow, no border and no backdrop of its own. It is a cell.
+   Cells are separated from each other by a hairline divider; the block they
+   belong to is what floats. */
 .topbar[data-chrome="float"] .logo-container,
 .topbar[data-chrome="float"] .logo-mobile-banner,
-.topbar[data-chrome="float"] .topbar-legend > *,
+.topbar[data-chrome="float"] .legend-pair,
 .topbar[data-chrome="float"] .mode-switcher-group,
 .topbar[data-chrome="float"] .vote-switcher-group,
 .topbar[data-chrome="float"] .nav-group,
-.topbar[data-chrome="float"] .btn-cast,
-.topbar[data-chrome="float"] .btn-header,
-.topbar[data-chrome="float"] .calculating-indicator {
+.topbar[data-chrome="float"] .actions-group {
   background: var(--plate-bg);
   backdrop-filter: var(--plate-blur);
   -webkit-backdrop-filter: var(--plate-blur);
@@ -252,7 +262,10 @@
     minmax(120px, auto)      /* Start / End         */
     auto                     /* Selection / Votes   */
     minmax(220px, 460px)     /* Map / Vote          */
-    auto                     /* -/+ / Clear         */
+    /* Pinned, not auto: this column has to keep its width when the block
+       inside it is removed in the empty state, or the pills that span into it
+       would gain nothing. Two squares plus the container's own 1px edges. */
+    calc(2 * var(--control-height) + 2px)   /* -/+ / Clear */
     1fr                      /* slack               */
     auto;                    /* rail                */
   grid-template-rows: var(--control-height) var(--control-height);
@@ -268,22 +281,46 @@
    radius is zeroed anyway: a sweep of the band should come back clean without
    anyone having to first work out which elements still generate a box. */
 .topbar[data-chrome="float"] .topbar-legend,
-.topbar[data-chrome="float"] .topbar-actions,
-.topbar[data-chrome="float"] .actions-group {
+.topbar[data-chrome="float"] .topbar-actions {
   display: contents;
   border-radius: 0;
 }
 
-/* Legend cells, in DOM order: Start, Selection, End, Votes. */
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(1) { grid-area: 1 / 1; }
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(3) { grid-area: 2 / 1; }
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(2) { grid-area: 1 / 2; }
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(4) { grid-area: 2 / 2; }
+/* Each legend pair is one container spanning both rows of its column. */
+.topbar[data-chrome="float"] .legend-pair-tools { grid-area: 1 / 1 / 3 / 2; }
+.topbar[data-chrome="float"] .legend-pair-key   { grid-area: 1 / 2 / 3 / 3; }
 
 .topbar[data-chrome="float"] .mode-switcher-group { grid-area: 1 / 3; }
 .topbar[data-chrome="float"] .vote-switcher-group { grid-area: 2 / 3; }
-.topbar[data-chrome="float"] .cast-group          { grid-area: 1 / 4; }
-.topbar[data-chrome="float"] .btn-clear           { grid-area: 2 / 4; }
+/* The -/+ over Clear BLOCK. .actions-group already wraps exactly these two in
+   the markup, so it is the container the shadow belongs to; it was being
+   dissolved with `display: contents`, which is what left the cells to fend for
+   themselves. Restoring it as a real box also hands .calculating-indicator
+   back its positioning ancestor (globals positions it `absolute; inset: 0`
+   inside this element). */
+.topbar[data-chrome="float"] .actions-group {
+  display: grid;
+  grid-area: 1 / 4 / 3 / 5;
+  /* Both explicit. globals styles this as a flex row with
+     `justify-content: flex-end`, and that keyword is equally valid for grid —
+     left as-is it pushed the tracks to the container's end, which with the
+     implicit columns auto-placement had created meant the two cells rendered
+     ~170px OUTSIDE the box to its left. One column, stretched, no ambiguity. */
+  grid-template-columns: 1fr;
+  grid-template-rows: var(--control-height) var(--control-height);
+  justify-content: stretch;
+  align-content: stretch;
+  justify-items: stretch;
+  /* content-box so the two 44px cells are exactly the content width and the
+     container's own 1px edge sits outside them */
+  box-sizing: content-box;
+  width: calc(2 * var(--control-height));
+  justify-self: start;
+  align-self: center;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
 
 /* Spans both rows and sits centred: with Cast and Clear moved out, nothing
    else occupies this column's second row. */
@@ -310,29 +347,36 @@
 
 
 /* ==========================================================================
-   Every column is one stacked pill: the top cell rounds its top and hands the
-   divider down, the bottom cell rounds its bottom. Three pairs and a button,
-   all reading in the same shape language.
+   Every stacked pair is ONE container holding cells divided by hairlines, so
+   nothing inside a pill can shade its neighbour.
    ========================================================================== */
 
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(1),
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(2),
-.topbar[data-chrome="float"] .mode-switcher-group,
-.topbar[data-chrome="float"] .cast-group {
-  border-radius: var(--float-radius) var(--float-radius) 0 0;
-  border-bottom: 0;
+.topbar[data-chrome="float"] .topbar-legend {
+  display: contents;
 }
 
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(3),
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(4),
-.topbar[data-chrome="float"] .vote-switcher-group,
-.topbar[data-chrome="float"] .btn-clear {
-  border-radius: 0 0 var(--float-radius) var(--float-radius);
+.topbar[data-chrome="float"] .legend-pair {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  align-self: center;
 }
 
-/* The banner's own internal rules are replaced by the pill edges above. */
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(odd) {
-  border-right: 1px solid var(--plate-line);
+/* Cells: no plate, no shadow, no backdrop — the pair is what floats. */
+.topbar[data-chrome="float"] .legend-pair > * {
+  flex: 1 1 0;
+  min-width: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-radius: 0;
+}
+
+/* The divider inside the pill — a hairline, not a shadow. */
+.topbar[data-chrome="float"] .legend-pair > :first-child {
+  border-bottom: 1px solid var(--plate-line);
 }
 
 /* Flex children holding a nowrap address: without this the automatic minimum
@@ -387,7 +431,11 @@
   flex: 0 0 auto;
   width: 5ch;
   text-align: right;
-  font-size: var(--control-font-size-compact);
+  /* The SAME token the pill's own value text uses (.mode-btn and
+     .vote-type-control both read --control-font-size), so the label and the
+     thing it labels are one size and move together with any change to the
+     shared scale. No literal px here. */
+  font-size: var(--control-font-size);
 }
 
 /* Both problems were real, so both are fixed: the pills were tight INSIDE
@@ -496,29 +544,26 @@
 /* GEOMETRY, stated exactly.
 
    The unit is --control-height: the height of one control row in this band.
-   That is the only unit that makes the -/+ row exactly as tall as the legend
-   and the pills beside it AND makes each cell square, and it steps down with
-   the breakpoints on its own (44 / 36 / 34 / 32), so the block stays two
-   squares wide at every width. The logo island's unit — the gap between the
-   crossword squares, 3.66px — is deliberately NOT reused here: that is a
-   SPACING value for an inset, and sizing a control from it would neither match
-   the row height nor produce a square. One rhythm per job.
+   It is the only unit that makes the -/+ row exactly as tall as the legend and
+   the pills beside it AND makes each cell square, and it steps down with the
+   breakpoints on its own (44 / 36 / 34 / 32). The logo island's unit — the gap
+   between the crossword squares, 3.66px — is deliberately NOT reused here:
+   that is a SPACING value for an inset, and sizing a control from it would
+   neither match the row height nor produce a square.
 
      minus, plus   --control-height square each, side by side
-     shared seam   the two overlap by their 1px border (margin-left: -1px, the
-                   idiom globals already uses), so the pair measures
-                   2 x --control-height - 1
-     Clear         exactly that, so the block is 2 wide, flush on both edges
+     Clear         the full container width, so exactly two squares
+     dividers      a hairline between minus and plus, and another above Clear
 
-   The group itself is no longer a plate — a bordered box around two bordered
-   boxes could never make the inner cells square without fractional maths. Each
-   cell carries the plate instead, which is also how the legend column works. */
+   Nothing in here casts a shadow. The container above does, once. */
+
 .topbar[data-chrome="float"] .cast-group {
+  grid-row: 1;
+  display: flex;
   gap: 0;
   padding: 0;
-  width: fit-content;
-  height: var(--control-height);
-  justify-self: start;
+  width: 100%;
+  height: 100%;
   background: none;
   border: 0;
   box-shadow: none;
@@ -530,28 +575,54 @@
 .topbar[data-chrome="float"] .btn-cast {
   flex: 0 0 auto;
   width: var(--control-height);
-  height: var(--control-height);
+  height: 100%;
   box-sizing: border-box;
   padding: 0;
   margin: 0;
+  border: 0;
   border-radius: 0;
-  /* Clear's top border is the divider between the rows. */
-  border-bottom: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
-/* The shared seam: the two squares overlap by one border. */
+/* The divider between the two cells — a hairline, not a shadow. */
 .topbar[data-chrome="float"] .btn-cast-up {
-  margin-left: -1px;
+  border-left: 1px solid var(--plate-line);
 }
 
 .topbar[data-chrome="float"] .btn-clear {
-  width: calc(2 * var(--control-height) - 1px);
-  height: var(--control-height);
+  grid-row: 2;
+  width: 100%;
+  height: 100%;
   box-sizing: border-box;
-  justify-self: start;
+  justify-self: stretch;
   justify-content: center;
   padding: 0;
+  margin: 0;
   min-width: 0;
+  border: 0;
+  /* The divider between the -/+ row and Clear. */
+  border-top: 1px solid var(--plate-line);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Back to its own mechanism: absolutely positioned over the block it replaces,
+   inside the container that now exists again. A child, so no shadow. */
+.topbar[data-chrome="float"] .calculating-indicator {
+  inset: 0;
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--plate-bg);
+  backdrop-filter: var(--plate-blur);
+  -webkit-backdrop-filter: var(--plate-blur);
 }
 
 
@@ -632,13 +703,11 @@
     grid-template-rows: repeat(4, var(--control-height));
   }
 
-  .topbar[data-chrome="float"] .topbar-legend > :nth-child(1) { grid-area: 1 / 1; }
-  .topbar[data-chrome="float"] .topbar-legend > :nth-child(3) { grid-area: 2 / 1; }
+  .topbar[data-chrome="float"] .legend-pair-tools { grid-area: 1 / 1 / 3 / 2; }
+  .topbar[data-chrome="float"] .legend-pair-key   { grid-area: 1 / 2 / 3 / 3; }
   .topbar[data-chrome="float"] .mode-switcher-group           { grid-area: 3 / 1; }
   .topbar[data-chrome="float"] .vote-switcher-group           { grid-area: 4 / 1; }
 
-  .topbar[data-chrome="float"] .topbar-legend > :nth-child(2) { grid-area: 1 / 2; }
-  .topbar[data-chrome="float"] .topbar-legend > :nth-child(4) { grid-area: 2 / 2; }
   .topbar[data-chrome="float"] .cast-group                    { grid-area: 3 / 2; }
   .topbar[data-chrome="float"] .btn-clear                     { grid-area: 4 / 2; }
   .topbar[data-chrome="float"] .calculating-indicator         { grid-area: 3 / 2 / 5 / 3; }
@@ -653,14 +722,7 @@
 
   /* Stacked in one column, End sits above Map, so the pill edges fall between
      different pairs than they do on the desktop grid. */
-  .topbar[data-chrome="float"] .topbar-legend > :nth-child(3) {
-    border-radius: 0 0 var(--float-radius) var(--float-radius);
-    margin-bottom: var(--space-2);
-  }
 
-  .topbar[data-chrome="float"] .topbar-legend > :nth-child(4) {
-    margin-bottom: var(--space-2);
-  }
 
   .topbar[data-chrome="float"] .cast-group {
     margin-top: var(--space-2);
@@ -732,30 +794,24 @@
    the waypoint it is about to drop — cyan for Start, red for End, the same two
    the markers use — plus an inset edge in that colour. Hover keeps the neutral
    lift. The two can no longer be confused, in either direction. */
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(1).legend-tool.active,
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(1).legend-tool.typing {
+.topbar[data-chrome="float"] .legend-pair-tools > :nth-child(1).legend-tool.active,
+.topbar[data-chrome="float"] .legend-pair-tools > :nth-child(1).legend-tool.typing {
   background:
     linear-gradient(
       color-mix(in srgb, var(--color-start) 16%, transparent),
       color-mix(in srgb, var(--color-start) 16%, transparent)),
     var(--plate-bg);
-  box-shadow:
-    var(--plate-shadow),
-    inset 0 1px 0 var(--plate-sheen),
-    inset 2px 0 0 var(--color-start);
+  box-shadow: inset 2px 0 0 var(--color-start);
 }
 
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(3).legend-tool.active,
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(3).legend-tool.typing {
+.topbar[data-chrome="float"] .legend-pair-tools > :nth-child(2).legend-tool.active,
+.topbar[data-chrome="float"] .legend-pair-tools > :nth-child(2).legend-tool.typing {
   background:
     linear-gradient(
       color-mix(in srgb, var(--color-end) 16%, transparent),
       color-mix(in srgb, var(--color-end) 16%, transparent)),
     var(--plate-bg);
-  box-shadow:
-    var(--plate-shadow),
-    inset 0 1px 0 var(--plate-sheen),
-    inset 2px 0 0 var(--color-end);
+  box-shadow: inset 2px 0 0 var(--color-end);
 }
 
 /* Hover, native and neutral. Gated on a real hovering pointer: on touch,
@@ -763,7 +819,7 @@
    stuck-highlight complaint again in the one place CSS can actually produce
    it. The rail's tooltips are already gated this way for the same reason. */
 @media (hover: hover) {
-  .topbar[data-chrome="float"] .topbar-legend > .legend-tool:hover:not(:disabled):not(.active) {
+  .topbar[data-chrome="float"] .legend-pair > .legend-tool:hover:not(:disabled):not(.active) {
     background:
       linear-gradient(var(--hover-bg), var(--hover-bg)),
       var(--plate-bg);
@@ -824,4 +880,73 @@
 .topbar[data-chrome="float"] .btn-header:focus-visible {
   outline: 1px solid var(--ink-strong);
   outline-offset: -3px;
+}
+
+
+/* ==========================================================================
+   Banner mode — unchanged by the wrappers.
+
+   The two .legend-pair elements exist for the floating layout but sit in the
+   markup for both. Collapsing them to `display: contents` hands the banner
+   back the flat 2x2 grid it has always laid out, and filling that grid
+   column-first restores its reading order (Start over End on the left,
+   Selection over Votes on the right). globals' two divider rules address
+   `.topbar-legend > :nth-child(...)`, which now resolves to the wrappers, so
+   they are re-drawn here on the cells they were always meant for. Nothing in
+   globals.css is touched.
+   ========================================================================== */
+
+.topbar[data-chrome="banner"] .legend-pair {
+  display: contents;
+}
+
+.topbar[data-chrome="banner"] .topbar-legend {
+  grid-auto-flow: column;
+  grid-template-rows: auto auto;
+  grid-template-columns: auto auto;
+}
+
+.topbar[data-chrome="banner"] .legend-pair-tools > * {
+  border-right: 1px solid var(--hairline);
+}
+
+.topbar[data-chrome="banner"] .legend-pair-tools > :first-child {
+  border-bottom: 1px solid var(--hairline);
+}
+
+
+/* ==========================================================================
+   The empty state — before anything is selected.
+
+   With no selection there is nothing to cast on and nothing to clear, so the
+   -/+ over Clear block is REMOVED from the layout rather than shown disabled.
+   A disabled control that cannot be enabled from where it sits is just noise,
+   and reserving its space is what left the run ending in a gap and reading
+   half-built. The Map and Vote pills take that column instead, so the run ends
+   flush where the block's right edge would have been.
+
+   The reflow when a selection appears is contained to columns 3 and 4: the
+   wordmark, the Start/End inputs and the legend are all to the LEFT of the
+   pills and cannot move, and the right cluster is held against the right
+   margin by the slack column, so it cannot move either. Only the two pills
+   give back the width the block needs.
+
+   `.has-selection` is already on .topbar-actions (TopBar.tsx sets it from
+   start.coords), so this rides an existing signal rather than inventing one.
+   ========================================================================== */
+
+.topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .actions-group {
+  display: none;
+}
+
+.topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .mode-switcher-group,
+.topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .vote-switcher-group {
+  grid-column: 3 / 5;
+}
+
+@media (max-width: 1080px) {
+  .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .mode-switcher-group,
+  .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .vote-switcher-group {
+    grid-column: 1 / 3;
+  }
 }

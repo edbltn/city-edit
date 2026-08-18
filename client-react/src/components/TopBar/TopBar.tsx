@@ -142,82 +142,92 @@ export const TopBar = memo(function TopBar() {
             route legend at all (covers desktop and mobile). */}
         {!isPointOnly && (
           <div className="topbar-legend">
-            {typingField === "start" ? (
-              <div className={`${startToolClass.join(" ")} typing`}>
-                <span className="legend-icon-slot">
-                  <span className="legend-char-start">◆</span>
-                </span>
-                <span className="legend-label">{theme.locationLabel}</span>
-                <AddressSearch
-                  onSelect={(coords, address) => handleAddressSelect("start", coords, address)}
-                  onClose={handleTypingClose}
-                  placeholder="Search address..."
-                  accentColor="var(--color-start)"
-                />
-              </div>
-            ) : (
-              <button
-                type="button"
-                className={startToolClass.join(" ")}
-                onClick={handleStartClick}
-                aria-pressed={activeTool === "start"}
-              >
-                <span className="legend-icon-slot">
-                  <span className="legend-char-start">◆</span>
-                </span>
-                <span className="legend-label">{theme.locationLabel}</span>
-                <span className={startCoordsClass.join(" ")}>
-                  {formatLocation(start) || startPlaceholder}
-                </span>
-              </button>
-            )}
+            {/* Each stacked pair is a real element, so the floating chrome has a
+                container to hang ONE shadow on. Two cells of a single surface
+                cannot shade each other, and without a wrapper the only thing left
+                to carry the shadow is the cells themselves — which is exactly how
+                the plus came to cast one onto the minus. In banner mode these
+                collapse to `display: contents`, so that layout is untouched. */}
+            <div className="legend-pair legend-pair-tools">
+              {typingField === "start" ? (
+                <div className={`${startToolClass.join(" ")} typing`}>
+                  <span className="legend-icon-slot">
+                    <span className="legend-char-start">◆</span>
+                  </span>
+                  <span className="legend-label">{theme.locationLabel}</span>
+                  <AddressSearch
+                    onSelect={(coords, address) => handleAddressSelect("start", coords, address)}
+                    onClose={handleTypingClose}
+                    placeholder="Search address..."
+                    accentColor="var(--color-start)"
+                  />
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className={startToolClass.join(" ")}
+                  onClick={handleStartClick}
+                  aria-pressed={activeTool === "start"}
+                >
+                  <span className="legend-icon-slot">
+                    <span className="legend-char-start">◆</span>
+                  </span>
+                  <span className="legend-label">{theme.locationLabel}</span>
+                  <span className={startCoordsClass.join(" ")}>
+                    {formatLocation(start) || startPlaceholder}
+                  </span>
+                </button>
+              )}
 
-            <div className="legend-item">
-              <span className="legend-icon-slot">
-                <span className="legend-char-selection">◻</span>
-              </span>
-              <span>Selection</span>
+              {typingField === "end" ? (
+                <div className={`${endToolClass.join(" ")} typing`}>
+                  <span className="legend-icon-slot">
+                    <span className="legend-char-end">◆</span>
+                  </span>
+                  <span className="legend-label">End</span>
+                  <AddressSearch
+                    onSelect={(coords, address) => handleAddressSelect("end", coords, address)}
+                    onClose={handleTypingClose}
+                    placeholder="Search address..."
+                    accentColor="var(--color-end)"
+                  />
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className={endToolClass.join(" ")}
+                  onClick={handleEndClick}
+                  aria-pressed={activeTool === "end"}
+                >
+                  <span className="legend-icon-slot">
+                    <span className="legend-char-end">◆</span>
+                  </span>
+                  <span className="legend-label">End</span>
+                  <span className={endCoordsClass.join(" ")}>
+                    {formatLocation(end) || endPlaceholder}
+                  </span>
+                </button>
+              )}
             </div>
 
-            {typingField === "end" ? (
-              <div className={`${endToolClass.join(" ")} typing`}>
+            <div className="legend-pair legend-pair-key">
+              <div className="legend-item">
                 <span className="legend-icon-slot">
-                  <span className="legend-char-end">◆</span>
+                  <span className="legend-char-selection">◻</span>
                 </span>
-                <span className="legend-label">End</span>
-                <AddressSearch
-                  onSelect={(coords, address) => handleAddressSelect("end", coords, address)}
-                  onClose={handleTypingClose}
-                  placeholder="Search address..."
-                  accentColor="var(--color-end)"
-                />
+                <span>Selection</span>
               </div>
-            ) : (
-              <button
-                type="button"
-                className={endToolClass.join(" ")}
-                onClick={handleEndClick}
-                aria-pressed={activeTool === "end"}
-              >
-                <span className="legend-icon-slot">
-                  <span className="legend-char-end">◆</span>
-                </span>
-                <span className="legend-label">End</span>
-                <span className={endCoordsClass.join(" ")}>
-                  {formatLocation(end) || endPlaceholder}
-                </span>
-              </button>
-            )}
 
-            <div className="legend-item legend-item-heatmap">
-              <span className="legend-icon-slot">
-                {isHeatmapLoading ? (
-                  <span className="spinner" aria-label="Loading votes" />
-                ) : (
-                  <span className="legend-heat-swatch" />
-                )}
-              </span>
-              <span>{isHeatmapLoading ? "Loading…" : "Votes"}</span>
+              <div className="legend-item legend-item-heatmap">
+                <span className="legend-icon-slot">
+                  {isHeatmapLoading ? (
+                    <span className="spinner" aria-label="Loading votes" />
+                  ) : (
+                    <span className="legend-heat-swatch" />
+                  )}
+                </span>
+                <span>{isHeatmapLoading ? "Loading…" : "Votes"}</span>
+              </div>
             </div>
           </div>
         )}
