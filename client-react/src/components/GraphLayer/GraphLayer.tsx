@@ -50,7 +50,7 @@ import {
   expandSelectionToUndirected,
   type RouteProposal,
 } from "./routeProposals";
-import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, topProposalDiffs } from "./voteApply";
+import { applyMyVoteChange, applyMyBlockVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, topProposalDiffs } from "./voteApply";
 import {
   COORD_SCALE,
   type GraphTopology,
@@ -71,7 +71,8 @@ import {
   adjShortest,
 } from "./graphTopology";
 import {
-  materializeBlocks, selectionVoteRows, selectionCoverage,
+  materializeBlocks, materializeTouchedBlocks, singletonBlocks,
+  selectionVoteRows, selectionCoverage,
   type SelectionCoverage,
 } from "../../utils/blockSelection";
 import { iconForLabel, iconSrc, mapStyleForTheme, pointTypeForLabel } from "../../themes";
@@ -92,6 +93,7 @@ import {
   type VoteDirection,
 } from "../../utils/voteStore";
 import { castVotes, voteButtonState } from "../../utils/castVote";
+import { pendingCastsFor, settlePendingCastsForDelta } from "../../utils/pendingVotes";
 import {
   useProposalAudience, describeAudience, MIN_VIEWS_SHOWN,
 } from "../../hooks/useProposalAudience";
@@ -388,7 +390,21 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // derivation of vote data that has already changed under it. The proposal
   // caches below key off this.
   const voteEpochRef = useRef(0);
-  const bumpVoteEpoch = () => { voteEpochRef.current++; };
+
+  // WHICH vote types the epoch bump invalidated. A corridor for one vote type
+  // is a function of that type's nets and the topology alone (the insight
+  // e3086cc built the per-type cluster cache on), so a cast for one label has
+  // no bearing on any other label's corridors — dropping all of them made
+  // every press pay a full re-cluster of every type. `null` means "everything"
+  // and is what a whole-snapshot install or a mode switch bumps with; the
+  // consumer clears the set when it has acted on it.
+  const dirtyVoteLabelsRef = useRef<Set<string> | null>(null);
+  const bumpVoteEpoch = (labels?: readonly string[]) => {
+    voteEpochRef.current++;
+    if (!labels) { dirtyVoteLabelsRef.current = null; return; }
+    const dirty = dirtyVoteLabelsRef.current;
+    if (dirty) for (const label of labels) dirty.add(label);
+  };
 
   // Deltas received before the initial vote fetch completes
   const pendingDeltasRef = useRef<import("../../types").VoteDelta[]>([]);
@@ -586,8 +602,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   useEffect(() => {
     setBlockMaterializer((edgeIds: number[]) => {
       const topo = topologyRef.current;
-      if (!topo) return edgeIds.map((e) => [e]);
-      return materializeBlocks(topo, blockIndexRef.current, edgeIds);
+      if (!topo) return singletonBlocks(edgeIds);
+      return materializeTouchedBlocks(topo, blockIndexRef.current, edgeIds);
     });
     return () => setBlockMaterializer(null);
   }, [setBlockMaterializer]);
@@ -1545,7 +1561,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // type is cached" from "one was never clustered".
   const routeCacheRef = useRef<{
     epoch: number; eligible: number[] | null; byType: Map<number, RouteProposal[]>;
-  }>({ epoch: -1, eligible: null, byType: new Map() });
+    /** Legend size when `eligible` was enumerated — anything past it is a type
+     *  the job has never judged, so the list has to be rebuilt. */
+    eligibleLegendLen: number;
+  }>({ epoch: -1, eligible: null, byType: new Map(), eligibleLegendLen: 0 });
 
   const publishRouteProposals = useCallback((next: RouteProposal[], note: string) => {
     dlog("proposals", `recompute: ${next.length} corridors ${note}`,
@@ -1569,8 +1588,30 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const cache = routeCacheRef.current;
     if (cache.epoch !== voteEpochRef.current) {
       cache.epoch = voteEpochRef.current;
-      cache.eligible = null;
-      cache.byType.clear();
+      // Drop only the types whose votes actually moved. A cast changes ONE
+      // label's nets, and job.step(type) reads only that type's nets and the
+      // topology — so re-clustering the other eleven was pure latency sitting
+      // on top of the press (measured: 1205ms of it, all after the click).
+      const dirty = dirtyVoteLabelsRef.current;
+      if (dirty === null) {
+        cache.eligible = null;
+        cache.byType.clear();
+      } else {
+        for (const label of dirty) {
+          const li = legend.indexOf(label);
+          if (li < 0 || li >= cache.eligibleLegendLen) {
+            // A type the enumeration never saw — a brand-new suggestion label.
+            // Whether it even belongs to the corridor family is unknown, so the
+            // list has to be rebuilt. An index the job DID judge needs no such
+            // rebuild: dropping its clusters is enough, and dropping one it
+            // ruled out (a point-kind type) is a harmless no-op.
+            cache.eligible = null;
+          } else {
+            cache.byType.delete(li);
+          }
+        }
+      }
+      dirtyVoteLabelsRef.current = new Set();
     }
     const visible = (legendIdx: number) => isVoteTypeVisible(legend[legendIdx] ?? "");
 
@@ -1608,6 +1649,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       minRouteScore: routeProposalMinNet + 1,
     });
     cache.eligible = job.types;
+    cache.eligibleLegendLen = legend.length;
     // Only VISIBLE types are clustered, and only the ones not already cached:
     // a filtered map still recomputes faster, not slower, and re-showing a type
     // costs that one type rather than all of them.
@@ -1643,7 +1685,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // The clustering bakes in kind and the support floor, so a change to either
   // invalidates every cached type.
   useEffect(() => {
-    routeCacheRef.current = { epoch: -1, eligible: null, byType: new Map() };
+    routeCacheRef.current = {
+      epoch: -1, eligible: null, byType: new Map(), eligibleLegendLen: 0,
+    };
   }, [voteTypeKindOf, routeProposalMinNet]);
 
   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);
@@ -1840,7 +1884,6 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       debugState("votesRev", voteData.rev);
       // Teach the vote store this map's label→id map so packed lookups resolve.
       setVoteTypeMap(voteData.vote_types);
-      broadcastBlockVotes(voteData);
 
       // Replay deltas newer than the installed body: both any buffered before
       // the initial load (pendingDeltasRef) and the recent-applied ring — the
@@ -1864,6 +1907,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           + "leave a hole — scheduling one delayed refetch");
         setTimeout(() => fetchVotesRef.current(), 2500);
       }
+
+      // Re-apply anything still in flight. This body was BUILT before those
+      // presses reached the server, so installing it wholesale is exactly the
+      // background refresh that used to make a fresh vote pop off the map and
+      // then reappear when its delta finally landed. Re-applied last, on top of
+      // server truth; the confirming delta's idempotent SET reconciles either
+      // way, so a body that already contains the vote self-corrects rather than
+      // double-counting it.
+      const inFlight = pendingCastsFor(themeMode);
+      for (const cast of inFlight) applyCastToGraphDataRef.current(cast);
+      if (inFlight.length > 0) {
+        dlog("votes", `re-applied ${inFlight.length} in-flight cast(s) over rev ${bodyRev}`);
+      }
+      // Broadcast AFTER the replay + re-apply, so the heat painted is the one
+      // that includes them rather than the raw body's.
+      broadcastBlockVotes(voteData);
 
       refreshHeatmapDisplayRef.current();
       requestProposalsRecomputeRef.current();
@@ -1903,8 +1962,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       broadcastBlockVotes(data, "delta");
     }
     lastRevRef.current = delta.rev;
-    bumpVoteEpoch();
-  }, [broadcastBlockVotes]);
+    bumpVoteEpoch([vtLabel]);
+    // This may be the echo of one of our own presses. Its authoritative counts
+    // have just replaced the optimistic guess, so the cast no longer needs
+    // shielding from a background refresh (utils/pendingVotes.ts).
+    settlePendingCastsForDelta(themeMode, vtLabel, delta.edges ?? []);
+  }, [broadcastBlockVotes, themeMode]);
 
   // Load topology + votes on mount, preferring persisted caches.
   useEffect(() => {
@@ -2358,26 +2421,55 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     };
   }, [subscribeToSync, subscribeToOpen, requestSync, themeMode, applyDeltaToGraphData]);
 
-  // Optimistic vote — apply this user's vote transition (prevDir → newDir)
-  // immediately on cast so the heatmap and top-proposal counts update before the
-  // server round-trip completes. No ledger is needed: every server delta now
-  // carries authoritative vtCounts and is applied as an idempotent SET (see
-  // applyDeltaToGraphData), so the caster's own optimistic guess is corrected to
-  // truth rather than double-counted. The cast path (utils/castVote.ts) emits a
+  // Apply one cast's in-memory count changes — edge transitions AND the
+  // predicted deduped block moves. Shared by the optimistic press below and the
+  // re-apply that follows a background snapshot install, which have to write
+  // exactly the same thing or the two would disagree about what is on screen.
+  // Returns true when the BLOCK layer moved, i.e. when the heat needs a repaint.
+  const applyCastToGraphData = useCallback((
+    cast: { label: string; groups: readonly { edges: number[]; prevDir: number; newDir: number }[];
+            blockDeltas: readonly { block: number; up: number; down: number }[] },
+  ): boolean => {
+    const data = graphDataRef.current;
+    const adj = nodeAdjRef.current;
+    if (!data?.edge_votes || !adj) return false;
+    for (const g of cast.groups) {
+      applyMyVoteChange(data, adj, g.edges, cast.label, g.prevDir, g.newDir);
+    }
+    return applyMyBlockVoteChange(data, cast.label, cast.blockDeltas);
+  }, []);
+  const applyCastToGraphDataRef = useRef(applyCastToGraphData);
+  useEffect(() => { applyCastToGraphDataRef.current = applyCastToGraphData; }, [applyCastToGraphData]);
+
+  // Optimistic vote — apply this user's press to the in-memory counts in the
+  // press's own tick, so the map changes now instead of on the round trip.
+  //
+  // Both aggregates move, and the BLOCK one is the point: on a map with a block
+  // layer the polygons are the heat and the edges only show on hover, so an
+  // edge-only optimistic apply changed nothing anyone could see and every press
+  // sat waiting for its own WebSocket echo to repaint. The prediction models the
+  // server's dedupe rule (castVote.blockVoteDeltas) precisely so that the
+  // confirming delta's idempotent SET lands as a no-op rather than a visible
+  // correction — a vote that twitches reads as broken, which is worse than slow.
+  //
+  // No count ledger is needed for the edge side either: every server delta
+  // carries authoritative vtCounts applied as a SET (applyDeltaToGraphData), so
+  // a wrong guess is corrected rather than compounded. The cast path emits the
   // reverse transition to roll back if the request fails.
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as import("../../utils/castVote").OptimisticVoteDetail;
       if (detail.mode !== themeMode) return;
-
       const data = graphDataRef.current;
-      const adj = nodeAdjRef.current;
-      if (!data?.edge_votes || !adj) return;
-      if (!detail.edgeIds?.length) return;
+      if (!data?.edge_votes || !nodeAdjRef.current) return;
+      if (!detail.groups?.length && !detail.blockDeltas?.length) return;
 
       const legendLenBefore = data.vote_type_legend?.length ?? 0;
-      applyMyVoteChange(data, adj, detail.edgeIds, detail.label, detail.prevDir, detail.newDir);
-      bumpVoteEpoch();
+      const blocksMoved = applyCastToGraphDataRef.current({
+        label: detail.label, groups: detail.groups ?? [], blockDeltas: detail.blockDeltas ?? [],
+      });
+      bumpVoteEpoch([detail.label]);
+      if (blocksMoved) broadcastBlockVotes(data, "delta");
       refreshHeatmapDisplayRef.current();
       // Unlike the WS-delta path (which dirty-marks for the minute sweep),
       // THIS is the local user's own press — the one vote whose effect on the
@@ -2389,7 +2481,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     };
     window.addEventListener("optimistic-vote", handler);
     return () => window.removeEventListener("optimistic-vote", handler);
-  }, [themeMode, scheduleOwnCastRecompute]);
+  }, [themeMode, scheduleOwnCastRecompute, broadcastBlockVotes]);
 
   // Draw hover and pinned highlights on separate canvas
   const redrawHoverHighlight = useCallback(() => {
@@ -4524,7 +4616,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
       mode: themeMode, edgeIds: [edgeId], label, direction: newDir,
       // Block-scoped semantics (docs §4): the plan/unvote spans the touched
       // block; omitted (pre-topology) castVotes falls back to singletons.
-      blocks: topo ? materializeBlocks(topo, blockIndexRef.current, [edgeId]) : undefined,
+      blocks: topo ? materializeTouchedBlocks(topo, blockIndexRef.current, [edgeId]) : undefined,
     });
   }, [themeMode]);
 
@@ -4541,7 +4633,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     const topo = topologyRef.current;
     castVotes({
       mode: themeMode, edgeIds: Array.from(ids), label, direction: newDir,
-      blocks: topo ? materializeBlocks(topo, blockIndexRef.current, ids) : undefined,
+      blocks: topo ? materializeTouchedBlocks(topo, blockIndexRef.current, ids) : undefined,
     });
   }, [themeMode]);
 

@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { planBlockVote, voteButtonState, castVotes } from "./castVote";
+import { singletonBlocks, type TouchedBlock } from "./blockSelection";
+import { _resetPendingCasts } from "./pendingVotes";
 import {
   getVote, setVote, setVotes, setVoteTypeMap, blockCoverage, _resetVoteStore,
 } from "./voteStore";
@@ -8,10 +10,13 @@ const MODE = "walkways";
 const LABEL = "Add bike lane";
 
 /** Singleton fallback: each selection edge is its own block. */
-const singles = (edgeIds: number[]) => edgeIds.map((e) => [e]);
+const singles = (edgeIds: number[]) => singletonBlocks(edgeIds);
+/** A real, id-carrying block — the only kind that moves a block aggregate. */
+const blk = (key: number, edges: number[]): TouchedBlock => ({ key, edges });
 
 beforeEach(() => {
   _resetVoteStore();
+  _resetPendingCasts();
   setVoteTypeMap({ "10": LABEL });
 });
 
@@ -22,7 +27,7 @@ describe("planBlockVote — singleton blocks (per-edge fallback)", () => {
     const plan = planBlockVote({
       mode: MODE, edgeIds: [1, 2, 3], label: LABEL, direction: 1, blocks: singles([1, 2, 3]),
     });
-    expect(plan).toEqual({ targetDir: 1, castEdges: [1, 2, 3], clearEdges: [] });
+    expect(plan).toEqual({ targetDir: 1, castEdges: [1, 2, 3], clearEdges: [], blockDeltas: [] });
   });
 
   it("unvote-all: pressing the active direction clears my votes, casts nothing", () => {
@@ -30,7 +35,7 @@ describe("planBlockVote — singleton blocks (per-edge fallback)", () => {
     const plan = planBlockVote({
       mode: MODE, edgeIds: [1, 2, 3], label: LABEL, direction: 1, blocks: singles([1, 2, 3]),
     });
-    expect(plan).toEqual({ targetDir: 0, castEdges: [], clearEdges: [1, 2, 3] });
+    expect(plan).toEqual({ targetDir: 0, castEdges: [], clearEdges: [1, 2, 3], blockDeltas: [] });
   });
 
   it("flip: opposite active → reverses via castEdges, never via clearEdges", () => {
@@ -58,13 +63,13 @@ describe("planBlockVote — singleton blocks (per-edge fallback)", () => {
     const plan = planBlockVote({
       mode: MODE, edgeIds: [4, 5], label: LABEL, direction: -1, blocks: singles([4, 5]),
     });
-    expect(plan).toEqual({ targetDir: -1, castEdges: [4, 5], clearEdges: [] });
+    expect(plan).toEqual({ targetDir: -1, castEdges: [4, 5], clearEdges: [], blockDeltas: [] });
   });
 });
 
 describe("planBlockVote — real blocks (selection ⊂ touched blocks)", () => {
   // Selection = edge 1; its block also carries edges 10 and 11.
-  const BLOCKS = [[1, 10, 11]];
+  const BLOCKS = [blk(7, [1, 10, 11])];
 
   it("coverage counts any block edge, so a vote elsewhere in the block activates unvote", () => {
     setVote(MODE, 10, LABEL, 1); // block held via a NON-selection edge
@@ -72,7 +77,10 @@ describe("planBlockVote — real blocks (selection ⊂ touched blocks)", () => {
       mode: MODE, edgeIds: [1], label: LABEL, direction: 1, blocks: BLOCKS,
     });
     // coverage(+) = all → unvote everything of mine in the touched blocks.
-    expect(plan).toEqual({ targetDir: 0, castEdges: [], clearEdges: [10] });
+    expect(plan).toEqual({
+      targetDir: 0, castEdges: [], clearEdges: [10],
+      blockDeltas: [{ block: 7, up: -1, down: 0 }],
+    });
   });
 
   it("clear-then-cast: my scattered block votes are cleared, the selection cast", () => {
@@ -82,7 +90,7 @@ describe("planBlockVote — real blocks (selection ⊂ touched blocks)", () => {
     // coverage(down) = all → unvote-all. Pressing up on a block that is
     // "all down" is the interesting flip:
     const plan = planBlockVote({
-      mode: MODE, edgeIds: [1], label: LABEL, direction: 1, blocks: [[1, 10]],
+      mode: MODE, edgeIds: [1], label: LABEL, direction: 1, blocks: [blk(7, [1, 10])],
     });
     expect(plan.targetDir).toBe(1);
     expect(plan.castEdges).toEqual([1]);
@@ -103,7 +111,7 @@ describe("planBlockVote — real blocks (selection ⊂ touched blocks)", () => {
     setVote(MODE, 10, LABEL, 1); // covers block A only
     const plan = planBlockVote({
       mode: MODE, edgeIds: [1, 2], label: LABEL, direction: 1,
-      blocks: [[1, 10], [2, 20]],
+      blocks: [blk(7, [1, 10]), blk(8, [2, 20])],
     });
     expect(plan.targetDir).toBe(1); // coverage = some → still a cast
     expect(plan.castEdges).toEqual([1, 2]);
@@ -121,7 +129,7 @@ describe("voteButtonState", () => {
 
   it("agrees with blockCoverage end-to-end", () => {
     setVotes(MODE, [1, 2], LABEL, -1);
-    const cov = blockCoverage(MODE, singles([1, 2]), LABEL);
+    const cov = blockCoverage(MODE, singles([1, 2]).map((b) => b.edges), LABEL);
     expect(voteButtonState(cov, -1)).toBe("active");
     expect(voteButtonState(cov, 1)).toBe("neutral");
   });
@@ -177,7 +185,7 @@ describe("castVotes", () => {
   it("with blocks: clears my block votes outside the selection, casts the selection", async () => {
     setVote(MODE, 10, LABEL, 1); // elsewhere in the touched block
     const res = await castVotes({
-      mode: MODE, edgeIds: [1], label: LABEL, direction: -1, blocks: [[1, 10]],
+      mode: MODE, edgeIds: [1], label: LABEL, direction: -1, blocks: [blk(7, [1, 10])],
     });
     expect(res.targetDir).toBe(-1);
     expect(postedBody().edge_ids).toEqual([1]); // selection only — server expands
@@ -197,7 +205,7 @@ describe("castVotes", () => {
     setVote(MODE, 10, LABEL, 1);
     fetchMock.mockRejectedValue(new Error("network down"));
     const res = await castVotes({
-      mode: MODE, edgeIds: [1], label: LABEL, direction: -1, blocks: [[1, 10]],
+      mode: MODE, edgeIds: [1], label: LABEL, direction: -1, blocks: [blk(7, [1, 10])],
     });
     expect(res.ok).toBe(false);
     expect(getVote(MODE, 1, LABEL)).toBe(0); // cast rolled back

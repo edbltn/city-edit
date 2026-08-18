@@ -18,6 +18,7 @@
 // reconcileEdge folds its truth in.
 
 import { dlog } from "./debugLog";
+import { pendingCastsFor, pendingDirection } from "./pendingVotes";
 import { packVoteKey, unpackVoteKey, modeToInt } from "./voteKey";
 
 export type VoteDirection = 1 | -1;
@@ -339,6 +340,10 @@ export function myVotesInBlocks(
  * Reconcile against authoritative server state for one edge. `serverLabels`
  * maps label → direction; the server wins for the labels it reports. Local-only
  * entries (server lagging a fresh optimistic vote) are left untouched.
+ *
+ * A (edge, label) an in-flight cast is holding is skipped outright: the
+ * response was READ before that cast reached the database, so applying it would
+ * roll a vote back on screen a beat before its own echo puts it back.
  */
 export function reconcileEdge(
   mode: string,
@@ -347,7 +352,9 @@ export function reconcileEdge(
 ) {
   let changed = false;
   for (const [label, dir] of Object.entries(serverLabels)) {
-    if (dir === 1 || dir === -1) changed = writeVote(mode, edgeId, label, dir) || changed;
+    if (dir !== 1 && dir !== -1) continue;
+    if (pendingDirection(mode, edgeId, label) !== undefined) continue;
+    changed = writeVote(mode, edgeId, label, dir) || changed;
   }
   if (changed) {
     persistById();
@@ -388,8 +395,6 @@ export function resetMapVotes(
       dropped++;
     }
   }
-  dlog("store", `resetMapVotes(${mode}): dropped ${dropped} local entries, `
-    + `applying ${Object.keys(serverVotes).length} server edges`);
   for (const [eidStr, labels] of Object.entries(serverVotes)) {
     const eid = Number(eidStr);
     for (const [label, dir] of Object.entries(labels)) {
@@ -398,6 +403,20 @@ export function resetMapVotes(
       }
     }
   }
+  // Then put back every vote still in flight. This snapshot was read before
+  // those casts were persisted, so its silence about them is lag, not a
+  // retraction — replaying them last is what stops a fresh press from
+  // visibly popping off and back on when a refresh lands mid-cast.
+  let restored = 0;
+  for (const cast of pendingCastsFor(mode)) {
+    for (const [eid, dir] of cast.edges) {
+      changed = writeVote(mode, eid, cast.label, dir) || changed;
+      restored++;
+    }
+  }
+  dlog("store", `resetMapVotes(${mode}): dropped ${dropped} local entries, `
+    + `applying ${Object.keys(serverVotes).length} server edges`
+    + (restored > 0 ? `, restoring ${restored} in-flight` : ""));
   if (changed) {
     persistById();
     persistByLabel();

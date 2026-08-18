@@ -12,6 +12,7 @@ import { useRouteCalculation, NO_ROUTE_MESSAGE } from "../hooks/useRouteCalculat
 import { CONFIG } from "../config";
 import { getMapSlug, getCurrentMap, mapVoteTypesForPointType } from "../map/runtime";
 import { getDefaultVoteTypeForTheme } from "../constants/voteTypes";
+import { singletonBlocks, type TouchedBlock } from "../utils/blockSelection";
 import { blockCoverage, type VoteDirection } from "../utils/voteStore";
 import { useVotesVersion } from "../utils/useVotesVersion";
 import { castVotes, voteButtonState } from "../utils/castVote";
@@ -165,7 +166,7 @@ export interface PendingWaypoint {
 
 /** Selection edges → the touched blocks' materialized edge lists (docs
  *  three-layer-model §4). Registered by GraphLayer, which owns the topology. */
-export type BlockMaterializer = (edgeIds: number[]) => ArrayLike<number>[];
+export type BlockMaterializer = (edgeIds: number[]) => TouchedBlock[];
 
 /** Corridor geometry for a segment the selection FLAGS as forcibly routed
  *  through a route proposal (SelWaypoint.forcedCorridor): the corridor's path as
@@ -1580,8 +1581,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
       if (currentEdgeIds.length === 0 || !effectiveVoteType) return false;
       const blocks =
         blockMaterializerRef.current?.(currentEdgeIds)
-        ?? currentEdgeIds.map((e) => [e]);
-      const cov = blockCoverage(theme.mode, blocks, effectiveVoteType);
+        ?? singletonBlocks(currentEdgeIds);
+      const cov = blockCoverage(theme.mode, blocks.map((b) => b.edges), effectiveVoteType);
       return voteButtonState(cov, dir) === "active";
     },
     [votesVersion, currentEdgeIds, effectiveVoteType, theme.mode]

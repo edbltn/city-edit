@@ -228,6 +228,58 @@ export function topProposalDiffs(
   return { diff, maxPos, maxNeg };
 }
 
+/**
+ * INCREMENT each block's deduped [up, down] for `vtLabel` by a predicted move
+ * (−1 / 0 / +1 per direction) — the optimistic twin of applyBlockCounts' SET.
+ *
+ * This exists because the block aggregate, not the edge aggregate, is what the
+ * heatmap paints on a map with a block layer: bumping edge counts optimistically
+ * moved a number nothing on screen reads, so every press waited for the
+ * server's echo to repaint. Same bookkeeping as the SET path (block_votes stays
+ * total deduped activity, breakdown sorted by total desc) so the confirming
+ * delta lands as a no-op rather than a visible correction. Returns true when
+ * anything moved, so the caller knows whether to re-broadcast the heat.
+ */
+export function applyMyBlockVoteChange(
+  data: VoteData,
+  vtLabel: string,
+  deltas: readonly { block: number; up: number; down: number }[],
+): boolean {
+  const blockVotes = data.block_votes;
+  const blockVoteTypes = data.block_vote_types;
+  if (!blockVotes || !blockVoteTypes || deltas.length === 0 || !vtLabel) return false;
+  const legend = data.block_vote_type_legend ?? (data.block_vote_type_legend = []);
+  let li = legend.indexOf(vtLabel);
+  if (li < 0) {
+    li = legend.length;
+    legend.push(vtLabel);
+  }
+
+  let changed = false;
+  for (const { block, up, down } of deltas) {
+    if (block < 0 || block >= blockVotes.length || (up === 0 && down === 0)) continue;
+    const pairs = blockVoteTypes[block] || [];
+    const existing = pairs.find(([l]) => l === li);
+    const oldUp = existing ? existing[1] : 0;
+    const oldDown = existing ? existing[2] : 0;
+    // Clamped: a prediction can only ever be one person too optimistic, and a
+    // negative count would paint a block the ramp has no colour for. Compared
+    // AFTER clamping, so a move that clamps away doesn't report a change and
+    // trigger a repaint of nothing.
+    const nextUp = Math.max(0, oldUp + up);
+    const nextDown = Math.max(0, oldDown + down);
+    if (oldUp === nextUp && oldDown === nextDown) continue;
+
+    const next = pairs.filter(([l]) => l !== li);
+    if (nextUp !== 0 || nextDown !== 0) next.push([li, nextUp, nextDown]);
+    next.sort((a, b) => b[1] + b[2] - (a[1] + a[2]));
+    blockVoteTypes[block] = next;
+    blockVotes[block] = (blockVotes[block] || 0) + (nextUp + nextDown - oldUp - oldDown);
+    changed = true;
+  }
+  return changed;
+}
+
 export function applyBlockCounts(
   data: VoteData,
   vtLabel: string,

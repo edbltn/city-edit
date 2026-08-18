@@ -48,20 +48,56 @@ export function routeVotesKey(slug: string, edgeIds: readonly number[]): string 
 }
 
 /**
- * Materialize a selection's touched blocks into per-block edge lists. Real
- * blocks resolve through the CSR index (subarray views, no copies — the mobile
- * typed-array memory rule); unmapped edges and maps without block artifacts
- * fall back to singleton [edge] blocks, so every rule downstream still holds.
+ * One touched block: its edges, and the key that names it.
+ *
+ * The key is `touchedBlockKeys`' encoding — `>= 0` is a real block id, `< 0`
+ * the singleton stand-in for an edge that belongs to no block. Callers that
+ * only reason about coverage need the edges; the ones that have to name the
+ * aggregate the server will move (the optimistic block-count prediction in
+ * castVote.ts) need the id, and carrying both on one object is what keeps
+ * them from drifting out of step.
  */
+export interface TouchedBlock {
+  key: number;
+  edges: ArrayLike<number>;
+}
+
+/**
+ * Materialize a selection's touched blocks into keyed per-block edge lists.
+ * Real blocks resolve through the CSR index (subarray views, no copies — the
+ * mobile typed-array memory rule); unmapped edges and maps without block
+ * artifacts fall back to singleton [edge] blocks, so every rule downstream
+ * still holds.
+ */
+export function materializeTouchedBlocks(
+  topo: GraphTopology,
+  blockIndex: BlockIndex | null,
+  edgeIds: ArrayLike<number>,
+): TouchedBlock[] {
+  const blocks: TouchedBlock[] = [];
+  for (const key of touchedBlockKeys(topo, edgeIds)) {
+    const members = edgesOfBlockKey(topo, blockIndex, key);
+    if (members.length > 0) blocks.push({ key, edges: members });
+  }
+  return blocks;
+}
+
+/** The edge lists alone, for the coverage readers that never name a block. */
 export function materializeBlocks(
   topo: GraphTopology,
   blockIndex: BlockIndex | null,
   edgeIds: ArrayLike<number>,
 ): ArrayLike<number>[] {
-  const blocks: ArrayLike<number>[] = [];
-  for (const key of touchedBlockKeys(topo, edgeIds)) {
-    const members = edgesOfBlockKey(topo, blockIndex, key);
-    if (members.length > 0) blocks.push(members);
+  return materializeTouchedBlocks(topo, blockIndex, edgeIds).map((b) => b.edges);
+}
+
+/** Singleton fallback: every edge is its own block, named the way
+ *  `touchedBlockKeys` names an unblocked edge so nothing downstream can
+ *  mistake one for a real block id. */
+export function singletonBlocks(edgeIds: ArrayLike<number>): TouchedBlock[] {
+  const blocks: TouchedBlock[] = [];
+  for (let i = 0; i < edgeIds.length; i++) {
+    blocks.push({ key: -edgeIds[i] - 2, edges: [edgeIds[i]] });
   }
   return blocks;
 }
