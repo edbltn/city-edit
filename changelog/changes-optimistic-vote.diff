@@ -1,0 +1,1954 @@
+commit fc059578448ca564f07eaefade8b03d110c917f4
+Author: Eric Bolton <eric.didier.bolton@gmail.com>
+Date:   Tue Aug 18 17:54:54 2026 -0400
+
+    perf(vote): paint the block a press moves, in the press's own tick
+    
+    Pressing - or + took about a second to show anything. Measured with
+    perf/vcast.mjs (it records the mousedown, the synchronous handler, the
+    button's cast-state class, every block-votes broadcast that actually
+    moves a block, the first WebGL draw after it, the POST and the WebSocket
+    echo). It was two things, and neither was the request.
+    
+    The map waited for its own echo. castVotes was already optimistic, but
+    only over EDGE counts - and on a map with a block layer the polygons are
+    the heat and edges show only on hover. So the optimistic apply moved a
+    number nothing on screen reads, and the first visible change was the
+    server's delta landing with block counts: 53-105ms on localhost, a full
+    round trip wherever the user actually is.
+    
+    So predict the block move instead. It is not the edge count and not
+    their sum: a block counts a person ONCE per (vote type, direction)
+    however many of its edges carry their vote (server block_votes.py, bd:
+    HLEN), so the move is a presence boundary - a second press on the same
+    corridor is 0, a flip is (+1 down, -1 up), extending onto more edges of
+    a block I already hold is 0. planBlockVote now computes that alongside
+    the plan it already derived, and applyMyBlockVoteChange is the
+    increment twin of the delta path's SET. Getting the rule exactly right
+    is what makes the confirming delta a no-op ("heat apply (diff): 0
+    writes") rather than a visible correction; a vote that twitches reads as
+    broken, which is worse than one that reads as slow.
+    
+    An optimistic write also has to survive until that echo. Two background
+    refreshes walked over it: /api/my-votes -> resetMapVotes deletes rows a
+    snapshot READ before the vote does not confirm, and /api/graph-votes
+    installs a whole new count snapshot over graphDataRef. Neither could
+    tell a speculative row from a settled one, so pendingVotes.ts makes that
+    distinction explicit for the window between dispatch and echo. Both
+    refresh paths re-apply what is still pending on top of server truth;
+    the cast leaves the ledger when its own delta arrives, or on a 20s
+    backstop so a dropped socket cannot shield it forever.
+    
+    Rollback now says so. A failure reverses the edge transitions AND the
+    block move (recomputed against the store as it stands, not by negating a
+    stale prediction), and raises the toast App.tsx already listens for -
+    "Route not found" and the server's own refusals use the same one. It
+    also refuses to fire when a LATER press on the same control has already
+    re-written those edges: undoing then would revert the user's newest
+    intent rather than this cast.
+    
+    Second finding, the one no amount of optimism fixes: a cast forced a
+    full corridor re-cluster. scheduleOwnCastRecompute fires 400ms after
+    every press and the epoch bump dropped every vote type's cached
+    clusters - "20 corridors in 1215.0ms (9/9 types clustered over 9
+    slices)", ~1.1s of long tasks landing right on top of the press. But a
+    corridor for one type reads only that type's nets and the topology (the
+    insight e3086cc built the cache on), and a cast changes one label. So
+    the epoch now carries WHICH labels moved and drops only their clusters.
+    perf/vcast-verify.mjs drives the check that matters: the incremental
+    list is identical to what a cold load's full 9-type recompute produces
+    in the same vote state.
+    
+    nyc-walkways, 61-edge/25-block corridor, localhost:
+      click -> block heat   53-105ms -> 2.3-6.2ms (and now before the POST
+                                        is even sent)
+      click -> WebGL draw   68-118ms -> 25.9-39.2ms
+      main thread blocked   1110-1126ms -> 51-59ms
+      corridor recompute    1205ms (9/9 types) -> 65-73ms (1/9)
+      cast-state highlight  22-28ms, already optimistic, unchanged
+    Same shape on a point cast on nyc-proposals (1 block, 5.1ms, delta a
+    no-op).
+    
+    Tests: optimisticVote.test.ts covers the prediction against the dedupe
+    rule, the optimistic-then-authoritative no-op invariant, a wrong
+    prediction being corrected rather than compounded, both refresh paths
+    landing mid-flight (including one that lands after the POST but before
+    the echo), and every rollback path including the superseded press.
+    
+    Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
+index 3af8e98..8e6fd35 100644
+--- a/client-react/src/components/GraphLayer/GraphLayer.tsx
++++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -50,7 +50,7 @@ import {
+   expandSelectionToUndirected,
+   type RouteProposal,
+ } from "./routeProposals";
+-import { applyMyVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, topProposalDiffs } from "./voteApply";
++import { applyMyVoteChange, applyMyBlockVoteChange, applyEdgeVoteChange, applyAuthoritativeCounts, applyBlockCounts, topProposalDiffs } from "./voteApply";
+ import {
+   COORD_SCALE,
+   type GraphTopology,
+@@ -71,7 +71,8 @@ import {
+   adjShortest,
+ } from "./graphTopology";
+ import {
+-  materializeBlocks, selectionVoteRows, selectionCoverage,
++  materializeBlocks, materializeTouchedBlocks, singletonBlocks,
++  selectionVoteRows, selectionCoverage,
+   type SelectionCoverage,
+ } from "../../utils/blockSelection";
+ import { iconForLabel, iconSrc, mapStyleForTheme, pointTypeForLabel } from "../../themes";
+@@ -92,6 +93,7 @@ import {
+   type VoteDirection,
+ } from "../../utils/voteStore";
+ import { castVotes, voteButtonState } from "../../utils/castVote";
++import { pendingCastsFor, settlePendingCastsForDelta } from "../../utils/pendingVotes";
+ import {
+   useProposalAudience, describeAudience, MIN_VIEWS_SHOWN,
+ } from "../../hooks/useProposalAudience";
+@@ -388,7 +390,21 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // derivation of vote data that has already changed under it. The proposal
+   // caches below key off this.
+   const voteEpochRef = useRef(0);
+-  const bumpVoteEpoch = () => { voteEpochRef.current++; };
++
++  // WHICH vote types the epoch bump invalidated. A corridor for one vote type
++  // is a function of that type's nets and the topology alone (the insight
++  // e3086cc built the per-type cluster cache on), so a cast for one label has
++  // no bearing on any other label's corridors — dropping all of them made
++  // every press pay a full re-cluster of every type. `null` means "everything"
++  // and is what a whole-snapshot install or a mode switch bumps with; the
++  // consumer clears the set when it has acted on it.
++  const dirtyVoteLabelsRef = useRef<Set<string> | null>(null);
++  const bumpVoteEpoch = (labels?: readonly string[]) => {
++    voteEpochRef.current++;
++    if (!labels) { dirtyVoteLabelsRef.current = null; return; }
++    const dirty = dirtyVoteLabelsRef.current;
++    if (dirty) for (const label of labels) dirty.add(label);
++  };
+ 
+   // Deltas received before the initial vote fetch completes
+   const pendingDeltasRef = useRef<import("../../types").VoteDelta[]>([]);
+@@ -586,8 +602,8 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   useEffect(() => {
+     setBlockMaterializer((edgeIds: number[]) => {
+       const topo = topologyRef.current;
+-      if (!topo) return edgeIds.map((e) => [e]);
+-      return materializeBlocks(topo, blockIndexRef.current, edgeIds);
++      if (!topo) return singletonBlocks(edgeIds);
++      return materializeTouchedBlocks(topo, blockIndexRef.current, edgeIds);
+     });
+     return () => setBlockMaterializer(null);
+   }, [setBlockMaterializer]);
+@@ -1545,7 +1561,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // type is cached" from "one was never clustered".
+   const routeCacheRef = useRef<{
+     epoch: number; eligible: number[] | null; byType: Map<number, RouteProposal[]>;
+-  }>({ epoch: -1, eligible: null, byType: new Map() });
++    /** Legend size when `eligible` was enumerated — anything past it is a type
++     *  the job has never judged, so the list has to be rebuilt. */
++    eligibleLegendLen: number;
++  }>({ epoch: -1, eligible: null, byType: new Map(), eligibleLegendLen: 0 });
+ 
+   const publishRouteProposals = useCallback((next: RouteProposal[], note: string) => {
+     dlog("proposals", `recompute: ${next.length} corridors ${note}`,
+@@ -1569,8 +1588,30 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     const cache = routeCacheRef.current;
+     if (cache.epoch !== voteEpochRef.current) {
+       cache.epoch = voteEpochRef.current;
+-      cache.eligible = null;
+-      cache.byType.clear();
++      // Drop only the types whose votes actually moved. A cast changes ONE
++      // label's nets, and job.step(type) reads only that type's nets and the
++      // topology — so re-clustering the other eleven was pure latency sitting
++      // on top of the press (measured: 1205ms of it, all after the click).
++      const dirty = dirtyVoteLabelsRef.current;
++      if (dirty === null) {
++        cache.eligible = null;
++        cache.byType.clear();
++      } else {
++        for (const label of dirty) {
++          const li = legend.indexOf(label);
++          if (li < 0 || li >= cache.eligibleLegendLen) {
++            // A type the enumeration never saw — a brand-new suggestion label.
++            // Whether it even belongs to the corridor family is unknown, so the
++            // list has to be rebuilt. An index the job DID judge needs no such
++            // rebuild: dropping its clusters is enough, and dropping one it
++            // ruled out (a point-kind type) is a harmless no-op.
++            cache.eligible = null;
++          } else {
++            cache.byType.delete(li);
++          }
++        }
++      }
++      dirtyVoteLabelsRef.current = new Set();
+     }
+     const visible = (legendIdx: number) => isVoteTypeVisible(legend[legendIdx] ?? "");
+ 
+@@ -1608,6 +1649,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       minRouteScore: routeProposalMinNet + 1,
+     });
+     cache.eligible = job.types;
++    cache.eligibleLegendLen = legend.length;
+     // Only VISIBLE types are clustered, and only the ones not already cached:
+     // a filtered map still recomputes faster, not slower, and re-showing a type
+     // costs that one type rather than all of them.
+@@ -1643,7 +1685,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   // The clustering bakes in kind and the support floor, so a change to either
+   // invalidates every cached type.
+   useEffect(() => {
+-    routeCacheRef.current = { epoch: -1, eligible: null, byType: new Map() };
++    routeCacheRef.current = {
++      epoch: -1, eligible: null, byType: new Map(), eligibleLegendLen: 0,
++    };
+   }, [voteTypeKindOf, routeProposalMinNet]);
+ 
+   const recomputeRouteProposalsRef = useRef(recomputeRouteProposals);
+@@ -1840,7 +1884,6 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       debugState("votesRev", voteData.rev);
+       // Teach the vote store this map's label→id map so packed lookups resolve.
+       setVoteTypeMap(voteData.vote_types);
+-      broadcastBlockVotes(voteData);
+ 
+       // Replay deltas newer than the installed body: both any buffered before
+       // the initial load (pendingDeltasRef) and the recent-applied ring — the
+@@ -1865,6 +1908,22 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+         setTimeout(() => fetchVotesRef.current(), 2500);
+       }
+ 
++      // Re-apply anything still in flight. This body was BUILT before those
++      // presses reached the server, so installing it wholesale is exactly the
++      // background refresh that used to make a fresh vote pop off the map and
++      // then reappear when its delta finally landed. Re-applied last, on top of
++      // server truth; the confirming delta's idempotent SET reconciles either
++      // way, so a body that already contains the vote self-corrects rather than
++      // double-counting it.
++      const inFlight = pendingCastsFor(themeMode);
++      for (const cast of inFlight) applyCastToGraphDataRef.current(cast);
++      if (inFlight.length > 0) {
++        dlog("votes", `re-applied ${inFlight.length} in-flight cast(s) over rev ${bodyRev}`);
++      }
++      // Broadcast AFTER the replay + re-apply, so the heat painted is the one
++      // that includes them rather than the raw body's.
++      broadcastBlockVotes(voteData);
++
+       refreshHeatmapDisplayRef.current();
+       requestProposalsRecomputeRef.current();
+       if (servedStale) scheduleStaleVotesRefetch();
+@@ -1903,8 +1962,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       broadcastBlockVotes(data, "delta");
+     }
+     lastRevRef.current = delta.rev;
+-    bumpVoteEpoch();
+-  }, [broadcastBlockVotes]);
++    bumpVoteEpoch([vtLabel]);
++    // This may be the echo of one of our own presses. Its authoritative counts
++    // have just replaced the optimistic guess, so the cast no longer needs
++    // shielding from a background refresh (utils/pendingVotes.ts).
++    settlePendingCastsForDelta(themeMode, vtLabel, delta.edges ?? []);
++  }, [broadcastBlockVotes, themeMode]);
+ 
+   // Load topology + votes on mount, preferring persisted caches.
+   useEffect(() => {
+@@ -2358,26 +2421,55 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     };
+   }, [subscribeToSync, subscribeToOpen, requestSync, themeMode, applyDeltaToGraphData]);
+ 
+-  // Optimistic vote — apply this user's vote transition (prevDir → newDir)
+-  // immediately on cast so the heatmap and top-proposal counts update before the
+-  // server round-trip completes. No ledger is needed: every server delta now
+-  // carries authoritative vtCounts and is applied as an idempotent SET (see
+-  // applyDeltaToGraphData), so the caster's own optimistic guess is corrected to
+-  // truth rather than double-counted. The cast path (utils/castVote.ts) emits a
++  // Apply one cast's in-memory count changes — edge transitions AND the
++  // predicted deduped block moves. Shared by the optimistic press below and the
++  // re-apply that follows a background snapshot install, which have to write
++  // exactly the same thing or the two would disagree about what is on screen.
++  // Returns true when the BLOCK layer moved, i.e. when the heat needs a repaint.
++  const applyCastToGraphData = useCallback((
++    cast: { label: string; groups: readonly { edges: number[]; prevDir: number; newDir: number }[];
++            blockDeltas: readonly { block: number; up: number; down: number }[] },
++  ): boolean => {
++    const data = graphDataRef.current;
++    const adj = nodeAdjRef.current;
++    if (!data?.edge_votes || !adj) return false;
++    for (const g of cast.groups) {
++      applyMyVoteChange(data, adj, g.edges, cast.label, g.prevDir, g.newDir);
++    }
++    return applyMyBlockVoteChange(data, cast.label, cast.blockDeltas);
++  }, []);
++  const applyCastToGraphDataRef = useRef(applyCastToGraphData);
++  useEffect(() => { applyCastToGraphDataRef.current = applyCastToGraphData; }, [applyCastToGraphData]);
++
++  // Optimistic vote — apply this user's press to the in-memory counts in the
++  // press's own tick, so the map changes now instead of on the round trip.
++  //
++  // Both aggregates move, and the BLOCK one is the point: on a map with a block
++  // layer the polygons are the heat and the edges only show on hover, so an
++  // edge-only optimistic apply changed nothing anyone could see and every press
++  // sat waiting for its own WebSocket echo to repaint. The prediction models the
++  // server's dedupe rule (castVote.blockVoteDeltas) precisely so that the
++  // confirming delta's idempotent SET lands as a no-op rather than a visible
++  // correction — a vote that twitches reads as broken, which is worse than slow.
++  //
++  // No count ledger is needed for the edge side either: every server delta
++  // carries authoritative vtCounts applied as a SET (applyDeltaToGraphData), so
++  // a wrong guess is corrected rather than compounded. The cast path emits the
+   // reverse transition to roll back if the request fails.
+   useEffect(() => {
+     const handler = (e: Event) => {
+       const detail = (e as CustomEvent).detail as import("../../utils/castVote").OptimisticVoteDetail;
+       if (detail.mode !== themeMode) return;
+-
+       const data = graphDataRef.current;
+-      const adj = nodeAdjRef.current;
+-      if (!data?.edge_votes || !adj) return;
+-      if (!detail.edgeIds?.length) return;
++      if (!data?.edge_votes || !nodeAdjRef.current) return;
++      if (!detail.groups?.length && !detail.blockDeltas?.length) return;
+ 
+       const legendLenBefore = data.vote_type_legend?.length ?? 0;
+-      applyMyVoteChange(data, adj, detail.edgeIds, detail.label, detail.prevDir, detail.newDir);
+-      bumpVoteEpoch();
++      const blocksMoved = applyCastToGraphDataRef.current({
++        label: detail.label, groups: detail.groups ?? [], blockDeltas: detail.blockDeltas ?? [],
++      });
++      bumpVoteEpoch([detail.label]);
++      if (blocksMoved) broadcastBlockVotes(data, "delta");
+       refreshHeatmapDisplayRef.current();
+       // Unlike the WS-delta path (which dirty-marks for the minute sweep),
+       // THIS is the local user's own press — the one vote whose effect on the
+@@ -2389,7 +2481,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     };
+     window.addEventListener("optimistic-vote", handler);
+     return () => window.removeEventListener("optimistic-vote", handler);
+-  }, [themeMode, scheduleOwnCastRecompute]);
++  }, [themeMode, scheduleOwnCastRecompute, broadcastBlockVotes]);
+ 
+   // Draw hover and pinned highlights on separate canvas
+   const redrawHoverHighlight = useCallback(() => {
+@@ -4524,7 +4616,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+       mode: themeMode, edgeIds: [edgeId], label, direction: newDir,
+       // Block-scoped semantics (docs §4): the plan/unvote spans the touched
+       // block; omitted (pre-topology) castVotes falls back to singletons.
+-      blocks: topo ? materializeBlocks(topo, blockIndexRef.current, [edgeId]) : undefined,
++      blocks: topo ? materializeTouchedBlocks(topo, blockIndexRef.current, [edgeId]) : undefined,
+     });
+   }, [themeMode]);
+ 
+@@ -4541,7 +4633,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+     const topo = topologyRef.current;
+     castVotes({
+       mode: themeMode, edgeIds: Array.from(ids), label, direction: newDir,
+-      blocks: topo ? materializeBlocks(topo, blockIndexRef.current, ids) : undefined,
++      blocks: topo ? materializeTouchedBlocks(topo, blockIndexRef.current, ids) : undefined,
+     });
+   }, [themeMode]);
+ 
+diff --git a/client-react/src/components/GraphLayer/voteApply.ts b/client-react/src/components/GraphLayer/voteApply.ts
+index 94c21b0..fb2bd06 100644
+--- a/client-react/src/components/GraphLayer/voteApply.ts
++++ b/client-react/src/components/GraphLayer/voteApply.ts
+@@ -228,6 +228,58 @@ export function topProposalDiffs(
+   return { diff, maxPos, maxNeg };
+ }
+ 
++/**
++ * INCREMENT each block's deduped [up, down] for `vtLabel` by a predicted move
++ * (−1 / 0 / +1 per direction) — the optimistic twin of applyBlockCounts' SET.
++ *
++ * This exists because the block aggregate, not the edge aggregate, is what the
++ * heatmap paints on a map with a block layer: bumping edge counts optimistically
++ * moved a number nothing on screen reads, so every press waited for the
++ * server's echo to repaint. Same bookkeeping as the SET path (block_votes stays
++ * total deduped activity, breakdown sorted by total desc) so the confirming
++ * delta lands as a no-op rather than a visible correction. Returns true when
++ * anything moved, so the caller knows whether to re-broadcast the heat.
++ */
++export function applyMyBlockVoteChange(
++  data: VoteData,
++  vtLabel: string,
++  deltas: readonly { block: number; up: number; down: number }[],
++): boolean {
++  const blockVotes = data.block_votes;
++  const blockVoteTypes = data.block_vote_types;
++  if (!blockVotes || !blockVoteTypes || deltas.length === 0 || !vtLabel) return false;
++  const legend = data.block_vote_type_legend ?? (data.block_vote_type_legend = []);
++  let li = legend.indexOf(vtLabel);
++  if (li < 0) {
++    li = legend.length;
++    legend.push(vtLabel);
++  }
++
++  let changed = false;
++  for (const { block, up, down } of deltas) {
++    if (block < 0 || block >= blockVotes.length || (up === 0 && down === 0)) continue;
++    const pairs = blockVoteTypes[block] || [];
++    const existing = pairs.find(([l]) => l === li);
++    const oldUp = existing ? existing[1] : 0;
++    const oldDown = existing ? existing[2] : 0;
++    // Clamped: a prediction can only ever be one person too optimistic, and a
++    // negative count would paint a block the ramp has no colour for. Compared
++    // AFTER clamping, so a move that clamps away doesn't report a change and
++    // trigger a repaint of nothing.
++    const nextUp = Math.max(0, oldUp + up);
++    const nextDown = Math.max(0, oldDown + down);
++    if (oldUp === nextUp && oldDown === nextDown) continue;
++
++    const next = pairs.filter(([l]) => l !== li);
++    if (nextUp !== 0 || nextDown !== 0) next.push([li, nextUp, nextDown]);
++    next.sort((a, b) => b[1] + b[2] - (a[1] + a[2]));
++    blockVoteTypes[block] = next;
++    blockVotes[block] = (blockVotes[block] || 0) + (nextUp + nextDown - oldUp - oldDown);
++    changed = true;
++  }
++  return changed;
++}
++
+ export function applyBlockCounts(
+   data: VoteData,
+   vtLabel: string,
+diff --git a/client-react/src/context/RouteContext.tsx b/client-react/src/context/RouteContext.tsx
+index 30ec06f..f98d77a 100644
+--- a/client-react/src/context/RouteContext.tsx
++++ b/client-react/src/context/RouteContext.tsx
+@@ -12,6 +12,7 @@ import { useRouteCalculation, NO_ROUTE_MESSAGE } from "../hooks/useRouteCalculat
+ import { CONFIG } from "../config";
+ import { getMapSlug, getCurrentMap, mapVoteTypesForPointType } from "../map/runtime";
+ import { getDefaultVoteTypeForTheme } from "../constants/voteTypes";
++import { singletonBlocks, type TouchedBlock } from "../utils/blockSelection";
+ import { blockCoverage, type VoteDirection } from "../utils/voteStore";
+ import { useVotesVersion } from "../utils/useVotesVersion";
+ import { castVotes, voteButtonState } from "../utils/castVote";
+@@ -165,7 +166,7 @@ export interface PendingWaypoint {
+ 
+ /** Selection edges → the touched blocks' materialized edge lists (docs
+  *  three-layer-model §4). Registered by GraphLayer, which owns the topology. */
+-export type BlockMaterializer = (edgeIds: number[]) => ArrayLike<number>[];
++export type BlockMaterializer = (edgeIds: number[]) => TouchedBlock[];
+ 
+ /** Corridor geometry for a segment the selection FLAGS as forcibly routed
+  *  through a route proposal (SelWaypoint.forcedCorridor): the corridor's path as
+@@ -1580,8 +1581,8 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+       if (currentEdgeIds.length === 0 || !effectiveVoteType) return false;
+       const blocks =
+         blockMaterializerRef.current?.(currentEdgeIds)
+-        ?? currentEdgeIds.map((e) => [e]);
+-      const cov = blockCoverage(theme.mode, blocks, effectiveVoteType);
++        ?? singletonBlocks(currentEdgeIds);
++      const cov = blockCoverage(theme.mode, blocks.map((b) => b.edges), effectiveVoteType);
+       return voteButtonState(cov, dir) === "active";
+     },
+     [votesVersion, currentEdgeIds, effectiveVoteType, theme.mode]
+diff --git a/client-react/src/utils/blockSelection.ts b/client-react/src/utils/blockSelection.ts
+index 770f2a3..aabc7f8 100644
+--- a/client-react/src/utils/blockSelection.ts
++++ b/client-react/src/utils/blockSelection.ts
+@@ -48,20 +48,56 @@ export function routeVotesKey(slug: string, edgeIds: readonly number[]): string
+ }
+ 
+ /**
+- * Materialize a selection's touched blocks into per-block edge lists. Real
+- * blocks resolve through the CSR index (subarray views, no copies — the mobile
+- * typed-array memory rule); unmapped edges and maps without block artifacts
+- * fall back to singleton [edge] blocks, so every rule downstream still holds.
++ * One touched block: its edges, and the key that names it.
++ *
++ * The key is `touchedBlockKeys`' encoding — `>= 0` is a real block id, `< 0`
++ * the singleton stand-in for an edge that belongs to no block. Callers that
++ * only reason about coverage need the edges; the ones that have to name the
++ * aggregate the server will move (the optimistic block-count prediction in
++ * castVote.ts) need the id, and carrying both on one object is what keeps
++ * them from drifting out of step.
+  */
+-export function materializeBlocks(
++export interface TouchedBlock {
++  key: number;
++  edges: ArrayLike<number>;
++}
++
++/**
++ * Materialize a selection's touched blocks into keyed per-block edge lists.
++ * Real blocks resolve through the CSR index (subarray views, no copies — the
++ * mobile typed-array memory rule); unmapped edges and maps without block
++ * artifacts fall back to singleton [edge] blocks, so every rule downstream
++ * still holds.
++ */
++export function materializeTouchedBlocks(
+   topo: GraphTopology,
+   blockIndex: BlockIndex | null,
+   edgeIds: ArrayLike<number>,
+-): ArrayLike<number>[] {
+-  const blocks: ArrayLike<number>[] = [];
++): TouchedBlock[] {
++  const blocks: TouchedBlock[] = [];
+   for (const key of touchedBlockKeys(topo, edgeIds)) {
+     const members = edgesOfBlockKey(topo, blockIndex, key);
+-    if (members.length > 0) blocks.push(members);
++    if (members.length > 0) blocks.push({ key, edges: members });
++  }
++  return blocks;
++}
++
++/** The edge lists alone, for the coverage readers that never name a block. */
++export function materializeBlocks(
++  topo: GraphTopology,
++  blockIndex: BlockIndex | null,
++  edgeIds: ArrayLike<number>,
++): ArrayLike<number>[] {
++  return materializeTouchedBlocks(topo, blockIndex, edgeIds).map((b) => b.edges);
++}
++
++/** Singleton fallback: every edge is its own block, named the way
++ *  `touchedBlockKeys` names an unblocked edge so nothing downstream can
++ *  mistake one for a real block id. */
++export function singletonBlocks(edgeIds: ArrayLike<number>): TouchedBlock[] {
++  const blocks: TouchedBlock[] = [];
++  for (let i = 0; i < edgeIds.length; i++) {
++    blocks.push({ key: -edgeIds[i] - 2, edges: [edgeIds[i]] });
+   }
+   return blocks;
+ }
+diff --git a/client-react/src/utils/castVote.test.ts b/client-react/src/utils/castVote.test.ts
+index 230419e..7998cf1 100644
+--- a/client-react/src/utils/castVote.test.ts
++++ b/client-react/src/utils/castVote.test.ts
+@@ -1,5 +1,7 @@
+ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+ import { planBlockVote, voteButtonState, castVotes } from "./castVote";
++import { singletonBlocks, type TouchedBlock } from "./blockSelection";
++import { _resetPendingCasts } from "./pendingVotes";
+ import {
+   getVote, setVote, setVotes, setVoteTypeMap, blockCoverage, _resetVoteStore,
+ } from "./voteStore";
+@@ -8,10 +10,13 @@ const MODE = "walkways";
+ const LABEL = "Add bike lane";
+ 
+ /** Singleton fallback: each selection edge is its own block. */
+-const singles = (edgeIds: number[]) => edgeIds.map((e) => [e]);
++const singles = (edgeIds: number[]) => singletonBlocks(edgeIds);
++/** A real, id-carrying block — the only kind that moves a block aggregate. */
++const blk = (key: number, edges: number[]): TouchedBlock => ({ key, edges });
+ 
+ beforeEach(() => {
+   _resetVoteStore();
++  _resetPendingCasts();
+   setVoteTypeMap({ "10": LABEL });
+ });
+ 
+@@ -22,7 +27,7 @@ describe("planBlockVote — singleton blocks (per-edge fallback)", () => {
+     const plan = planBlockVote({
+       mode: MODE, edgeIds: [1, 2, 3], label: LABEL, direction: 1, blocks: singles([1, 2, 3]),
+     });
+-    expect(plan).toEqual({ targetDir: 1, castEdges: [1, 2, 3], clearEdges: [] });
++    expect(plan).toEqual({ targetDir: 1, castEdges: [1, 2, 3], clearEdges: [], blockDeltas: [] });
+   });
+ 
+   it("unvote-all: pressing the active direction clears my votes, casts nothing", () => {
+@@ -30,7 +35,7 @@ describe("planBlockVote — singleton blocks (per-edge fallback)", () => {
+     const plan = planBlockVote({
+       mode: MODE, edgeIds: [1, 2, 3], label: LABEL, direction: 1, blocks: singles([1, 2, 3]),
+     });
+-    expect(plan).toEqual({ targetDir: 0, castEdges: [], clearEdges: [1, 2, 3] });
++    expect(plan).toEqual({ targetDir: 0, castEdges: [], clearEdges: [1, 2, 3], blockDeltas: [] });
+   });
+ 
+   it("flip: opposite active → reverses via castEdges, never via clearEdges", () => {
+@@ -58,13 +63,13 @@ describe("planBlockVote — singleton blocks (per-edge fallback)", () => {
+     const plan = planBlockVote({
+       mode: MODE, edgeIds: [4, 5], label: LABEL, direction: -1, blocks: singles([4, 5]),
+     });
+-    expect(plan).toEqual({ targetDir: -1, castEdges: [4, 5], clearEdges: [] });
++    expect(plan).toEqual({ targetDir: -1, castEdges: [4, 5], clearEdges: [], blockDeltas: [] });
+   });
+ });
+ 
+ describe("planBlockVote — real blocks (selection ⊂ touched blocks)", () => {
+   // Selection = edge 1; its block also carries edges 10 and 11.
+-  const BLOCKS = [[1, 10, 11]];
++  const BLOCKS = [blk(7, [1, 10, 11])];
+ 
+   it("coverage counts any block edge, so a vote elsewhere in the block activates unvote", () => {
+     setVote(MODE, 10, LABEL, 1); // block held via a NON-selection edge
+@@ -72,7 +77,10 @@ describe("planBlockVote — real blocks (selection ⊂ touched blocks)", () => {
+       mode: MODE, edgeIds: [1], label: LABEL, direction: 1, blocks: BLOCKS,
+     });
+     // coverage(+) = all → unvote everything of mine in the touched blocks.
+-    expect(plan).toEqual({ targetDir: 0, castEdges: [], clearEdges: [10] });
++    expect(plan).toEqual({
++      targetDir: 0, castEdges: [], clearEdges: [10],
++      blockDeltas: [{ block: 7, up: -1, down: 0 }],
++    });
+   });
+ 
+   it("clear-then-cast: my scattered block votes are cleared, the selection cast", () => {
+@@ -82,7 +90,7 @@ describe("planBlockVote — real blocks (selection ⊂ touched blocks)", () => {
+     // coverage(down) = all → unvote-all. Pressing up on a block that is
+     // "all down" is the interesting flip:
+     const plan = planBlockVote({
+-      mode: MODE, edgeIds: [1], label: LABEL, direction: 1, blocks: [[1, 10]],
++      mode: MODE, edgeIds: [1], label: LABEL, direction: 1, blocks: [blk(7, [1, 10])],
+     });
+     expect(plan.targetDir).toBe(1);
+     expect(plan.castEdges).toEqual([1]);
+@@ -103,7 +111,7 @@ describe("planBlockVote — real blocks (selection ⊂ touched blocks)", () => {
+     setVote(MODE, 10, LABEL, 1); // covers block A only
+     const plan = planBlockVote({
+       mode: MODE, edgeIds: [1, 2], label: LABEL, direction: 1,
+-      blocks: [[1, 10], [2, 20]],
++      blocks: [blk(7, [1, 10]), blk(8, [2, 20])],
+     });
+     expect(plan.targetDir).toBe(1); // coverage = some → still a cast
+     expect(plan.castEdges).toEqual([1, 2]);
+@@ -121,7 +129,7 @@ describe("voteButtonState", () => {
+ 
+   it("agrees with blockCoverage end-to-end", () => {
+     setVotes(MODE, [1, 2], LABEL, -1);
+-    const cov = blockCoverage(MODE, singles([1, 2]), LABEL);
++    const cov = blockCoverage(MODE, singles([1, 2]).map((b) => b.edges), LABEL);
+     expect(voteButtonState(cov, -1)).toBe("active");
+     expect(voteButtonState(cov, 1)).toBe("neutral");
+   });
+@@ -177,7 +185,7 @@ describe("castVotes", () => {
+   it("with blocks: clears my block votes outside the selection, casts the selection", async () => {
+     setVote(MODE, 10, LABEL, 1); // elsewhere in the touched block
+     const res = await castVotes({
+-      mode: MODE, edgeIds: [1], label: LABEL, direction: -1, blocks: [[1, 10]],
++      mode: MODE, edgeIds: [1], label: LABEL, direction: -1, blocks: [blk(7, [1, 10])],
+     });
+     expect(res.targetDir).toBe(-1);
+     expect(postedBody().edge_ids).toEqual([1]); // selection only — server expands
+@@ -197,7 +205,7 @@ describe("castVotes", () => {
+     setVote(MODE, 10, LABEL, 1);
+     fetchMock.mockRejectedValue(new Error("network down"));
+     const res = await castVotes({
+-      mode: MODE, edgeIds: [1], label: LABEL, direction: -1, blocks: [[1, 10]],
++      mode: MODE, edgeIds: [1], label: LABEL, direction: -1, blocks: [blk(7, [1, 10])],
+     });
+     expect(res.ok).toBe(false);
+     expect(getVote(MODE, 1, LABEL)).toBe(0); // cast rolled back
+diff --git a/client-react/src/utils/castVote.ts b/client-react/src/utils/castVote.ts
+index 71f5f1f..e2d99d3 100644
+--- a/client-react/src/utils/castVote.ts
++++ b/client-react/src/utils/castVote.ts
+@@ -13,16 +13,19 @@
+ 
+ import { CONFIG } from "../config";
+ import { getMapSlug, getPasscodeToken } from "../map/runtime";
++import { singletonBlocks, type TouchedBlock } from "./blockSelection";
+ import { ensureVoteTypeVisible } from "../map/voteTypeFilter";
+ import { registerVoteTypeLabel } from "../map/voteTypeRegistry";
+ import { selectionFromParams } from "../selection/serialize";
+ import { hasPendingSticker, resolveSticker, takePendingSticker } from "../sticker";
+ import { dlog, derror } from "./debugLog";
++import {
++  confirmPendingCast, isLatestPendingCast, registerPendingCast,
++  resolvePendingCast, type PendingBlockDelta,
++} from "./pendingVotes";
+ import { getVoterId } from "./voterIdentity";
+ import {
+-  blockCoverage,
+   getVote,
+-  myVotesInBlocks,
+   setVotes,
+   type BlockCoverage,
+   type VoteDirection,
+@@ -67,13 +70,22 @@ function pinPendingSticker(targetDir: VoteDirection | 0, label: string): void {
+   void resolveSticker(code, binding, getVoterId());
+ }
+ 
+-/** Detail of the `optimistic-vote` window event GraphLayer listens for. */
++/**
++ * Detail of the `optimistic-vote` window event GraphLayer listens for.
++ *
++ * ONE event per press, carrying every edge transition and the predicted move in
++ * each touched block's deduped count. It is deliberately not one event per
++ * transition group: the block prediction is a property of the whole press (a
++ * clear on edge A and a cast on edge B in the same block cancel out), so
++ * splitting it would make each half wrong.
++ */
+ export interface OptimisticVoteDetail {
+   mode: string;
+   label: string;
+-  edgeIds: number[];
+-  prevDir: number; // -1 | 0 | 1
+-  newDir: number; // -1 | 0 | 1
++  /** Edge transitions, grouped by the direction each edge held before. */
++  groups: TransitionGroup[];
++  /** Predicted deduped block-count moves — the number the UI actually paints. */
++  blockDeltas: PendingBlockDelta[];
+ }
+ 
+ export interface CastResult {
+@@ -99,13 +111,71 @@ export interface BlockVotePlan {
+   /** My existing same-type votes (in the touched blocks) to remove: everything
+    *  on an unvote, everything outside the selection on a cast. */
+   clearEdges: number[];
++  /** Predicted move in each touched block's DEDUPED count. Empty without real
++   *  block ids (singleton fallback / no block layer). */
++  blockDeltas: PendingBlockDelta[];
++}
++
++/** Whether I hold an up / a down vote anywhere in one block's edges. */
++function presenceIn(
++  edges: ArrayLike<number>,
++  dirOf: (edgeId: number) => VoteDirection | 0,
++): { up: boolean; down: boolean } {
++  let up = false;
++  let down = false;
++  for (let i = 0; i < edges.length; i++) {
++    const v = dirOf(edges[i]);
++    if (v === 1) up = true;
++    else if (v === -1) down = true;
++    if (up && down) break;
++  }
++  return { up, down };
++}
++
++/**
++ * Predict how `changes` (edge → the direction it is about to hold) moves each
++ * block's deduped count — the ONE quantity the heatmap paints and the server's
++ * confirmation will overwrite.
++ *
++ * It is not the edge count and it is not their sum. A block counts a person
++ * ONCE per (vote type, direction) however many of its edges carry their vote
++ * (server: block_votes.py, `bd:` HLEN), so the move is purely a presence
++ * boundary: −1 when my last vote of that direction leaves the block, +1 when my
++ * first arrives, 0 whenever I was already there. That is what makes a second
++ * press on the same corridor worth 0 rather than +1, and a flip worth
++ * (+1 down, −1 up) rather than +1 down alone.
++ *
++ * Blind spot, by design: the server dedupes by COUNTING identity (an IP hash by
++ * default), not by device, so a second device behind one IP that already holds
++ * the block makes the real move 0 where this predicts ±1. Rare, and the
++ * authoritative [up, down] SET in the confirming delta corrects it.
++ */
++export function blockVoteDeltas(
++  mode: string,
++  label: string,
++  blocks: readonly TouchedBlock[],
++  changes: ReadonlyMap<number, VoteDirection | 0>,
++): PendingBlockDelta[] {
++  const deltas: PendingBlockDelta[] = [];
++  if (changes.size === 0) return deltas;
++  const before = (e: number) => getVote(mode, e, label);
++  const after = (e: number) => changes.get(e) ?? getVote(mode, e, label);
++  for (const block of blocks) {
++    if (block.key < 0) continue; // singleton stand-in — no block aggregate to move
++    const was = presenceIn(block.edges, before);
++    const now = presenceIn(block.edges, after);
++    const up = (now.up ? 1 : 0) - (was.up ? 1 : 0);
++    const down = (now.down ? 1 : 0) - (was.down ? 1 : 0);
++    if (up !== 0 || down !== 0) deltas.push({ block: block.key, up, down });
++  }
++  return deltas;
+ }
+ 
+ /**
+  * Decide what a press should do — the pure heart of the block-scoped rule
+  * (docs §4.1–4.2), extracted so it can be unit-tested without network/DOM.
+- * `blocks` is the materialized touched-block edge lists; pass
+- * `edgeIds.map((e) => [e])` for the no-blocks singleton fallback.
++ * `blocks` is the materialized touched blocks; pass `singletonBlocks(edgeIds)`
++ * for the no-blocks fallback.
+  *
+  *   - coverage(direction) === 'all' → UNVOTE: clear every one of my `label`
+  *     votes across the touched blocks, cast nothing (wire direction 0).
+@@ -118,26 +188,44 @@ export function planBlockVote(params: {
+   edgeIds: number[];
+   label: string;
+   direction: VoteDirection;
+-  blocks: ArrayLike<number>[];
++  blocks: readonly TouchedBlock[];
+ }): BlockVotePlan {
+   const { mode, edgeIds, label, direction, blocks } = params;
+-  const cov = blockCoverage(mode, blocks, label);
+-  const mine = myVotesInBlocks(mode, blocks, label);
+-
+-  const active = (direction === 1 ? cov.up : cov.down) === "all";
+-  if (active) {
+-    return {
+-      targetDir: 0,
+-      castEdges: [],
+-      clearEdges: [...mine.keys()].sort((a, b) => a - b),
+-    };
++  const dirOf = (e: number) => getVote(mode, e, label);
++
++  // One pass over the touched blocks gives both halves of the rule: whether
++  // every block already holds this direction (so the press is an unvote), and
++  // which of my votes live in them (what an unvote or a clear has to remove).
++  let atDirection = 0;
++  const mine: number[] = [];
++  const seen = new Set<number>();
++  for (const block of blocks) {
++    let holds = false;
++    for (let i = 0; i < block.edges.length; i++) {
++      const eid = block.edges[i];
++      const v = dirOf(eid);
++      if (v === direction) holds = true;
++      if (v !== 0 && !seen.has(eid)) { seen.add(eid); mine.push(eid); }
++    }
++    if (holds) atDirection++;
+   }
+-  const selection = new Set(edgeIds);
+-  return {
+-    targetDir: direction,
+-    castEdges: edgeIds.filter((e) => getVote(mode, e, label) !== direction),
+-    clearEdges: [...mine.keys()].filter((e) => !selection.has(e)).sort((a, b) => a - b),
+-  };
++  const active = blocks.length > 0 && atDirection === blocks.length;
++
++  const plan: Omit<BlockVotePlan, "blockDeltas"> = active
++    ? { targetDir: 0, castEdges: [], clearEdges: mine.sort((a, b) => a - b) }
++    : (() => {
++        const selection = new Set(edgeIds);
++        return {
++          targetDir: direction,
++          castEdges: edgeIds.filter((e) => dirOf(e) !== direction),
++          clearEdges: mine.filter((e) => !selection.has(e)).sort((a, b) => a - b),
++        };
++      })();
++
++  const changes = new Map<number, VoteDirection | 0>();
++  for (const e of plan.clearEdges) changes.set(e, 0);
++  for (const e of plan.castEdges) changes.set(e, plan.targetDir);
++  return { ...plan, blockDeltas: blockVoteDeltas(mode, label, blocks, changes) };
+ }
+ 
+ /** Button render state for a direction (docs §4.1): active iff every touched
+@@ -147,10 +235,51 @@ export function voteButtonState(coverage: BlockCoverage, dir: VoteDirection): "a
+ }
+ 
+ function dispatchOptimistic(detail: OptimisticVoteDetail) {
+-  if (typeof window === "undefined" || detail.edgeIds.length === 0) return;
++  if (typeof window === "undefined") return;
++  if (detail.groups.length === 0 && detail.blockDeltas.length === 0) return;
+   window.dispatchEvent(new CustomEvent("optimistic-vote", { detail }));
+ }
+ 
++/** Reverse a set of transitions — what a rollback (or a partial decline) applies. */
++function invertGroups(groups: readonly TransitionGroup[]): TransitionGroup[] {
++  return groups.map((g) => ({ edges: g.edges, prevDir: g.newDir, newDir: g.prevDir }));
++}
++
++/**
++ * Undo `groups` locally: the block prediction is recomputed against the store
++ * as it stands NOW rather than negating the forward one, because a rollback can
++ * land after other writes have moved the same blocks, and a negated stale
++ * prediction would then be a second wrong number rather than a correction.
++ */
++function revertGroups(
++  mode: string, label: string, blocks: readonly TouchedBlock[],
++  groups: readonly TransitionGroup[],
++) {
++  const inverse = invertGroups(groups);
++  const changes = new Map<number, VoteDirection | 0>();
++  for (const g of inverse) {
++    for (const e of g.edges) changes.set(e, g.newDir as VoteDirection | 0);
++  }
++  dispatchOptimistic({
++    mode, label, groups: inverse,
++    blockDeltas: blockVoteDeltas(mode, label, blocks, changes),
++  });
++  for (const g of inverse) {
++    setVotes(mode, g.edges, label, g.newDir as VoteDirection | 0);
++  }
++}
++
++/**
++ * Tell the person their vote did not take. A silent revert is indistinguishable
++ * from a bug, so every rollback says something — through the SAME toast the
++ * server's own refusals already use (App.tsx listens for `vote-rejected` and
++ * feeds it to ErrorToast), rather than a second notification surface.
++ */
++function announceRollback(message: string) {
++  if (typeof window === "undefined") return;
++  window.dispatchEvent(new CustomEvent("vote-rejected", { detail: { message } }));
++}
++
+ /** Group edges by their CURRENT stored direction so each optimistic event (and
+  *  its rollback) carries an accurate prevDir snapshot. */
+ function groupByPrevDir(
+@@ -185,7 +314,7 @@ export async function castVotes(params: {
+   edgeIds: number[];
+   label: string;
+   direction: VoteDirection;
+-  blocks?: ArrayLike<number>[];
++  blocks?: readonly TouchedBlock[];
+   /** Kind of the selection being voted ("route" corridor vs single "point").
+    *  Sent so the server can record the kind of a brand-new suggestion label —
+    *  the creating cast is the only witness. Optional: casts on existing labels
+@@ -206,8 +335,8 @@ export async function castVotes(params: {
+   registerVoteTypeLabel(label);
+   ensureVoteTypeVisible(label);
+ 
+-  const blocks = params.blocks ?? edges.map((e) => [e]);
+-  const { targetDir, castEdges, clearEdges } = planBlockVote({
++  const blocks = params.blocks ?? singletonBlocks(edges);
++  const { targetDir, castEdges, clearEdges, blockDeltas } = planBlockVote({
+     mode, edgeIds: edges, label, direction, blocks,
+   });
+   dlog("cast", `press ${direction > 0 ? "+" : "−"} "${label}" →`,
+@@ -226,13 +355,29 @@ export async function castVotes(params: {
+     return { ok: true, targetDir, changedEdges: [] };
+   }
+ 
+-  // Optimistic apply + local store update.
++  // Optimistic apply, in the press's own tick: ONE event carrying every edge
++  // transition and the predicted block moves, then the local store write that
++  // flips the button's cast state. Nothing here awaits the network.
++  dispatchOptimistic({ mode, label, groups, blockDeltas });
+   for (const g of groups) {
+-    dispatchOptimistic({ mode, label, edgeIds: g.edges, prevDir: g.prevDir, newDir: g.newDir });
+     setVotes(mode, g.edges, label, g.newDir as VoteDirection | 0);
+   }
+ 
++  // Register it as in flight BEFORE the request goes out. Until its echo comes
++  // back this shields the write from the background refreshes that would
++  // otherwise install a server snapshot taken before the vote existed
++  // (utils/pendingVotes.ts).
++  const pendingEdges = new Map<number, VoteDirection | 0>();
++  for (const g of groups) {
++    for (const e of g.edges) pendingEdges.set(e, g.newDir as VoteDirection | 0);
++  }
++  const pendingId = registerPendingCast({
++    mode, label, edges: pendingEdges, groups, blockDeltas,
++  });
++
+   const slug = getMapSlug();
++  // Whether the failure path has already told the user something specific.
++  let announced = false;
+   try {
+     const body: Record<string, unknown> = {
+       map: slug,
+@@ -252,6 +397,8 @@ export async function castVotes(params: {
+       body: JSON.stringify(body),
+     });
+     if (res.status === 401) {
++      // The passcode gate is the message here; a toast on top would be noise.
++      announced = true;
+       window.dispatchEvent(new CustomEvent("map-passcode-required", { detail: { slug } }));
+       throw new Error("Passcode required");
+     }
+@@ -263,9 +410,8 @@ export async function castVotes(params: {
+       // look exactly like the vote having worked and then vanished.
+       const reason = await res.json().catch(() => null);
+       if (reason?.error) {
+-        window.dispatchEvent(new CustomEvent("vote-rejected", {
+-          detail: { message: reason.error as string },
+-        }));
++        announced = true;
++        announceRollback(reason.error as string);
+       }
+       throw new Error(reason?.error || `Vote failed: ${res.status}`);
+     }
+@@ -282,12 +428,13 @@ export async function castVotes(params: {
+     // vote the server never recorded.
+     const declined = new Set<number>(result?.capped ?? []);
+     if (declined.size > 0) {
+-      for (const g of groups) {
+-        const edges = g.edges.filter((e) => declined.has(e));
+-        if (edges.length === 0) continue;
+-        dispatchOptimistic({ mode, label, edgeIds: edges, prevDir: g.newDir, newDir: g.prevDir });
+-        setVotes(mode, edges, label, g.prevDir as VoteDirection | 0);
+-      }
++      const cappedGroups = groups
++        .map((g) => ({ ...g, edges: g.edges.filter((e) => declined.has(e)) }))
++        .filter((g) => g.edges.length > 0);
++      revertGroups(mode, label, blocks, cappedGroups);
++      // Dropped from the shield too: the server never took these, so a refresh
++      // that omits them is telling the truth, not lagging.
++      for (const g of cappedGroups) for (const e of g.edges) pendingEdges.delete(e);
+     }
+ 
+     // At the cap the server took over an existing vote instead of adding one
+@@ -295,12 +442,19 @@ export async function castVotes(params: {
+     // for us — keep the local "you voted" state — but the TOTAL didn't move, so
+     // undo the optimistic count bump (no server delta corrects it otherwise).
+     const evicted: Record<string, number> = result?.evicted ?? {};
+-    for (const g of groups) {
+-      const edges = g.edges.filter((e) => evicted[String(e)] !== undefined);
+-      if (edges.length === 0) continue;
+-      dispatchOptimistic({ mode, label, edgeIds: edges, prevDir: g.newDir, newDir: g.prevDir });
+-      for (const e of edges) {
+-        setVotes(mode, [e], label, evicted[String(e)] as VoteDirection | 0);
++    const evictedGroups = groups
++      .map((g) => ({ ...g, edges: g.edges.filter((e) => evicted[String(e)] !== undefined) }))
++      .filter((g) => g.edges.length > 0);
++    if (evictedGroups.length > 0) {
++      // Take the counts back off (the totals never moved) …
++      revertGroups(mode, label, blocks, evictedGroups);
++      // … then restore MY direction, which is real: the row is now ours.
++      for (const g of evictedGroups) {
++        for (const e of g.edges) {
++          const dir = evicted[String(e)] as VoteDirection | 0;
++          setVotes(mode, [e], label, dir);
++          pendingEdges.set(e, dir);
++        }
+       }
+     }
+ 
+@@ -319,15 +473,29 @@ export async function castVotes(params: {
+     // is what earns a code its proposal.
+     pinPendingSticker(targetDir, label);
+ 
++    // Written and accepted — no longer rollback-able, but it keeps shielding
++    // until its own delta lands (or the TTL fires): a /api/my-votes response
++    // already in flight was read BEFORE this row existed.
++    confirmPendingCast(pendingId);
+     return { ok: true, targetDir, changedEdges: changedEdges.filter((e) => !declined.has(e)) };
+   } catch (err) {
++    // A press that has already been superseded must NOT restore what it saw:
++    // the later press on the same control re-wrote these edges deliberately,
++    // and undoing it here would revert the user's newest intent instead of
++    // this cast. Its own response reconciles the server's view.
++    const superseded = !isLatestPendingCast(pendingId);
++    resolvePendingCast(pendingId);
++    if (superseded) {
++      derror("cast", "failed but superseded by a newer press — not rolling back:", err);
++      return { ok: false, targetDir, changedEdges: [] };
++    }
+     // Roll back the optimistic apply and the local store so a failed sync can't
+     // leave the heatmap or button state showing a vote the server never took.
+-    for (const g of groups) {
+-      dispatchOptimistic({ mode, label, edgeIds: g.edges, prevDir: g.newDir, newDir: g.prevDir });
+-      setVotes(mode, g.edges, label, g.prevDir as VoteDirection | 0);
+-    }
++    revertGroups(mode, label, blocks, groups);
+     derror("cast", "failed, rolled back:", err);
++    // The 401 and the server's own refusals have already said their piece;
++    // anything else (offline, 500, timeout) would otherwise revert in silence.
++    if (!announced) announceRollback("Couldn't save your vote — please try again.");
+     return { ok: false, targetDir, changedEdges: [] };
+   }
+ }
+diff --git a/client-react/src/utils/optimisticVote.test.ts b/client-react/src/utils/optimisticVote.test.ts
+new file mode 100644
+index 0000000..c24eb95
+--- /dev/null
++++ b/client-react/src/utils/optimisticVote.test.ts
+@@ -0,0 +1,375 @@
++// ==========================================================================
++// Optimistic voting — prediction, reconciliation, rollback
++// ==========================================================================
++// castVote.test.ts covers the press matrix and the wire contract. This file
++// covers the three things that make a press feel instant rather than merely
++// look instant:
++//
++//   · the predicted BLOCK move (the number the heatmap paints) matches what
++//     the server will count, so the confirming delta is a no-op and nothing
++//     visibly corrects itself;
++//   · an in-flight write survives a background refresh landing on top of it;
++//   · a failure undoes itself, says so, and cannot undo a LATER press.
++
++import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
++
++import {
++  applyBlockCounts, applyMyBlockVoteChange,
++} from "../components/GraphLayer/voteApply";
++import type { GraphData } from "../types";
++import { singletonBlocks, type TouchedBlock } from "./blockSelection";
++import { blockVoteDeltas, castVotes, planBlockVote } from "./castVote";
++import {
++  _resetPendingCasts, pendingCastsFor, settlePendingCastsForDelta,
++} from "./pendingVotes";
++import {
++  getVote, setVote, setVotes, setVoteTypeMap, reconcileEdge, resetMapVotes,
++  _resetVoteStore,
++} from "./voteStore";
++
++const MODE = "walkways";
++const LABEL = "Add bike lane";
++const OTHER = "More trees";
++
++const blk = (key: number, edges: number[]): TouchedBlock => ({ key, edges });
++
++/** Events the cast path dispatched, in order. */
++let events: { type: string; detail: unknown }[] = [];
++
++beforeEach(() => {
++  _resetVoteStore();
++  _resetPendingCasts();
++  setVoteTypeMap({ "10": LABEL, "11": OTHER });
++  events = [];
++  // Node has EventTarget/CustomEvent, so a real one gives real listener
++  // semantics; localStorage is absent, which the store's try/catch expects.
++  const win = new EventTarget() as unknown as Window & typeof globalThis;
++  for (const type of ["optimistic-vote", "vote-rejected", "map-passcode-required"]) {
++    win.addEventListener(type, (e) => {
++      events.push({ type, detail: (e as CustomEvent).detail });
++    });
++  }
++  vi.stubGlobal("window", win);
++});
++
++afterEach(() => {
++  vi.unstubAllGlobals();
++});
++
++const optimistic = () => events.filter((e) => e.type === "optimistic-vote")
++  .map((e) => e.detail as import("./castVote").OptimisticVoteDetail);
++const rejections = () => events.filter((e) => e.type === "vote-rejected")
++  .map((e) => (e.detail as { message: string }).message);
++
++function okFetch(body: Record<string, unknown> = {}) {
++  const mock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => body });
++  vi.stubGlobal("fetch", mock);
++  return mock;
++}
++
++// ── The predicted block move ────────────────────────────────────────────────
++
++describe("blockVoteDeltas — the server's dedupe rule, predicted", () => {
++  // One block, five edges; a corridor vote lands on three of them.
++  const BLOCK = blk(4, [1, 2, 3, 4, 5]);
++
++  it("counts a person ONCE per block however many of its edges they voted", () => {
++    const plan = planBlockVote({
++      mode: MODE, edgeIds: [1, 2, 3], label: LABEL, direction: 1, blocks: [BLOCK],
++    });
++    expect(plan.blockDeltas).toEqual([{ block: 4, up: 1, down: 0 }]);
++  });
++
++  it("a second press on the held direction is −1 (an unvote), never +1", () => {
++    setVotes(MODE, [1, 2, 3], LABEL, 1);
++    const plan = planBlockVote({
++      mode: MODE, edgeIds: [1, 2, 3], label: LABEL, direction: 1, blocks: [BLOCK],
++    });
++    expect(plan.targetDir).toBe(0);
++    expect(plan.blockDeltas).toEqual([{ block: 4, up: -1, down: 0 }]);
++  });
++
++  it("a flip MOVES the person across arms rather than adding to the new one", () => {
++    setVotes(MODE, [1, 2, 3], LABEL, 1);
++    const plan = planBlockVote({
++      mode: MODE, edgeIds: [1, 2, 3], label: LABEL, direction: -1, blocks: [BLOCK],
++    });
++    expect(plan.blockDeltas).toEqual([{ block: 4, up: -1, down: 1 }]);
++  });
++
++  it("extending a vote onto more edges of a block I already hold moves nothing", () => {
++    setVote(MODE, 5, LABEL, 1); // already present in the block, off-selection…
++    const plan = planBlockVote({
++      mode: MODE, edgeIds: [1, 2], label: LABEL, direction: 1, blocks: [BLOCK],
++    });
++    // …so this reads as full coverage and becomes an unvote of the whole block.
++    expect(plan.targetDir).toBe(0);
++    expect(plan.blockDeltas).toEqual([{ block: 4, up: -1, down: 0 }]);
++  });
++
++  it("a clear on one edge and a cast on another in the SAME block cancel out", () => {
++    setVote(MODE, 5, LABEL, -1); // my down vote elsewhere in the block
++    const plan = planBlockVote({
++      mode: MODE, edgeIds: [1], label: LABEL, direction: 1, blocks: [BLOCK],
++    });
++    expect(plan.castEdges).toEqual([1]);
++    expect(plan.clearEdges).toEqual([5]);
++    // The block gains an up and loses its down — one move each way, not +1/0.
++    expect(plan.blockDeltas).toEqual([{ block: 4, up: 1, down: -1 }]);
++  });
++
++  it("moves each touched block exactly once across a multi-block corridor", () => {
++    const plan = planBlockVote({
++      mode: MODE, edgeIds: [1, 2, 7, 8], label: LABEL, direction: 1,
++      blocks: [blk(4, [1, 2, 3]), blk(9, [7, 8])],
++    });
++    expect(plan.blockDeltas).toEqual([
++      { block: 4, up: 1, down: 0 }, { block: 9, up: 1, down: 0 },
++    ]);
++  });
++
++  it("predicts nothing without a block layer — a singleton has no aggregate", () => {
++    const plan = planBlockVote({
++      mode: MODE, edgeIds: [1, 2], label: LABEL, direction: 1,
++      blocks: singletonBlocks([1, 2]),
++    });
++    expect(plan.blockDeltas).toEqual([]);
++  });
++
++  it("ignores other vote types in the same block", () => {
++    setVote(MODE, 5, OTHER, 1);
++    const deltas = blockVoteDeltas(MODE, LABEL, [BLOCK], new Map([[1, 1 as const]]));
++    expect(deltas).toEqual([{ block: 4, up: 1, down: 0 }]);
++  });
++});
++
++// ── The invariant that keeps the vote from twitching ────────────────────────
++
++describe("optimistic apply vs the server's authoritative SET", () => {
++  function graph(): GraphData {
++    return {
++      block_votes: [0, 0, 0, 0, 0],
++      block_vote_types: [[], [], [], [], []],
++      block_vote_type_legend: [],
++    } as unknown as GraphData;
++  }
++
++  it("a correct prediction makes the confirming delta a NO-OP", () => {
++    const data = graph();
++    expect(applyMyBlockVoteChange(data, LABEL, [{ block: 4, up: 1, down: 0 }])).toBe(true);
++    // The server's post-write truth for that block is the same 1 up.
++    expect(applyBlockCounts(data, LABEL, { "4": [1, 0] })).toBe(false);
++    expect(data.block_vote_types![4]).toEqual([[0, 1, 0]]);
++    expect(data.block_votes![4]).toBe(1);
++  });
++
++  it("a flip predicted as a move lands as a no-op too", () => {
++    const data = graph();
++    applyMyBlockVoteChange(data, LABEL, [{ block: 4, up: 1, down: 0 }]);
++    applyMyBlockVoteChange(data, LABEL, [{ block: 4, up: -1, down: 1 }]);
++    expect(applyBlockCounts(data, LABEL, { "4": [0, 1] })).toBe(false);
++    expect(data.block_vote_types![4]).toEqual([[0, 0, 1]]);
++  });
++
++  it("a WRONG prediction is corrected by the SET rather than compounded", () => {
++    const data = graph();
++    // Somebody else behind the same IP already held this block, so the real
++    // count never moved — the blind spot the dedupe identity creates.
++    applyMyBlockVoteChange(data, LABEL, [{ block: 4, up: 1, down: 0 }]);
++    expect(applyBlockCounts(data, LABEL, { "4": [1, 0] })).toBe(false);
++    // A second, genuinely different truth still lands.
++    expect(applyBlockCounts(data, LABEL, { "4": [2, 0] })).toBe(true);
++    expect(data.block_vote_types![4]).toEqual([[0, 2, 0]]);
++  });
++
++  it("never drives a block count below zero", () => {
++    const data = graph();
++    expect(applyMyBlockVoteChange(data, LABEL, [{ block: 4, up: -1, down: 0 }])).toBe(false);
++    expect(data.block_votes![4]).toBe(0);
++  });
++
++  it("leaves blocks outside the prediction alone", () => {
++    const data = graph();
++    applyMyBlockVoteChange(data, LABEL, [{ block: 4, up: 1, down: 0 }]);
++    expect(data.block_votes).toEqual([0, 0, 0, 0, 1]);
++  });
++});
++
++// ── Surviving a background refresh ──────────────────────────────────────────
++
++describe("an in-flight cast survives a background refresh", () => {
++  it("keeps the vote when /api/my-votes lands mid-flight without it", async () => {
++    // A snapshot READ before the cast reached the database: it knows nothing
++    // about the vote, and used to delete it outright.
++    let release!: (v: unknown) => void;
++    const gate = new Promise((r) => { release = r; });
++    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
++      await gate;
++      return { ok: true, status: 200, json: async () => ({}) };
++    }));
++
++    const inFlight = castVotes({
++      mode: MODE, edgeIds: [1], label: LABEL, direction: 1, blocks: [blk(4, [1, 2])],
++    });
++    expect(getVote(MODE, 1, LABEL)).toBe(1);
++
++    resetMapVotes(MODE, {}); // the stale snapshot: "you have voted on nothing"
++    expect(getVote(MODE, 1, LABEL)).toBe(1); // …and the press stands
++
++    release(null);
++    await inFlight;
++  });
++
++  it("keeps the vote for a refresh that lands after the POST but before the echo", async () => {
++    okFetch();
++    await castVotes({
++      mode: MODE, edgeIds: [1], label: LABEL, direction: 1, blocks: [blk(4, [1, 2])],
++    });
++    // The POST is done, but a my-votes request issued BEFORE it is only now
++    // coming back — still blind to the row.
++    resetMapVotes(MODE, {});
++    expect(getVote(MODE, 1, LABEL)).toBe(1);
++  });
++
++  it("lets server truth win again once the cast's own delta has settled it", async () => {
++    okFetch();
++    await castVotes({
++      mode: MODE, edgeIds: [1], label: LABEL, direction: 1, blocks: [blk(4, [1, 2])],
++    });
++    settlePendingCastsForDelta(MODE, LABEL, [1]);
++    expect(pendingCastsFor(MODE)).toHaveLength(0);
++    // No longer shielded: a genuine retraction elsewhere now applies.
++    resetMapVotes(MODE, {});
++    expect(getVote(MODE, 1, LABEL)).toBe(0);
++  });
++
++  it("shields the pending edge from reconcileEdge but not its neighbours", async () => {
++    setVote(MODE, 2, LABEL, 1); // an older, settled vote on a sibling edge
++    okFetch();
++    await castVotes({
++      mode: MODE, edgeIds: [1], label: LABEL, direction: -1, blocks: [blk(4, [1, 2, 3])],
++    });
++    // Edge 2 was cleared by the plan and IS pending too, so both are shielded;
++    // an unrelated edge the response does report still applies.
++    reconcileEdge(MODE, 1, { [LABEL]: 1 });
++    reconcileEdge(MODE, 3, { [LABEL]: 1 });
++    expect(getVote(MODE, 1, LABEL)).toBe(-1); // in flight — untouched
++    expect(getVote(MODE, 3, LABEL)).toBe(1); // not in flight — server wins
++  });
++
++  it("re-applies exactly what the optimistic press applied, over a fresh snapshot", async () => {
++    okFetch();
++    const blocks = [blk(4, [1, 2])];
++    await castVotes({ mode: MODE, edgeIds: [1], label: LABEL, direction: 1, blocks });
++
++    // What the press did to the in-memory counts…
++    const fresh = () => ({
++      block_votes: [0, 0, 0, 0, 0], block_vote_types: [[], [], [], [], []],
++      block_vote_type_legend: [],
++    } as unknown as GraphData);
++    const pressed = fresh();
++    applyMyBlockVoteChange(pressed, LABEL, optimistic()[0].blockDeltas);
++
++    // …a background /api/graph-votes install wipes, and the re-apply restores.
++    const reinstalled = fresh();
++    for (const cast of pendingCastsFor(MODE)) {
++      applyMyBlockVoteChange(reinstalled, cast.label, cast.blockDeltas);
++    }
++    expect(reinstalled.block_votes).toEqual(pressed.block_votes);
++    expect(reinstalled.block_vote_types).toEqual(pressed.block_vote_types);
++  });
++});
++
++// ── Rollback ───────────────────────────────────────────────────────────────
++
++describe("rollback", () => {
++  it("undoes the store, the edge transitions AND the block move", async () => {
++    setVote(MODE, 2, LABEL, 1); // will be cleared by the plan
++    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
++
++    const res = await castVotes({
++      mode: MODE, edgeIds: [1], label: LABEL, direction: -1, blocks: [blk(4, [1, 2])],
++    });
++    expect(res.ok).toBe(false);
++    expect(getVote(MODE, 1, LABEL)).toBe(0); // cast undone
++    expect(getVote(MODE, 2, LABEL)).toBe(1); // clear undone
++
++    const [forward, back] = optimistic();
++    expect(forward.blockDeltas).toEqual([{ block: 4, up: -1, down: 1 }]);
++    expect(back.blockDeltas).toEqual([{ block: 4, up: 1, down: -1 }]);
++    // Applying both to a graph leaves it exactly where it started.
++    const data = {
++      block_votes: [0, 0, 0, 0, 5], block_vote_types: [[], [], [], [], [[0, 5, 0]]],
++      block_vote_type_legend: [LABEL],
++    } as unknown as GraphData;
++    applyMyBlockVoteChange(data, LABEL, forward.blockDeltas);
++    applyMyBlockVoteChange(data, LABEL, back.blockDeltas);
++    expect(data.block_votes![4]).toBe(5);
++    expect(data.block_vote_types![4]).toEqual([[0, 5, 0]]);
++  });
++
++  it("tells the person, rather than reverting in silence", async () => {
++    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
++    await castVotes({ mode: MODE, edgeIds: [1], label: LABEL, direction: 1 });
++    expect(rejections()).toHaveLength(1);
++    expect(rejections()[0]).toMatch(/couldn't save your vote/i);
++  });
++
++  it("uses the server's own reason once, not twice", async () => {
++    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
++      ok: false, status: 507, json: async () => ({ error: "Too many vote types" }),
++    }));
++    await castVotes({ mode: MODE, edgeIds: [1], label: LABEL, direction: 1 });
++    expect(rejections()).toEqual(["Too many vote types"]);
++  });
++
++  it("stays quiet behind the passcode gate, which is its own message", async () => {
++    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
++      ok: false, status: 401, json: async () => ({}),
++    }));
++    await castVotes({ mode: MODE, edgeIds: [1], label: LABEL, direction: 1 });
++    expect(rejections()).toEqual([]);
++    expect(events.some((e) => e.type === "map-passcode-required")).toBe(true);
++  });
++
++  it("does NOT undo a later press on the same control", async () => {
++    // Press 1 hangs, then fails. Press 2 lands cleanly in the meantime — its
++    // state is what the user asked for last and must survive press 1's failure.
++    let failFirst!: (e: unknown) => void;
++    const first = new Promise((_, reject) => { failFirst = reject; });
++    const fetchMock = vi.fn()
++      .mockImplementationOnce(() => first)
++      .mockResolvedValue({ ok: true, status: 200, json: async () => ({}) });
++    vi.stubGlobal("fetch", fetchMock);
++
++    const blocks = [blk(4, [1])];
++    const pending = castVotes({ mode: MODE, edgeIds: [1], label: LABEL, direction: 1, blocks });
++    expect(getVote(MODE, 1, LABEL)).toBe(1);
++
++    await castVotes({ mode: MODE, edgeIds: [1], label: LABEL, direction: -1, blocks });
++    expect(getVote(MODE, 1, LABEL)).toBe(-1); // the newer press
++
++    failFirst(new Error("timed out"));
++    await pending;
++    expect(getVote(MODE, 1, LABEL)).toBe(-1); // …still the newer press
++    expect(rejections()).toEqual([]); // and no toast about a press since replaced
++  });
++
++  it("rolls back only the edges the server declined under the cap", async () => {
++    okFetch({ capped: [2] });
++    await castVotes({
++      mode: MODE, edgeIds: [1, 2], label: LABEL, direction: 1,
++      blocks: [blk(4, [1]), blk(5, [2])],
++    });
++    expect(getVote(MODE, 1, LABEL)).toBe(1);
++    expect(getVote(MODE, 2, LABEL)).toBe(0);
++    // Block 5's optimistic +1 is taken back; block 4's stands.
++    const [forward, back] = optimistic();
++    expect(forward.blockDeltas).toEqual([
++      { block: 4, up: 1, down: 0 }, { block: 5, up: 1, down: 0 },
++    ]);
++    expect(back.blockDeltas).toEqual([{ block: 5, up: -1, down: 0 }]);
++    // …and the declined edge stops shielding, since the server never took it.
++    expect([...pendingCastsFor(MODE)[0].edges.keys()]).toEqual([1]);
++  });
++});
+diff --git a/client-react/src/utils/pendingVotes.ts b/client-react/src/utils/pendingVotes.ts
+new file mode 100644
+index 0000000..ab7d389
+--- /dev/null
++++ b/client-react/src/utils/pendingVotes.ts
+@@ -0,0 +1,166 @@
++// ==========================================================================
++// Pending optimistic casts — the ledger that keeps a fresh vote from popping
++// ==========================================================================
++// An optimistic write has to survive until the server's own echo of it lands,
++// and two background refreshes will happily walk over it in the meantime:
++//
++//   /api/my-votes   → resetMapVotes / reconcileEdge, which delete local rows
++//                     the response doesn't confirm. A snapshot READ before the
++//                     vote was persisted lacks it, so the button un-highlights.
++//   /api/graph-votes→ the SWR refresh installs a whole new count snapshot over
++//                     graphDataRef, discarding the optimistic edge/block bumps.
++//
++// Neither refresh knows which local entries are speculative, and it can't be
++// inferred from the store — a confirmed vote and an optimistic one are the same
++// row. So a cast registers here for the window between "dispatched" and "the
++// server's delta for it applied", and both refresh paths re-apply what is still
++// pending after they install server truth.
++//
++// A cast leaves the ledger when
++//   · its authoritative delta arrives (settlePendingCastsForDelta), or
++//   · it fails and rolls back, or
++//   · PENDING_CAST_TTL_MS passes — the backstop for a WebSocket that dropped
++//     the delta, so a dead socket can't shield a stale entry forever.
++
++import type { VoteDirection } from "./voteStore";
++
++/** How long a cast may shield its optimistic write without its delta arriving. */
++export const PENDING_CAST_TTL_MS = 20_000;
++
++export interface PendingTransition {
++  edges: number[];
++  prevDir: number;
++  newDir: number;
++}
++
++export interface PendingBlockDelta {
++  /** Real block id (singleton pseudo-blocks never reach the aggregate). */
++  block: number;
++  /** Move in the block's DEDUPED up/down count: -1, 0 or +1. */
++  up: number;
++  down: number;
++}
++
++export interface PendingVoteCast {
++  id: number;
++  mode: string;
++  label: string;
++  /** Edge → the direction this cast wrote. The shield the store reads. */
++  edges: Map<number, VoteDirection | 0>;
++  /** The same writes as transitions, for re-applying to fresh count arrays. */
++  groups: PendingTransition[];
++  blockDeltas: PendingBlockDelta[];
++  /** True once the POST succeeded: still shielding, no longer rollback-able. */
++  confirmed: boolean;
++}
++
++let nextId = 1;
++const casts = new Map<number, PendingVoteCast>();
++const timers = new Map<number, ReturnType<typeof setTimeout>>();
++
++/** `${mode}|${label}` — the grain a press supersedes an earlier press at. */
++function controlKey(mode: string, label: string): string {
++  return `${mode}|${label}`;
++}
++
++/**
++ * Record an optimistic cast. Returns its id; hand that back to
++ * `confirmPendingCast` / `resolvePendingCast` when it settles.
++ */
++export function registerPendingCast(
++  cast: Omit<PendingVoteCast, "id" | "confirmed">,
++): number {
++  const id = nextId++;
++  casts.set(id, { ...cast, id, confirmed: false });
++  timers.set(id, setTimeout(() => resolvePendingCast(id), PENDING_CAST_TTL_MS));
++  return id;
++}
++
++/** The POST came back OK: keep shielding, but this cast can no longer roll back. */
++export function confirmPendingCast(id: number) {
++  const cast = casts.get(id);
++  if (cast) cast.confirmed = true;
++}
++
++export function resolvePendingCast(id: number) {
++  const timer = timers.get(id);
++  if (timer !== undefined) {
++    clearTimeout(timer);
++    timers.delete(id);
++  }
++  casts.delete(id);
++}
++
++/**
++ * Is this still the newest press on its control?
++ *
++ * Rollback reads it: a press that failed AFTER a later press on the same
++ * (mode, vote type) already re-wrote the same edges must NOT restore what it
++ * saw, or it would undo the newer press instead of its own. The newer press
++ * owns the state and the server's response to it is what reconciles.
++ */
++export function isLatestPendingCast(id: number): boolean {
++  const cast = casts.get(id);
++  if (!cast) return false;
++  const key = controlKey(cast.mode, cast.label);
++  for (const other of casts.values()) {
++    if (other.id > id && controlKey(other.mode, other.label) === key) return false;
++  }
++  return true;
++}
++
++/** Every cast still in flight for `mode`, oldest first (application order). */
++export function pendingCastsFor(mode: string): PendingVoteCast[] {
++  return [...casts.values()]
++    .filter((c) => c.mode === mode)
++    .sort((a, b) => a.id - b.id);
++}
++
++/**
++ * The direction a pending cast wrote for (mode, edge, label), or undefined when
++ * nothing speculative covers it. This is what tells a server snapshot's silence
++ * about an edge apart from "the vote was retracted".
++ */
++export function pendingDirection(
++  mode: string, edgeId: number, label: string,
++): VoteDirection | 0 | undefined {
++  let found: VoteDirection | 0 | undefined;
++  for (const cast of casts.values()) {
++    if (cast.mode !== mode || cast.label !== label) continue;
++    const dir = cast.edges.get(edgeId);
++    if (dir !== undefined) found = dir; // later cast wins
++  }
++  return found;
++}
++
++/** Whether any cast is pending at all — the cheap guard on the refresh paths. */
++export function hasPendingCasts(): boolean {
++  return casts.size > 0;
++}
++
++/**
++ * Settle every pending cast this delta is the echo of: same mode + vote type,
++ * and at least one edge in common. The server publishes exactly the edges it
++ * changed, so an intersection means our optimistic guess has been replaced by
++ * authoritative counts and the shield is no longer needed.
++ */
++export function settlePendingCastsForDelta(
++  mode: string, label: string, edges: readonly number[],
++): void {
++  if (casts.size === 0 || edges.length === 0) return;
++  const changed = new Set(edges);
++  for (const cast of [...casts.values()]) {
++    if (cast.mode !== mode || cast.label !== label) continue;
++    for (const eid of cast.edges.keys()) {
++      if (changed.has(eid)) { resolvePendingCast(cast.id); break; }
++    }
++  }
++}
++
++/** Test-only: drop the whole ledger. */
++export function _resetPendingCasts() {
++  for (const timer of timers.values()) clearTimeout(timer);
++  timers.clear();
++  casts.clear();
++  nextId = 1;
++}
+diff --git a/client-react/src/utils/voteStore.ts b/client-react/src/utils/voteStore.ts
+index 2e95649..fbed4da 100644
+--- a/client-react/src/utils/voteStore.ts
++++ b/client-react/src/utils/voteStore.ts
+@@ -18,6 +18,7 @@
+ // reconcileEdge folds its truth in.
+ 
+ import { dlog } from "./debugLog";
++import { pendingCastsFor, pendingDirection } from "./pendingVotes";
+ import { packVoteKey, unpackVoteKey, modeToInt } from "./voteKey";
+ 
+ export type VoteDirection = 1 | -1;
+@@ -339,6 +340,10 @@ export function myVotesInBlocks(
+  * Reconcile against authoritative server state for one edge. `serverLabels`
+  * maps label → direction; the server wins for the labels it reports. Local-only
+  * entries (server lagging a fresh optimistic vote) are left untouched.
++ *
++ * A (edge, label) an in-flight cast is holding is skipped outright: the
++ * response was READ before that cast reached the database, so applying it would
++ * roll a vote back on screen a beat before its own echo puts it back.
+  */
+ export function reconcileEdge(
+   mode: string,
+@@ -347,7 +352,9 @@ export function reconcileEdge(
+ ) {
+   let changed = false;
+   for (const [label, dir] of Object.entries(serverLabels)) {
+-    if (dir === 1 || dir === -1) changed = writeVote(mode, edgeId, label, dir) || changed;
++    if (dir !== 1 && dir !== -1) continue;
++    if (pendingDirection(mode, edgeId, label) !== undefined) continue;
++    changed = writeVote(mode, edgeId, label, dir) || changed;
+   }
+   if (changed) {
+     persistById();
+@@ -388,8 +395,6 @@ export function resetMapVotes(
+       dropped++;
+     }
+   }
+-  dlog("store", `resetMapVotes(${mode}): dropped ${dropped} local entries, `
+-    + `applying ${Object.keys(serverVotes).length} server edges`);
+   for (const [eidStr, labels] of Object.entries(serverVotes)) {
+     const eid = Number(eidStr);
+     for (const [label, dir] of Object.entries(labels)) {
+@@ -398,6 +403,20 @@ export function resetMapVotes(
+       }
+     }
+   }
++  // Then put back every vote still in flight. This snapshot was read before
++  // those casts were persisted, so its silence about them is lag, not a
++  // retraction — replaying them last is what stops a fresh press from
++  // visibly popping off and back on when a refresh lands mid-cast.
++  let restored = 0;
++  for (const cast of pendingCastsFor(mode)) {
++    for (const [eid, dir] of cast.edges) {
++      changed = writeVote(mode, eid, cast.label, dir) || changed;
++      restored++;
++    }
++  }
++  dlog("store", `resetMapVotes(${mode}): dropped ${dropped} local entries, `
++    + `applying ${Object.keys(serverVotes).length} server edges`
++    + (restored > 0 ? `, restoring ${restored} in-flight` : ""));
+   if (changed) {
+     persistById();
+     persistByLabel();
+diff --git a/perf/vcast-verify.mjs b/perf/vcast-verify.mjs
+new file mode 100644
+index 0000000..b958215
+--- /dev/null
++++ b/perf/vcast-verify.mjs
+@@ -0,0 +1,66 @@
++/**
++ * Correctness check for the per-type corridor invalidation: after a press, the
++ * incrementally-recomputed corridor list must equal what a cold load (which
++ * clusters every type from scratch) produces in the SAME vote state.
++ */
++import { chromium } from "playwright";
++
++const MAP = "nyc-walkways";
++const LABEL = "Widen sidewalk";
++const W = "40.712800,-74.006000;40.718000,-74.002000";
++const URL = `http://localhost:3000/m/${MAP}?tab=vcastv&w=${encodeURIComponent(W)}`
++  + `&vt=${encodeURIComponent(LABEL)}#15/40.7154/-74.0040`;
++
++const INIT = () => {
++  window.__lists = [];
++  const origLog = console.log.bind(console);
++  console.log = function (...a) {
++    if (a[0] === "[proposals]" && typeof a[1] === "string" && a[1].startsWith("recompute:")) {
++      window.__lists.push({ note: a[1], list: a[2] });
++    }
++    return origLog(...a);
++  };
++};
++
++async function open(browser) {
++  const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
++  await page.addInitScript(INIT);
++  await page.goto(URL, { waitUntil: "domcontentloaded" });
++  await page.waitForFunction(
++    () => window.cityedit && window.cityedit.dumpState().blockHeatNonzero > 0,
++    null, { timeout: 90000 });
++  await page.waitForSelector("button.btn-cast-up", { timeout: 30000 });
++  await page.waitForTimeout(6000);
++  return page;
++}
++
++const browser = await chromium.launch({ headless: true, args: ["--use-gl=angle"] });
++
++// Session A: cold load, then a press → the INCREMENTAL list.
++const a = await open(browser);
++await a.evaluate(() => { window.__lists.length = 0; });
++await a.evaluate(() => document.querySelector("button.btn-cast-up")
++  .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window, button: 0 })));
++await a.waitForTimeout(6000);
++const incremental = await a.evaluate(() => window.__lists.at(-1));
++await a.close();
++
++// Session B: a fresh load in the state that press left behind → the FULL list.
++const b = await open(browser);
++const full = await b.evaluate(() => window.__lists.at(-1));
++
++// Put the map back where it was so the run is repeatable.
++await b.evaluate(() => document.querySelector("button.btn-cast-up")
++  .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window, button: 0 })));
++await b.waitForTimeout(3000);
++await b.close();
++await browser.close();
++
++console.log("incremental:", incremental?.note);
++console.log("full       :", full?.note);
++console.log("lists match:", JSON.stringify(incremental?.list) === JSON.stringify(full?.list));
++if (JSON.stringify(incremental?.list) !== JSON.stringify(full?.list)) {
++  console.log("  incremental:", JSON.stringify(incremental?.list));
++  console.log("  full       :", JSON.stringify(full?.list));
++  process.exitCode = 1;
++}
+diff --git a/perf/vcast.mjs b/perf/vcast.mjs
+new file mode 100644
+index 0000000..2e55e0d
+--- /dev/null
++++ b/perf/vcast.mjs
+@@ -0,0 +1,233 @@
++/**
++ * Vote-cast latency harness — the sibling of vtoggle.mjs.
++ *
++ * Answers one question: when you press − or + in the top bar, how long until
++ * the screen actually changes, and which stage owns the wait?
++ *
++ * Reports per press:
++ *   handlerMs    : mousedown → the synchronous click handler returning
++ *   castStateMs  : mousedown → the button's red/blue `is-cast` class flipping
++ *   heatDeltaMs  : mousedown → a `city-edit:block-votes` broadcast that
++ *                  actually MOVES a block's differential (the map changing)
++ *   glDrawMs     : mousedown → the first WebGL draw after that broadcast
++ *   postMs       : mousedown → POST /api/vote resolving
++ *   wsMs         : mousedown → the vote delta arriving over the WebSocket
++ *   longTasks    : main-thread tasks > 50ms in the window
++ *
++ * Usage:
++ *   node vcast.mjs --map nyc-walkways --w "40.7128,-74.0060;40.7180,-74.0020" \
++ *                  --label "Widen sidewalk"
++ */
++import { chromium } from "playwright";
++
++const args = Object.fromEntries(
++  process.argv.slice(2).reduce((acc, a, i, arr) => {
++    if (a.startsWith("--")) acc.push([a.slice(2), arr[i + 1] ?? "true"]);
++    return acc;
++  }, [])
++);
++const URL_BASE = args.url ?? "http://localhost:3000";
++const MAP = args.map ?? "nyc-walkways";
++const W = args.w ?? "40.712800,-74.006000;40.718000,-74.002000";
++const LABEL = args.label ?? "Widen sidewalk";
++const VIEW = args.view ?? "40.7154,-74.0040,15";
++const WINDOW_MS = parseInt(args.window ?? "6000", 10);
++const PRESSES = (args.presses ?? "up,up,down,down").split(",");
++const LATENCY = parseInt(args.latency ?? "0", 10);
++const GAP_MS = parseInt(args.gap ?? String(WINDOW_MS), 10);
++const [LAT, LNG, Z] = VIEW.split(",").map(Number);
++
++const INIT = () => {
++  const P = { frames: [], marks: [], tasks: [], t0: 0 };
++  window.__vc = P;
++  P.mark = (label, extra) =>
++    P.marks.push({ t: +(performance.now() - P.t0).toFixed(1), label, ...extra });
++
++  let last = performance.now();
++  const tick = () => {
++    const now = performance.now();
++    P.frames.push({ t: +(now - P.t0).toFixed(1), dt: +(now - last).toFixed(1) });
++    if (P.frames.length > 4000) P.frames.shift();
++    last = now;
++    requestAnimationFrame(tick);
++  };
++  requestAnimationFrame(tick);
++
++  try {
++    new PerformanceObserver((l) => {
++      for (const e of l.getEntries())
++        P.tasks.push({ t: +(e.startTime - P.t0).toFixed(1), ms: +e.duration.toFixed(1) });
++    }).observe({ entryTypes: ["longtask"] });
++  } catch { /* unsupported */ }
++
++  // WebGL draws: MapLibre renders only when dirty, so a draw IS a repaint.
++  const origGetContext = HTMLCanvasElement.prototype.getContext;
++  HTMLCanvasElement.prototype.getContext = function (type, ...rest) {
++    const ctx = origGetContext.call(this, type, ...rest);
++    if (ctx && /webgl/.test(String(type)) && !ctx.__vcHooked) {
++      ctx.__vcHooked = true;
++      const origClear = ctx.clear.bind(ctx);
++      let lastGl = -1;
++      ctx.clear = function (mask) {
++        const t = performance.now();
++        if (t - lastGl > 4) { lastGl = t; P.mark("gl draw"); }
++        return origClear(mask);
++      };
++    }
++    return ctx;
++  };
++
++  // Block heat: record only broadcasts whose differential actually MOVED.
++  let prevDiff = null;
++  window.addEventListener("city-edit:block-votes", (e) => {
++    const d = e.detail.blockDiff;
++    let changed = 0;
++    if (prevDiff && prevDiff.length === d.length) {
++      for (let i = 0; i < d.length; i++) if (d[i] !== prevDiff[i]) changed++;
++    }
++    P.mark("block-votes", { changed, source: e.detail.source });
++    prevDiff = d.slice();
++  });
++
++  // POST /api/vote round trip.
++  const origFetch = window.fetch.bind(window);
++  window.fetch = function (input, init) {
++    const url = String(typeof input === "string" ? input : input?.url ?? "");
++    const isVote = /\/api\/vote(\?|$)/.test(url);
++    const isVotes = /graph-votes|my-votes|route-votes/.test(url);
++    if (!isVote && !isVotes) return origFetch(input, init);
++    const a = performance.now();
++    if (isVote) P.mark("POST /vote sent");
++    return origFetch(input, init).then((r) => {
++      P.mark((isVote ? "POST /vote done " : "fetch ") + url.replace(/^.*\/api\//, ""),
++        { ms: +(performance.now() - a).toFixed(1), status: r.status });
++      return r;
++    });
++  };
++
++  // WebSocket vote deltas.
++  const OrigWS = window.WebSocket;
++  window.WebSocket = function (...a) {
++    const ws = new OrigWS(...a);
++    ws.addEventListener("message", () => P.mark("ws message"));
++    return ws;
++  };
++  window.WebSocket.prototype = OrigWS.prototype;
++
++  // The button's cast-state class, watched from the moment it exists.
++  P.watchCast = () => {
++    if (P.castObserver) P.castObserver.disconnect();
++    const obs = new MutationObserver((recs) => {
++      for (const r of recs) {
++        const el = r.target;
++        if (el.classList && el.classList.contains("btn-cast")) {
++          P.mark("cast-class", {
++            btn: el.className.includes("btn-cast-up") ? "up" : "down",
++            isCast: el.classList.contains("is-cast"),
++          });
++        }
++      }
++    });
++    for (const b of document.querySelectorAll("button.btn-cast")) {
++      obs.observe(b, { attributes: true, attributeFilter: ["class"] });
++    }
++    P.castObserver = obs;
++  };
++
++  const origLog = console.log.bind(console);
++  console.log = function (...a) {
++    if (typeof a[0] === "string" && /^\[(blocks|proposals|cast|votes|store)\]/.test(a[0])) {
++      P.mark("log " + [a[0], a[1], a[2]].join(" ").slice(0, 130));
++    }
++    return origLog(...a);
++  };
++
++  P.reset = () => {
++    P.frames.length = 0; P.marks.length = 0; P.tasks.length = 0;
++    P.t0 = performance.now();
++  };
++};
++
++function summarize(P, windowMs) {
++  const at = (pred) => { const m = P.marks.find(pred); return m ? m.t : null; };
++  const syncEnd = at((m) => m.label === "--sync end--");
++  const castClass = P.marks.find((m) => m.label === "cast-class");
++  const heat = P.marks.find((m) => m.label === "block-votes" && m.changed > 0);
++  const glAfterHeat = heat
++    ? P.marks.find((m) => m.label === "gl draw" && m.t >= heat.t) : null;
++  const post = P.marks.find((m) => m.label.startsWith("POST /vote done"));
++  return {
++    handlerMs: syncEnd,
++    castStateMs: castClass ? castClass.t : null,
++    castState: castClass ? castClass.isCast : null,
++    heatDeltaMs: heat ? heat.t : null,
++    heatBlocksChanged: heat ? heat.changed : 0,
++    heatSource: heat ? heat.source : null,
++    glDrawMs: glAfterHeat ? glAfterHeat.t : null,
++    postMs: post ? post.t : null,
++    postStatus: post ? post.status : null,
++    wsMs: at((m) => m.label === "ws message"),
++    longTasks: P.tasks.filter((t) => t.ms > 50 && t.t <= windowMs),
++    marks: P.marks.filter((m) => m.label !== "gl draw"),
++  };
++}
++
++const browser = await chromium.launch({
++  headless: args.headed !== "true",
++  args: ["--use-gl=angle", "--enable-gpu"],
++});
++const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
++await page.addInitScript(INIT);
++const url = `${URL_BASE}/m/${MAP}?tab=vcast&w=${encodeURIComponent(W)}`
++  + `&vt=${encodeURIComponent(LABEL)}#${Z}/${LAT}/${LNG}`;
++await page.goto(url, { waitUntil: "domcontentloaded" });
++
++await page.waitForFunction(
++  () => window.cityedit && window.cityedit.dumpState().blockHeatNonzero > 0,
++  null, { timeout: 90000 },
++);
++await page.waitForSelector("button.btn-cast-up", { timeout: 30000 });
++await page.waitForTimeout(5000); // let the route resolve + proposals settle
++
++// Emulate a real network AFTER the load, so only the vote round trips pay it.
++if (LATENCY > 0) {
++  const cdp = await page.context().newCDPSession(page);
++  await cdp.send("Network.enable");
++  await cdp.send("Network.emulateNetworkConditions", {
++    offline: false, latency: LATENCY,
++    downloadThroughput: 5_000_000 / 8, uploadThroughput: 2_000_000 / 8,
++  });
++}
++
++const results = [];
++for (const press of PRESSES) {
++  const ok = await page.evaluate((dir) => {
++    const P = window.__vc;
++    const btn = document.querySelector(`button.btn-cast-${dir}`);
++    if (!btn) return false;
++    P.reset();
++    P.watchCast();
++    P.mark("--press--", { wasCast: btn.classList.contains("is-cast") });
++    btn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window, button: 0 }));
++    btn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window, button: 0 }));
++    btn.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window, button: 0 }));
++    P.mark("--sync end--");
++    return true;
++  }, press);
++  if (!ok) { results.push({ press, error: "button not found" }); continue; }
++  await page.waitForTimeout(GAP_MS);
++  const P = await page.evaluate(() => ({
++    frames: window.__vc.frames, marks: window.__vc.marks, tasks: window.__vc.tasks,
++  }));
++  results.push({ press, ...summarize(P, WINDOW_MS) });
++}
++
++const table = results.map((r) => ({
++  press: r.press, handlerMs: r.handlerMs, castStateMs: r.castStateMs,
++  heatDeltaMs: r.heatDeltaMs, glDrawMs: r.glDrawMs, postMs: r.postMs, wsMs: r.wsMs,
++  blockedMs: (r.longTasks ?? []).reduce((s2, t) => s2 + t.ms, 0),
++}));
++console.error("\n== " + MAP + " latency=" + LATENCY + "ms gap=" + GAP_MS + "ms ==");
++console.table(table);
++console.log(JSON.stringify({ map: MAP, label: LABEL, latency: LATENCY, results }, null, 1));
++await browser.close();

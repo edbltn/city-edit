@@ -29,6 +29,24 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-18-optimistic-vote.html">
+    <div class="date">2026-08-18</div>
+    <h2>Voting that answers in the click&rsquo;s own tick</h2>
+    <p>Pressing &minus; or + took about a second to show anything, and it was never the request &mdash;
+    the POST answered in ~20ms. It was two other things. The map waited for the <strong>WebSocket echo
+    of its own vote</strong>, because the optimistic apply moved the EDGE counts while a block-layer
+    map paints the BLOCK ones; and every press then forced a full re-cluster of all twelve vote types,
+    ~1.1s of long tasks landing right on top of it. So the press now predicts the <strong>deduped
+    block move</strong> &mdash; a presence boundary, not a sum, so a second press is 0 and a flip
+    moves one vote across arms &mdash; exactly enough that the server&rsquo;s confirmation lands as a
+    literal no-op rather than a visible correction. An explicit <strong>in-flight ledger</strong>
+    stops a background refresh walking over a vote that has not reached the server yet, a failure
+    undoes itself and says so without being able to race the next click, and a cast invalidates one
+    vote type&rsquo;s corridors instead of all of them. Click &rarr; heat:
+    <strong>53&ndash;105ms &rarr; 2.3&ndash;6.2ms</strong>; main thread blocked after a press:
+    <strong>~1,120ms &rarr; ~55ms</strong>.</p>
+  </a>
+
   <a class="entry" href="./2026-08-17-first-use-onboarding.html">
     <div class="date">2026-08-17</div>
     <h2>First use: a wall of sentences, and the map as the second half of one</h2>
