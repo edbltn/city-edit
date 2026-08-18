@@ -15,6 +15,10 @@
   --font-size-sm-mobile: 14px;
   --font-size-md: 18px;
   --font-size-base: 19px;
+  /* The display step. Additive: it names a size the app was already using as a
+     literal in three places (the landing tagline and card names, the propose
+     modal's close glyph) rather than changing any existing step. */
+  --font-size-lg: 22px;
 
   /* One knob for ALL topbar control text — mode/vote selectors, their dropdown
      options (label, subtitle, vote count, search field, empty state) and the

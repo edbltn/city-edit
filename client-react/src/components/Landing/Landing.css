@@ -1,6 +1,69 @@
-/* Landing page — theme picker shown on cityedit.org */
+/* Landing page — theme picker shown on cityedit.org
+
+   Two things this sheet owes the rest of the app:
+
+   1. ONE TYPE SCALE, AND IT MOVES. Everything here reads a `--landing-*` step
+      declared on `.landing` below, and every step resolves to a token from the
+      scale in globals.css. Nothing in this file writes a literal font size.
+      That indirection is the whole point: the landing page is not the topbar,
+      so it cannot use `--control-font-size*`, but the `--font-size-*` scale it
+      IS allowed to use is frozen across breakpoints. Sizing elements from that
+      scale directly is what left this page holding still at 22px/17px while
+      the one shared component on it (NavRail, which correctly rides
+      `--control-font-size`) shrank to 10px underneath — a 2.2x gap at 390px
+      that does not exist at 1440px. The re-declaration in the narrow block at
+      the bottom is what makes the page shrink as a unit instead.
+
+   2. THE APP'S SURFACE LANGUAGE, MINUS THE MAP. The map chrome reads as
+      floating because its plates are translucent over tiles, blurred, and
+      ringed. None of that transfers to a page with no map behind it: a blur
+      over flat paper does nothing, and a black drop shadow on a near-black
+      page has nothing to darken. What DOES transfer — and what the float
+      sheet's own reasoning says is doing the work on a dark basemap — is the
+      edge, and a fill lifted off --paper toward --ink so a surface reads as
+      sitting ABOVE the page rather than being a region cut out of it. Both are
+      pure --paper/--ink derivations, so they re-tint with the theme. See the
+      report for the plate primitives that are still locked inside
+      TopBarFloat.css and should be promoted to globals.css. */
 
 .landing {
+  /* ---- Type scale, landing-local ------------------------------------------
+     Four steps, each an alias for a globals.css token. Re-pointed as a group
+     at the narrow breakpoint, so the ratios between them survive the shrink
+     (22/19/17/14 -> 19/17/14/13) instead of one element moving alone. */
+  --landing-display: var(--font-size-lg);   /* the tagline — the page's hero */
+  --landing-title: var(--font-size-base);   /* map card names */
+  --landing-body: var(--font-size-sm);      /* map card taglines */
+  --landing-ui: var(--font-size-xs);        /* search, footer, tooltip */
+
+  /* The nav rail is shared with the map topbar, so it rides
+     `--control-font-size` — the correct knob for it, and NOT something to
+     override with a frozen --font-size-* on the element. Re-pointing the knob
+     itself, scoped to this subtree, is how the rail joins the landing's scale
+     without touching the topbar's. It is re-pointed for the same reason
+     .landing-nav already keeps Donate's label at every width below: the rail
+     compacts on mobile because the *map* header is fighting for room at that
+     size, and this page is not. (Safe to scope: nothing else rendered under
+     .landing reads this token — the propose modal sizes itself entirely from
+     the --font-size-* scale.) */
+  --control-font-size: var(--landing-ui);
+
+  /* ---- Surfaces -----------------------------------------------------------
+     One step up from the page, so a card or a field reads as an object resting
+     on the paper. Derived rather than picked: this is what the #1a1a1a that
+     used to be hardcoded here actually was, but stated in terms that move with
+     the theme. */
+  --landing-surface: color-mix(in srgb, var(--paper) 94%, var(--ink));
+
+  /* Quieting is done with COLOUR, not `opacity` — the house rule from the
+     float chrome's kicker. Opacity fades an element's border along with its
+     text; these keep every point of contrast the type has. */
+  --landing-quiet: color-mix(in srgb, var(--ink) 55%, transparent);
+  --landing-quieter: color-mix(in srgb, var(--ink) 42%, transparent);
+
+  /* Icon box. The add tile's mark and a map's symbol are peers and share it. */
+  --landing-symbol: 56px;
+
   height: 100vh;
   /* dvh tracks the *visible* viewport as mobile browser chrome shows/hides, so
      the footer isn't stuck below the fold and the page scrolls to the bottom. */
@@ -14,20 +77,28 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Same measure and gutter as the toolbar and the grid below. The header used to
+   be unconstrained, which put the nav rail against the far viewport edge with
+   nothing on the page to line up with — the one thing the floating chrome is
+   strict about is that every row starts and ends at the same gutter. */
 .landing-header {
   position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-3);
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
   padding: 64px var(--space-5) var(--space-5);
+  box-sizing: border-box;
   text-align: center;
-  border-bottom: 1px solid var(--hairline);
 }
 
 /* Pinned to the corner rather than sitting in the column flow: the header's job
    is the logo + tagline, and the meta links should stay out of that axis. The
-   top padding above is what keeps it clear of the logo. */
+   top padding above is what keeps it clear of the logo. Now that the header
+   carries the shared measure, `right` lands on the grid's right gutter. */
 .landing-nav {
   position: absolute;
   top: var(--space-4);
@@ -64,7 +135,7 @@
 
 .landing-tagline {
   margin: 0;
-  font-size: 22px;
+  font-size: var(--landing-display);
   color: var(--ink);
 }
 
@@ -93,34 +164,39 @@
   left: var(--space-3);
   width: 16px;
   height: 16px;
-  color: var(--ink);
-  opacity: 0.45;
+  color: var(--landing-quieter);
   pointer-events: none;
 }
 
+/* A control, so it stands at the app's control height beside the nav rail
+   rather than at whatever height its own padding happened to make it. */
 .landing-search {
   width: 100%;
-  padding: var(--space-3) var(--space-3) var(--space-3) 38px;
+  height: var(--control-height);
+  box-sizing: border-box;
+  padding: 0 var(--space-3) 0 38px;
   font-family: var(--font-main);
-  font-size: var(--font-size-xs);
+  font-size: var(--landing-ui);
   color: var(--ink);
-  background: rgba(212, 212, 212, 0.04);
+  background: var(--landing-surface);
   border: 1px solid var(--hairline);
-  border-radius: 0;
+  border-radius: var(--radius-sm);
   text-overflow: ellipsis;
 }
 
 .landing-search::placeholder {
-  color: var(--ink);
-  opacity: 0.4;
+  color: var(--landing-quieter);
+  opacity: 1;   /* Firefox dims placeholders by default; the colour above is the knob */
 }
 
 .landing-search:focus {
   outline: none;
-  border-color: #fff;
+  border-color: var(--ink-strong);
 }
 
-/* Clear button — matches the app's other × controls (e.g. .propose-close). */
+/* Clear button — an icon, drawn on the same 1.5px stroke grid as the loupe
+   beside it and the nav rail's glyphs, rather than a typographic × sized off
+   the scale. */
 .landing-search-clear {
   position: absolute;
   right: var(--space-2);
@@ -129,18 +205,22 @@
   justify-content: center;
   width: 24px;
   height: 24px;
+  padding: 0;
   border: none;
   background: none;
-  font-family: var(--font-main);
-  font-size: 20px;
-  line-height: 1;
-  color: var(--ink);
-  opacity: 0.6;
+  color: var(--landing-quiet);
   cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.landing-search-clear svg {
+  display: block;
+  width: 14px;
+  height: 14px;
 }
 
 .landing-search-clear:hover {
-  opacity: 1;
+  color: var(--ink-strong);
 }
 
 /* Full-placeholder tooltip, shown only when the placeholder is clipped (narrow
@@ -152,7 +232,7 @@
   top: calc(100% + 6px);
   z-index: 20;
   padding: 4px 8px;
-  font-size: var(--font-size-xs);
+  font-size: var(--landing-ui);
   color: var(--ink);
   background: var(--paper);
   border: 1px solid var(--ink);
@@ -186,7 +266,7 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background-color: #1a1a1a;
+  background-color: var(--landing-surface);
   background-size: cover;
   background-position: center;
   /* Size the image to the full border box (so there's no sliver of gap at the
@@ -195,11 +275,14 @@
   background-origin: border-box;
   background-clip: padding-box;
   box-sizing: border-box;
+  /* Not --ink: the card's text sits on map imagery under a black scrim, so it
+     is white in either theme for the same reason the scrim is black. */
   color: #fff;
   text-decoration: none;
   cursor: pointer;
   aspect-ratio: 3 / 4;
   border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
   transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
 }
 
@@ -219,11 +302,16 @@
 
 .landing-card:hover {
   border-color: var(--ink);
-  background-color: var(--hover-bg);
+  background-color: var(--hover-bg-strong);
 }
 
 .landing-card:active {
   transform: translateY(1px);
+}
+
+.landing-card:focus-visible {
+  outline: 1px solid var(--ink-strong);
+  outline-offset: -3px;
 }
 
 /* Loading skeleton — placeholder tiles shown while /api/maps is in flight, so a
@@ -232,7 +320,6 @@
 .landing-card-skeleton {
   pointer-events: none;
   cursor: default;
-  background-color: #1a1a1a;
   background-image: linear-gradient(
     100deg,
     rgba(255, 255, 255, 0.04) 30%,
@@ -274,15 +361,20 @@
   display: none;
 }
 
-.landing-card-plus {
-  width: 56px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 64px;
-  line-height: 1;
-  font-weight: 400;
+/* The mark and a map's symbol are the same object in the same box. It used to
+   be a 64px typographic "+", which next to the thin-stroke symbols read as a
+   different weight of thing entirely; as an icon on the app's 1.5px stroke grid
+   it sits with them, and the last literal font size leaves this file with it. */
+.landing-card-symbol,
+.landing-card-mark {
+  width: var(--landing-symbol);
+  height: var(--landing-symbol);
+  display: block;
+}
+
+.landing-card-symbol {
+  object-fit: contain;
+  image-rendering: auto;
 }
 
 .landing-card-content {
@@ -294,26 +386,25 @@
   padding: var(--space-5);
 }
 
-.landing-card-symbol {
-  width: 56px;
-  height: 56px;
-  object-fit: contain;
-  image-rendering: auto;
-}
-
+/* One step under the tagline, not level with it: the hero says what the site
+   is, a card says which map. They were both 22px, which read as two headlines
+   arguing — worst at 768px, where a 22px name in a ~220px column wrapped. */
 .landing-card-name {
-  font-size: 22px;
+  font-size: var(--landing-title);
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
 }
 
 .landing-card-tagline {
   flex: 1;
-  font-size: var(--font-size-sm);
+  font-size: var(--landing-body);
   line-height: 1.4;
   opacity: 0.88;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
+/* No top rule. A full-width hairline across the page is the banner idiom — a
+   lid edge — and it is the thing the floating chrome took off. The footer is
+   quiet enough to be the end of the page without one. */
 .landing-footer {
   display: flex;
   flex-wrap: wrap;
@@ -321,13 +412,25 @@
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-4) var(--space-5);
-  border-top: 1px solid var(--hairline);
   text-align: center;
-  font-size: var(--font-size-xs);
-  opacity: 0.5;
+  font-size: var(--landing-ui);
+  color: var(--landing-quiet);
 }
 
 @media (max-width: 720px) {
+  /* The whole page steps down together — one notch per role, ratios intact.
+     This block is the reason the page has a local scale at all: the
+     --font-size-* tokens these point at are deliberately frozen across
+     breakpoints, so re-pointing the aliases is the only way a non-topbar
+     surface can shrink as a unit. */
+  .landing {
+    --landing-display: var(--font-size-base);
+    --landing-title: var(--font-size-sm);
+    --landing-body: var(--font-size-xs);
+    --landing-ui: var(--font-size-2xs);
+    --landing-symbol: 48px;
+  }
+
   .landing-header {
     padding: 40px var(--space-4) var(--space-4);
   }
@@ -358,5 +461,13 @@
     aspect-ratio: auto;
     /* keep the preview image visible in the single-column mobile layout */
     min-height: 168px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-card,
+  .landing-search-clear,
+  .landing-search-tip {
+    transition: none;
   }
 }

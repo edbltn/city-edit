@@ -179,7 +179,10 @@ export function Landing() {
               aria-label="Clear search"
               type="button"
             >
-              ×
+              <svg viewBox="0 0 16 16" aria-hidden focusable="false">
+                <line x1="4" y1="4" x2="12" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                <line x1="12" y1="4" x2="4" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
             </button>
           )}
           {placeholderClipped && !query && (
@@ -192,7 +195,14 @@ export function Landing() {
         {/* Propose-a-map tile — always first (top-left). */}
         <button className="landing-card landing-card-add" onClick={() => setProposeOpen(true)}>
           <div className="landing-card-content">
-            <div className="landing-card-plus" aria-hidden>+</div>
+            {/* Stroke 1 in a 24 box, not the loupe's 1.5 in a 16 box: this mark
+                is drawn at --landing-symbol (56/48px), so the viewBox scales the
+                stroke up with it. 1 lands it at ~2px — the weight the map
+                symbols beside it are drawn at. */}
+            <svg className="landing-card-mark" viewBox="0 0 24 24" aria-hidden focusable="false">
+              <line x1="12" y1="3" x2="12" y2="21" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+              <line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
+            </svg>
             <div className="landing-card-name">Propose a Map</div>
             <div className="landing-card-tagline">Pick a city and vote types.</div>
           </div>
