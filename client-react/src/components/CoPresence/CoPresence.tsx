@@ -27,26 +27,23 @@ import "./CoPresence.css";
  *  a guess: the real room is 2 or more, never fewer. */
 const MIN_TOTAL = 2;
 
-/** Past this many marks the row stops being countable at a glance, which is
- *  the entire reason it is drawn as marks. Beyond it, the marks become a
- *  texture and the numeral carries the count. */
-const MAX_MARKS = 12;
 
 /**
- * Who else has this map open, drawn rather than tallied.
+ * Who else has this map open.
  *
  * The thing being built here is common knowledge — not "how popular is this
  * map" but "we are looking at this together, and we both know it". That only
- * works if the reader believes the number, and a number nobody can check is a
- * number people quietly discount. So the count is drawn as one mark per
- * person: you can count the marks and see that the numeral is not lying, and
- * the mark that is filled is YOU, which makes visible — without a footnote —
- * that the total includes the person reading it. A count that had quietly
- * excluded you, or padded itself, could not survive being drawn.
+ * works if the reader believes the number, so everything about how it is
+ * COUNTED is arranged to make it hard to doubt: the identity key under-counts
+ * on purpose (presence.py), a hidden tab leaves the room, and a lost socket
+ * shows nothing rather than the last number it heard.
  *
- * The marks are hollow squares in the app's own hand: the same bare 1.5px
- * stroked box the mobile wordmark builds its letters from. Nothing new is
- * introduced to say something quiet.
+ * An earlier version also drew one square per person, filled for you, so the
+ * numeral could be checked against something. That is gone by request. Worth
+ * knowing what went with it: the count is no longer verifiable at a glance,
+ * so it now leans entirely on the wording and on the note in `title`. The
+ * wording is doing real work — "other viewers" says the total excludes you,
+ * which the filled square used to say without words.
  *
  * What the number actually means is one hover away rather than hidden: people
  * are counted per network connection and only while their tab is in the
@@ -63,8 +60,6 @@ export function CoPresence() {
   if (viewerCount < MIN_TOTAL) return null;
 
   const others = viewerCount - 1;
-  const marks = Math.min(viewerCount, MAX_MARKS);
-  const overflow = viewerCount - marks;
 
   return (
     <aside
@@ -76,18 +71,6 @@ export function CoPresence() {
         + "more likely to be low than high."
       }
     >
-      <span className="copresence-marks" aria-hidden="true">
-        {Array.from({ length: marks }, (_, i) => (
-          <span
-            key={i}
-            className={`copresence-mark${i === 0 ? " is-you" : ""}`}
-            // Stagger the row in from your own mark outwards, so the
-            // animation reads as "and then these people", which is what it is.
-            style={{ animationDelay: `${i * 45}ms` }}
-          />
-        ))}
-        {overflow > 0 && <span className="copresence-overflow">+{overflow}</span>}
-      </span>
       <AudienceIcon others={others} />
       <span className="copresence-text">
         You’re looking at this with {others} other{" "}

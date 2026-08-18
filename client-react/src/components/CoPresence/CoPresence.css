@@ -55,42 +55,12 @@ body:has(.event-banner) .copresence {
   --copresence-lift: calc(38px + 56px);   /* history + notice (24px offset + 40px tall) */
 }
 
-/* The audience glyph sits between the marks and the sentence, in the same ink
-   as the text so it reads as part of the phrase rather than as a badge. It is
-   inline SVG on currentColor precisely so it tracks that ink through the
-   light/dark basemap flip — an <img> could not. */
+/* The audience glyph leads the sentence, in the same ink as the text so it
+   reads as part of the phrase rather than as a badge. It is inline SVG on
+   currentColor precisely so it tracks that ink through the light/dark basemap
+   flip — an <img> could not. */
 .copresence svg {
   opacity: 0.85;
-}
-
-.copresence-marks {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-
-/* One hollow box per person, in the wordmark's own hand: a bare 1.5px stroke,
-   no fill, no radius. Drawn rather than tallied so the row can be counted
-   against the sentence — a number you can check is a number you can believe. */
-.copresence-mark {
-  width: 7px;
-  height: 7px;
-  border: 1.5px solid color-mix(in srgb, var(--ink) 55%, transparent);
-  animation: copresence-mark-in 260ms ease-out both;
-}
-
-/* You. Filled, and first in the row, so the sentence's "other" needs no
-   explaining and the total can't be read as excluding the reader. */
-.copresence-mark.is-you {
-  background: var(--ink);
-  border-color: var(--ink);
-}
-
-.copresence-overflow {
-  margin-left: 2px;
-  font-size: var(--font-caption);
-  color: color-mix(in srgb, var(--ink) 45%, transparent);
-  font-variant-numeric: tabular-nums;
 }
 
 .copresence-text {
@@ -103,23 +73,16 @@ body:has(.event-banner) .copresence {
   to   { opacity: 1; transform: none; }
 }
 
-@keyframes copresence-mark-in {
-  from { opacity: 0; transform: scale(0.4); }
-  to   { opacity: 1; transform: none; }
-}
-
-/* Phones: the sentence is the first thing to go. The marks alone still say
-   "people are here", and they say it in the width of a thumbnail. */
+/* Phones just get smaller. The sentence used to be dropped here, back when a
+   row of squares carried the count on its own; with those gone, hiding the
+   text would leave a figure glyph and no number at all. At 10px the line is
+   ~260px, which fits a 375px screen with room to spare. */
 @media (max-width: 600px) {
   .copresence {
     bottom: calc(var(--space-2) + var(--copresence-lift));
     left: var(--space-2);
     padding: 5px 8px;
     font-size: var(--font-caption);
-  }
-
-  .copresence-text {
-    display: none;
   }
 
   /* A notice goes near-full-width and can wrap to several lines on a phone,
@@ -129,16 +92,10 @@ body:has(.event-banner) .copresence {
     --copresence-lift: calc(38px + 84px);
   }
 
-  /* With the sentence gone the marks carry the whole message, so lift them
-     out of the muted register — 55% ink at 7px on a phone reads as lint. */
-  .copresence-mark {
-    border-color: color-mix(in srgb, var(--ink) 75%, transparent);
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .copresence,
-  .copresence-mark {
+  .copresence {
     animation: none;
   }
 }

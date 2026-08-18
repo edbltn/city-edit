@@ -289,15 +289,14 @@ count, one step quieter than the text it trails. It fades in, because it
 arrives seconds after the card and an unannounced layout shift at that distance
 reads as a glitch.
 
-**Co-presence** is a small strip in the bottom-left (the one free corner —
-zoom and attribution are both bottom-right), and it does one thing that a
-number alone cannot:
+**Co-presence** is a small strip in the bottom-left (the quiet corner — zoom
+and attribution are both bottom-right):
 
 ```
-  ■ □ □ □  ··  You're looking at this with 3 other viewers
+  👥  You're looking at this with 3 other viewers
 ```
 
-It carries a figure glyph too — one person for a single other viewer, two for
+A figure glyph leads it — one person for a single other viewer, two for
 several — drawn inline on `currentColor` so it sits in the strip's muted ink
 and flips with the basemap, which an `<img>` icon could not. The same shape is
 now the app's one people icon: `public/icons/community.svg` and
@@ -305,16 +304,15 @@ now the app's one people icon: `public/icons/community.svg` and
 brand colours, and are now one monochrome outline glyph mirrored from the
 component's paths.
 
-**One mark per person, and the filled one is you.** The count is drawn, not
-just printed, so you can count the marks against the sentence — a number you
-can check is a number you can believe, and that is the whole difference between
-a metric and a ritual. The filled first mark makes visible, without a footnote,
-that the total includes the reader. A count that had quietly excluded you, or
-padded itself, could not survive being drawn.
-
-The marks are the bare 1.5px stroked box the mobile wordmark builds its letters
-from — nothing new is introduced to say something quiet. On phones the sentence
-drops and the marks alone carry it.
+**What was removed, and what it cost.** An earlier version drew one hollow
+square per person with yours filled, so the numeral could be counted against
+something — the argument being that a number you can check is a number you can
+believe, and that this is the difference between a metric and a ritual. The
+owner removed the squares. Recording the trade rather than quietly dropping it:
+the count is no longer verifiable at a glance, so trustworthiness now rests
+entirely on how it is COUNTED (§1, §3) plus the wording and the hover note. The
+wording is load-bearing as a result — "other viewers" is what now says the
+total excludes the reader, which the filled square used to say without words.
 
 The small print is one hover away rather than absent: *counted once per network
 connection, and only while a tab is in the foreground; people sharing a
