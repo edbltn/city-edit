@@ -93,9 +93,19 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
   }, [hidden]);
 
   // If the marker unmounts during an active drag (e.g. a recalc re-keys or
-  // removes markers mid-drag), `dragend` never fires — so restore setLatLng and
-  // tear down the live drag trail here. Otherwise the dotted trail polyline is
-  // orphaned on the map and accumulates with every interrupted drag.
+  // removes markers mid-drag), `dragend` never fires — so restore setLatLng,
+  // tear down the live drag trail, AND close the drag out here. Otherwise the
+  // dotted trail polyline is orphaned on the map and accumulates with every
+  // interrupted drag, and — the worse half — the host is never told the drag
+  // ended: `dragPoint` stays pinned at the last dragged position, so the
+  // drop-target ring stays lit on whatever proposal was under it and the
+  // drag-snap preview keeps an edge highlighted, while `isDragging` stays true
+  // and suppresses the graph hover for good. Every `dragend` path calls
+  // onDragFinish; the interrupted path must too.
+  const onDragFinishRef = useRef(onDragFinish);
+  useEffect(() => { onDragFinishRef.current = onDragFinish; }, [onDragFinish]);
+  const setDraggingRef = useRef(setDragging);
+  useEffect(() => { setDraggingRef.current = setDragging; }, [setDragging]);
   useEffect(() => {
     return () => {
       const marker = markerRef.current;
@@ -106,6 +116,11 @@ export function RouteMarker({ position, which, onDragEnd, onDragStart, onDragFin
       dragTrailRef.current?.remove();
       dragTrailRef.current = null;
       dragTrailOriginRef.current = null;
+      if (draggingRef.current) {
+        draggingRef.current = false;
+        setDraggingRef.current(false);
+        onDragFinishRef.current?.();
+      }
     };
   }, []);
 

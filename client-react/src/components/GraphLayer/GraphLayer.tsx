@@ -43,8 +43,10 @@ import {
   type VoteTypeWinner,
 } from "./topProposals";
 import {
+  HOVER_OWNER_SELECTOR, shouldReleaseIndicatorHover,
+} from "./hoverOwnership";
+import {
   createRouteProposalJob, rankRouteProposals, corridorFromEdgeIds, corridorSliceBetween, routeBlockEdges, isRouteCovered,
-  routeCoverageRatio, ROUTE_SELECTED_MIN_COVERAGE,
   expandSelectionToUndirected,
   type RouteProposal,
 } from "./routeProposals";
@@ -2875,12 +2877,61 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     };
   }, [map]);
 
+  // Drop everything a hovered top-proposal icon owns: its claim on the map
+  // hover, its corridor's block-edge union, its card. Called from the icon's
+  // own `mouseout`/unmount, from a map tap, AND — the reason it is shared —
+  // from the map mousemove whenever the pointer is on the bare map with this
+  // state still held. See hoverOwnership.ts: an icon re-rendered under the
+  // cursor loses its `mouseout` to a detached child node, so the release can
+  // never depend on that event alone.
+  const releaseIndicatorHover = useCallback(() => {
+    overIndicatorRef.current = false;
+    if (hoverRbtpRef.current) {
+      hoverRbtpRef.current = null;
+      setHoverRbtp(null);
+    }
+    // Cleared UNCONDITIONALLY — not only when a hover card exists. On touch
+    // the diamond's tap-mouseover used to set this ref while the (gated)
+    // hover card never mounted, so a guarded clear skipped exactly the strand
+    // it was meant to heal and the corridor's blocks stayed selected after
+    // tapping away.
+    routeHighlightEdgesRef.current = null;
+    redrawHoverHighlightRef.current();
+    // Re-broadcast so the block-select layer drops any stale hover blocks
+    // immediately (deduped by key — a no-op when nothing was stranded).
+    dispatchBlockSelectRef.current();
+  }, []);
+  const releaseIndicatorHoverRef = useRef(releaseIndicatorHover);
+  useEffect(() => { releaseIndicatorHoverRef.current = releaseIndicatorHover; }, [releaseIndicatorHover]);
+
   // Hover detection and snap — uses hitTest for unified logic.
   useEffect(() => {
     const canHover = window.matchMedia("(hover: hover)").matches;
     if (!canHover) return;
 
     const handleMouseMove = (e: L.LeafletMouseEvent) => {
+      // Reconcile indicator hover ownership FIRST — outside the rAF throttle,
+      // because a frame that never comes must not be what keeps a highlight up.
+      // The pointer being on the bare map is proof no icon owns the hover,
+      // whether or not the icon's `mouseout` was ever delivered. It often is
+      // not: a re-render hands a hovered icon a new DivIcon, and `createIcon`
+      // reuses the wrapper but rewrites its innerHTML, destroying the child
+      // node the browser tracks as the hover target — the mouseout then fires
+      // on a detached node that cannot bubble to the map. Dragging a start/end
+      // waypoint re-renders these icons constantly (the drop-target ring
+      // recomputes per drag frame, coverage/passthrough at the drop), which is
+      // how a corridor's entire block union ended up lit for good. Cheap: two
+      // ref reads and one `closest`, and the release itself runs at most once
+      // per stranded hover.
+      const hoverOwner = (e.originalEvent.target as Element | null)?.closest?.(HOVER_OWNER_SELECTOR);
+      if (shouldReleaseIndicatorHover(!!hoverOwner, {
+        overIndicator: overIndicatorRef.current,
+        routeHighlight: routeHighlightEdgesRef.current !== null,
+        hoverCard: hoverRbtpRef.current !== null,
+      })) {
+        releaseIndicatorHoverRef.current();
+      }
+
       if (hoverRafRef.current) return;
       hoverRafRef.current = requestAnimationFrame(() => {
         hoverRafRef.current = null;
@@ -3060,26 +3111,14 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // map taps. Hover devices re-derive the card on the next mousemove.
   useEffect(() => {
     const clearStaleHover = () => {
-      overIndicatorRef.current = false;
-      if (hoverRbtpRef.current) {
-        hoverRbtpRef.current = null;
-        setHoverRbtp(null);
-      }
-      // Cleared UNCONDITIONALLY — not only when a hover card exists. On touch
-      // the diamond's tap-mouseover used to set this ref while the (gated)
-      // hover card never mounted, so the old `if (hoverRbtpRef)` guard skipped
-      // exactly the strand it was meant to heal and the corridor's blocks
-      // stayed selected after tapping away. Also covers a marker unmounting
-      // mid-hover on desktop (its mouseout never fires).
-      routeHighlightEdgesRef.current = null;
+      // Same release the mousemove reconciliation runs, plus the graph hover
+      // target — a tap is an unambiguous "nothing is hovered any more".
+      releaseIndicatorHoverRef.current();
       if (hoverTargetRef.current) {
         hoverTargetRef.current = null;
         setHoverTarget(null);
+        redrawHoverHighlightRef.current();
       }
-      redrawHoverHighlightRef.current();
-      // Re-broadcast so the block-select layer drops any stale hover blocks
-      // immediately (deduped by key — a no-op when nothing was stranded).
-      dispatchBlockSelectRef.current();
     };
     map.on("click", clearStaleHover);
     return () => { map.off("click", clearStaleHover); };
@@ -3689,10 +3728,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // header, so selecting a diamond (or manually tracing its corridor) titles
   // the summary with that proposal. Mirrors the diamonds' own selected rule:
   // block coverage (twin-expanded) first, else the explicitly-tapped RBTP
-  // whose anchors are still waypoints. Coverage is a THRESHOLD, not all-or-
-  // nothing (ROUTE_SELECTED_MIN_COVERAGE), so several corridors can qualify at
-  // once — the best-covered one wins the header rather than whichever ranked
-  // first.
+  // whose anchors are still waypoints. Coverage is ALL-OR-NOTHING (every block
+  // of the corridor selected), so a selection that runs along part of a
+  // corridor never titles the card with it.
   const routeViewBlockIds = useMemo(
     () => proposalBlockIds(topologyRef.current, routeBlocks), [routeBlocks]);
 
@@ -3702,15 +3740,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
     if (!topo || !pathEdgeIds || pathEdgeIds.length === 0 || routeProposals.length === 0) return null;
     const sel = expandSelectionToUndirected(
       topo, pathEdgeIds, routeProposals.flatMap((p) => p.blockEdgeIds));
-    let byCoverage: RouteProposal | null = null;
-    let bestRatio = 0;
-    for (const p of routeProposals) {
-      const ratio = routeCoverageRatio(p.blocks, sel);
-      if (ratio >= ROUTE_SELECTED_MIN_COVERAGE && ratio > bestRatio) {
-        bestRatio = ratio;
-        byCoverage = p;
-      }
-    }
+    const byCoverage = routeProposals.find((p) => isRouteCovered(p.blocks, sel)) ?? null;
     if (byCoverage) return byCoverage;
     const tapped = routeProposals.find((p) => p.id === selectedRbtpId) ?? null;
     return tapped && anchorsAreWaypoints(tapped) ? tapped : null;
@@ -3732,10 +3762,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   //     block-grain the rows sum over, so the badge marks a row whose count
   //     includes that winner's votes). Same set that rings the pin — see
   //     onSelectedBlockSet.
-  //   - "route": an RBTP whose corridor is MOSTLY inside the selection
-  //     (≥ ROUTE_SELECTED_MIN_COVERAGE of its blocks, direction twins
-  //     forgiven) — a selection that merely brushes a corridor doesn't badge
-  //     it. Same predicate that lights the diamond.
+  //   - "route": an RBTP whose corridor is FULLY inside the selection (EVERY
+  //     block covered, direction twins forgiven) — a selection that runs along
+  //     part of a corridor doesn't badge it. Same predicate that lights the
+  //     diamond.
   // -------------------------------------------------------------------------
   const topKindsFor = useCallback(
     (edgeIds: readonly number[] | null | undefined, includeRoutes: boolean): TopKindMap => {
@@ -4596,10 +4626,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   // selects it FLAT OUT (the corridor replaces the route — start/end at its
   // anchors; only a drag-DROP threads it into an existing route). A diamond
   // reads selected when either
-  //   (a) the live route covers MOST of its blocks (the auto-select rule,
-  //       twin-expanded, ≥ ROUTE_SELECTED_MIN_COVERAGE — running along a
-  //       corridor without quite reaching both ends still counts, which is how
-  //       the point pins on that same path already behave), or
+  //   (a) the live route covers EVERY one of its blocks (the auto-select rule,
+  //       twin-expanded) — running along part of a corridor is not running
+  //       along the corridor, and lights a diamond that can sit nowhere near
+  //       the stretch actually traversed, or
   //   (b) it's the explicitly-tapped RBTP and both anchors are still waypoints
   //       — see selectedRbtpId; OSRM's leg between the anchors rarely re-traces
   //       the corridor, so (a) alone left a tapped diamond looking unselected.
@@ -4717,12 +4747,10 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         setHoverRbtp(p);
       };
       const deactivate = () => {
-        overIndicatorRef.current = false;
-        routeHighlightEdgesRef.current = null;
-        redrawHoverHighlightRef.current();
-        dispatchBlockSelectRef.current();
-        hoverRbtpRef.current = null;
-        setHoverRbtp(null);
+        // One shared release (see releaseIndicatorHover) so the icon's own
+        // mouseout, its unmount, a map tap and the mousemove reconciliation all
+        // drop exactly the same state — this corridor's block union included.
+        releaseIndicatorHoverRef.current();
         if (!spreadLockedRef.current && spreadRef.current?.has(spreadKeyRoute(p.id))) armSpreadTimer();
       };
 
@@ -5532,7 +5560,7 @@ function ProposalCard({
                             title={topKind === "point"
                               ? "Top proposal on this block"
                               : topKind === "route"
-                                ? "Top route proposal — mostly inside this selection"
+                                ? "Top route proposal — fully inside this selection"
                                 : "Top proposal here — point and route"}
                           >
                             {(topKind === "point" || topKind === "both") && (

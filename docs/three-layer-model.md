@@ -283,21 +283,22 @@ proposal → blocks is a well-defined projection.
 ### 3.3 Selection behavior
 
 - An RBTP renders **selected** when either:
-  1. **Coverage** — the current selection covers at least
-     `ROUTE_SELECTED_MIN_COVERAGE` (0.6) of its blocks (≥ 1 selected edge in a
-     covered block), the same rule that makes a PBTP render selected when its
-     one block is covered. `isRouteCovered` is the shared predicate — the
-     diamond's ring, the route card's header, and the card's "top proposal" row
-     badge all ask it, so they cannot disagree about what the selection stands
-     for. The selection is **expanded to direction twins** first
-     (`expandSelectionToUndirected`) — a routed path often traverses the twin
-     of the edge a corridor's block recorded.
+  1. **Coverage** — the current selection covers **every one** of its blocks
+     (≥ 1 selected edge in each), the same rule that makes a PBTP render
+     selected when its one block is covered (a point owns one block, so
+     touching it already *is* full coverage). `isRouteCovered` is the shared
+     predicate — the diamond's ring, the route card's header, and the card's
+     "top proposal" row badge all ask it, so they cannot disagree about what
+     the selection stands for. The selection is **expanded to direction twins**
+     first (`expandSelectionToUndirected`) — a routed path often traverses the
+     twin of the edge a corridor's block recorded.
 
-     The threshold is not 1.0 because full coverage almost never survives the
-     ends: a route that runs along a corridor starts and stops mid-corridor, or
-     OSRM clips a junction block at a turn. Requiring all-of-it left the diamond
-     dark while the point pins on that very path lit up — a point has one block,
-     so any overlap already *is* full coverage for it.
+     Coverage is all-or-nothing on purpose. A percentage threshold was tried
+     (`ROUTE_SELECTED_MIN_COVERAGE` = 0.6, "light a corridor the selection
+     substantially runs along") and rejected: a route tracing part of a long
+     corridor lit a diamond that can sit nowhere near the stretch actually
+     traversed, claiming something the selection never said. Partial coverage
+     is not selection; do not reintroduce a ratio.
   2. **Explicit tap** — it is the RBTP the user tapped (GraphLayer's
      `selectedRbtpId`) and **both of its anchors are still waypoints** of the
      current route. Editing an anchor away or clearing the route deselects it.

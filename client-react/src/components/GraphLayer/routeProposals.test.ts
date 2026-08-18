@@ -4,7 +4,6 @@ import {
   proposalShapeClass,
   routeBlockEdges,
   isRouteCovered,
-  routeCoverageRatio,
   expandSelectionToUndirected,
   dropPointsCoveredByRoutes,
   chooseAnchorOrder,
@@ -128,38 +127,41 @@ describe("routeBlockEdges (hover highlight + vote set)", () => {
   });
 });
 
-describe("routeCoverageRatio", () => {
-  const blocks = [[0, 5], [1], [2]];
-
-  it("counts blocks holding at least one selected edge", () => {
-    expect(routeCoverageRatio(blocks, [5, 1, 2])).toBe(1);   // 5 covers block 0
-    expect(routeCoverageRatio(blocks, [0, 1])).toBeCloseTo(2 / 3);
-    expect(routeCoverageRatio(blocks, [])).toBe(0);
-  });
-
-  it("is 0 for a corridor with no blocks (never accidentally 'covered')", () => {
-    expect(routeCoverageRatio([], [1, 2, 3])).toBe(0);
-  });
-});
-
 describe("isRouteCovered (auto-select)", () => {
+  // A three-block corridor. Block 0 stores two edges (a two-way street), so
+  // either of them covers it.
   const blocks = [[0, 5], [1], [2]];
 
-  it("fires on a substantial share of the blocks, not only on all of them", () => {
-    expect(isRouteCovered(blocks, [5, 1, 2])).toBe(true);  // 3/3
-    expect(isRouteCovered(blocks, [0, 1])).toBe(true);     // 2/3 ≥ 0.6 — ran along most of it
-    expect(isRouteCovered(blocks, [0])).toBe(false);       // 1/3 — merely brushed it
+  it("fires only when EVERY block has a selected edge — never on partial overlap", () => {
+    expect(isRouteCovered(blocks, [5, 1, 2])).toBe(true); // 3/3 (5 covers block 0)
+    expect(isRouteCovered(blocks, [0, 1])).toBe(false);   // 2/3 — ran along most of it
+    expect(isRouteCovered(blocks, [0])).toBe(false);      // 1/3 — merely brushed it
     expect(isRouteCovered(blocks, [])).toBe(false);
   });
 
-  it("takes an explicit ratio for callers that want the strict rule", () => {
-    expect(isRouteCovered(blocks, [0, 1], 1)).toBe(false);
-    expect(isRouteCovered(blocks, [0, 1, 2], 1)).toBe(true);
+  it("does not read a substantial share as selection (rejected 0.6 threshold)", () => {
+    // Regression: ROUTE_SELECTED_MIN_COVERAGE lit a diamond that can sit
+    // nowhere near the stretch actually traversed. Partial is not selected,
+    // whatever the share — 9 of 10 blocks is still not the corridor.
+    const long = Array.from({ length: 10 }, (_, i) => [i]);
+    const allButLast = Array.from({ length: 9 }, (_, i) => i);
+    expect(isRouteCovered(long, allButLast)).toBe(false);
+    expect(isRouteCovered(long, [...allButLast, 9])).toBe(true);
   });
 
-  it("clears coverage when enough blocks drop out of the selection", () => {
+  it("treats a point proposal (one block) as covered by touching that block", () => {
+    // Point and route obey the SAME rule: all of my blocks are selected.
+    expect(isRouteCovered([[7, 8]], [8])).toBe(true);
+    expect(isRouteCovered([[7, 8]], [9])).toBe(false);
+  });
+
+  it("clears coverage when a block drops out of the selection", () => {
     expect(isRouteCovered(blocks, new Set([0, 1, 2]))).toBe(true);
-    expect(isRouteCovered(blocks, new Set([1]))).toBe(false);
+    expect(isRouteCovered(blocks, new Set([0, 1]))).toBe(false);
+  });
+
+  it("is never covered when the corridor has no blocks", () => {
+    expect(isRouteCovered([], [1, 2, 3])).toBe(false);
   });
 });
 
