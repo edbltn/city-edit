@@ -36,6 +36,7 @@ Ctrl-C to stop; the viewers leave the room immediately.
 import argparse
 import hashlib
 import json
+import random
 import sys
 import threading
 import time
@@ -86,6 +87,95 @@ def _drain(ws) -> None:
             return
 
 
+def churn_viewers(ws_url: str, slug: str, low: int, high: int,
+                  stop: threading.Event) -> "Pool":
+    """Hold a viewer count that WANDERS between `low` and `high`.
+
+    A fixed count is the wrong demo: the strip renders once and then sits there,
+    which tells you nothing about the thing it was built to convey. Presence is
+    supposed to feel like a room — people arriving, people leaving, the marks
+    animating in and the number stepping down when someone closes a tab. So this
+    walks the population one person at a time on a slow, uneven beat.
+
+    Slow on purpose. The server pushes presence at most every PUSH_INTERVAL (2s)
+    and only when the number CHANGES, so churning faster than that would just
+    coalesce into a jitter you cannot read.
+    """
+    pool = Pool(ws_url, slug)
+    for _ in range(low):
+        pool.join()
+
+    def run():
+        while not stop.is_set():
+            # 4-9s between events: long enough to watch each one land.
+            stop.wait(4 + random.random() * 5)
+            if stop.is_set():
+                break
+            n = len(pool.conns)
+            if n <= low:
+                pool.join()
+            elif n >= high:
+                pool.leave()
+            elif random.random() < 0.5:
+                pool.join()
+            else:
+                pool.leave()
+            print(f"  [{time.strftime('%H:%M:%S')}] simulated viewers: "
+                  f"{len(pool.conns)}", flush=True)
+
+    threading.Thread(target=run, daemon=True).start()
+    return pool
+
+
+class Pool:
+    """The simulated people currently holding a socket, and their addresses.
+
+    Addresses are handed out and RETURNED so a leaver's identity is reused by a
+    later joiner. That keeps the demo inside a small, stable set of counting
+    identities rather than inventing a new person for every arrival — which
+    would make the cumulative view sketches grow without bound and stop looking
+    like a small map's real audience.
+    """
+
+    def __init__(self, ws_url: str, slug: str):
+        self.ws_url = ws_url
+        self.slug = slug
+        self.conns: list = []
+        self.free = list(range(len(FAKE_IPS)))
+
+    def join(self) -> None:
+        if not self.free:
+            return
+        idx = self.free.pop(0)
+        ip = FAKE_IPS[idx]
+        try:
+            ws = create_connection(f"{self.ws_url}?map={self.slug}&bin=1",
+                                   timeout=20, header={"X-Forwarded-For": ip})
+        except Exception as e:
+            print(f"  [join] {e}", flush=True)
+            self.free.insert(0, idx)
+            return
+        threading.Thread(target=_drain, args=(ws,), daemon=True).start()
+        self.conns.append((idx, ws))
+
+    def leave(self) -> None:
+        if not self.conns:
+            return
+        idx, ws = self.conns.pop(random.randrange(len(self.conns)))
+        try:
+            ws.close()
+        except Exception:
+            pass
+        self.free.append(idx)
+
+    def identities(self) -> list:
+        return [synthetic_identity(FAKE_IPS[i]) for i, _ in self.conns]
+
+    def close_all(self) -> None:
+        while self.conns:
+            self.leave()
+
+
 def seed_views(r, slug: str, identities: list, stop: threading.Event) -> None:
     """Add the same synthetic people to every view sketch the browser creates."""
     seeded: set[str] = set()
@@ -120,29 +210,52 @@ def main() -> None:
     ap.add_argument("--redis-port", type=int, default=6379)
     ap.add_argument("--no-seed-views", action="store_true",
                     help="co-presence only; leave view counts alone")
+    ap.add_argument("--churn", metavar="LOW-HIGH", default=None,
+                    help="instead of a fixed count, wander between LOW and "
+                         "HIGH viewers (e.g. --churn 1-4) so the strip visibly "
+                         "moves: people arrive, people leave, the number steps")
     args = ap.parse_args()
 
     r = redis.Redis(host=args.redis_host, port=args.redis_port, db=0,
                     decode_responses=True)
     r.ping()
 
-    print(f"Opening {args.viewers} simulated viewers on '{args.map}' …")
-    conns = hold_viewers(args.ws, args.map, args.viewers)
+    stop = threading.Event()
+    pool = None
+
+    if args.churn:
+        try:
+            low, high = (int(x) for x in args.churn.split("-", 1))
+        except ValueError:
+            sys.exit("--churn wants LOW-HIGH, e.g. --churn 1-4")
+        if low < 0 or high < low:
+            sys.exit("--churn needs 0 <= LOW <= HIGH")
+        print(f"Churning between {low} and {high} simulated viewers on "
+              f"'{args.map}' …")
+        pool = churn_viewers(args.ws, args.map, low, high, stop)
+        conns = []
+    else:
+        print(f"Opening {args.viewers} simulated viewers on '{args.map}' …")
+        conns = hold_viewers(args.ws, args.map, args.viewers)
+
     time.sleep(2.5)
     live = r.zcard(f"pres:{args.map}")
-    others = max(0, live - 1) if live > args.viewers else args.viewers
+    simulated = len(pool.conns) if pool else args.viewers
     print(f"  {live} distinct people present (Redis pres:{args.map}) — "
-          f"{args.viewers} of them simulated")
-    print(f"\nOpen http://localhost:3000/m/{args.map} — the strip should read "
-          f"\"…with {others} other people\".")
-    print("It counts everyone present EXCEPT you, so your own tab never adds to "
-          "the number it shows you.")
+          f"{simulated} of them simulated")
+    print(f"\nOpen http://localhost:3000/m/{args.map} — the strip counts "
+          f"everyone present EXCEPT you, so your own tab never adds to the "
+          f"number it shows you.")
     print("If nothing appears, check the tab is genuinely FOREGROUND: a hidden "
           "or occluded tab leaves the room on purpose.")
-
-    stop = threading.Event()
     if not args.no_seed_views:
-        ids = [synthetic_identity(FAKE_IPS[i % len(FAKE_IPS)])
+        # Seed with the WHOLE address pool under churn, not just whoever holds a
+        # socket at this instant: a view sketch is cumulative, so the people it
+        # should contain are everyone who has passed through, not the current
+        # room.
+        ids = [synthetic_identity(ip) for ip in
+               FAKE_IPS[:max(args.viewers, 6)]] if args.churn else \
+              [synthetic_identity(FAKE_IPS[i % len(FAKE_IPS)])
                for i in range(args.viewers)]
         print(f"\nWatching for view sketches. Open a proposal card, hold it ~2s, "
               f"then close and reopen it.")
@@ -162,6 +275,8 @@ def main() -> None:
                 ws.close()
             except Exception:
                 pass
+        if pool:
+            pool.close_all()
         time.sleep(0.5)
         print(f"\nStopped. {r.zcard(f'pres:{args.map}')} people still present.")
 

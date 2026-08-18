@@ -181,7 +181,7 @@ worse claim.
 
 ## 3. Feature 2 — co-presence
 
-> "You're looking at this with 3 other people."
+> "You're looking at this with 3 other viewers."
 
 Shown from **one** other viewer up (`MIN_TOTAL = 2` in `CoPresence.tsx`).
 
@@ -294,8 +294,16 @@ zoom and attribution are both bottom-right), and it does one thing that a
 number alone cannot:
 
 ```
-  ■ □ □ □   You're looking at this with 3 other people
+  ■ □ □ □  ··  You're looking at this with 3 other viewers
 ```
+
+It carries a figure glyph too — one person for a single other viewer, two for
+several — drawn inline on `currentColor` so it sits in the strip's muted ink
+and flips with the basemap, which an `<img>` icon could not. The same shape is
+now the app's one people icon: `public/icons/community.svg` and
+`public/icons/tactical.svg` were two different figure drawings in two different
+brand colours, and are now one monochrome outline glyph mirrored from the
+component's paths.
 
 **One mark per person, and the filled one is you.** The count is drawn, not
 just printed, so you can count the marks against the sentence — a number you

@@ -30,7 +30,7 @@
   border: 1px solid var(--hairline);
   background: var(--paper);
   font-family: var(--font-main);
-  font-size: 11px;
+  font-size: var(--font-caption);
   color: color-mix(in srgb, var(--ink) 70%, transparent);
   pointer-events: auto;            /* the title needs a hover target */
   cursor: default;
@@ -53,6 +53,14 @@
 body:has(.map-notice) .copresence,
 body:has(.event-banner) .copresence {
   --copresence-lift: calc(38px + 56px);   /* history + notice (24px offset + 40px tall) */
+}
+
+/* The audience glyph sits between the marks and the sentence, in the same ink
+   as the text so it reads as part of the phrase rather than as a badge. It is
+   inline SVG on currentColor precisely so it tracks that ink through the
+   light/dark basemap flip — an <img> could not. */
+.copresence svg {
+  opacity: 0.85;
 }
 
 .copresence-marks {
@@ -80,7 +88,7 @@ body:has(.event-banner) .copresence {
 
 .copresence-overflow {
   margin-left: 2px;
-  font-size: 10px;
+  font-size: var(--font-caption);
   color: color-mix(in srgb, var(--ink) 45%, transparent);
   font-variant-numeric: tabular-nums;
 }
@@ -107,7 +115,7 @@ body:has(.event-banner) .copresence {
     bottom: calc(var(--space-2) + var(--copresence-lift));
     left: var(--space-2);
     padding: 5px 8px;
-    font-size: 10px;
+    font-size: var(--font-caption);
   }
 
   .copresence-text {

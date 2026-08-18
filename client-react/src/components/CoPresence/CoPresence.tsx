@@ -1,4 +1,5 @@
 import { useWebSocketContext } from "../../context/WebSocketContext";
+import { AudienceIcon } from "./PeopleIcon";
 import "./CoPresence.css";
 
 /** Below this we say nothing.
@@ -87,8 +88,10 @@ export function CoPresence() {
         ))}
         {overflow > 0 && <span className="copresence-overflow">+{overflow}</span>}
       </span>
+      <AudienceIcon others={others} />
       <span className="copresence-text">
-        You’re looking at this with {others} other {others === 1 ? "person" : "people"}
+        You’re looking at this with {others} other{" "}
+        {others === 1 ? "viewer" : "viewers"}
       </span>
     </aside>
   );
