@@ -239,7 +239,7 @@ export const TopBar = memo(function TopBar() {
               proposal types are drawn and lets you toggle them — so it can no
               longer be gated on having a selection to vote on. */}
           <div className="vote-switcher-group">
-            <span className="mode-prefix-label">Proposal:</span>
+            <span className="mode-prefix-label">Vote:</span>
             <VoteTypeSelector />
           </div>
 

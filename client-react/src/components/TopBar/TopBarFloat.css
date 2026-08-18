@@ -1,340 +1,827 @@
 /* ==========================================================================
-   Floating chrome — the banner, unglued.
+   Floating chrome — the banner's own composition, lifted off the map.
 
-   The white strip across the top was never load-bearing: `#map` is already
-   `position: absolute; inset: 0`, so the map has always been drawn full-bleed
-   BEHIND the bar. The banner was an opaque lid over the top ~100px of it.
-   This sheet takes the lid off — the same controls, laid on the map as
-   separate plates, with map showing through the gaps between them.
+   `#map` is already `position: absolute; inset: 0`, so the map has always been
+   drawn full-bleed behind the bar; the banner was an opaque lid over the top
+   ~130px of it. This sheet takes the lid off and CHANGES NOTHING ELSE.
 
-   Everything here is scoped to `.topbar[data-chrome="float"]`, set from
-   chromeMode.ts. Nothing in this file changes how the banner layout behaves,
-   so backing the experiment out is one constant (or `?chrome=banner` in the
-   URL, live, without a rebuild).
+   That restraint is the lesson of two earlier passes. The first kept the
+   banner's opacity and square corners, so on a dark basemap it merely swapped
+   a white lid for a darker one. The second fixed the material but rearranged
+   the layout into a tall left-aligned stack — which shrank the wordmark to a
+   glyph rattling inside an oversized box, wrapped the pickers onto a row of
+   their own, and pushed the meta rail out of the composition. The arrangement
+   was never the problem. Only the lid was.
 
-   Two rules this sheet has to keep:
+   So the geometry here is measured FROM the banner and held to:
+
+     band            129px, one compact row-pair, everything vertically centred
+     wordmark        the mark 96px tall — the anchor, not a glyph
+     order           wordmark - Start/End - Selection/Votes - Map/Proposal - rail
+     picker rhythm   both labels on one left edge, both dropdowns one width
+     right cluster   icon groups + Donate, pinned to the right margin
+
+   What this sheet adds is only what makes chrome read as FLOATING:
+   translucency and blur so the map is visible through it, radius so it reads
+   as an object rather than a cut region, and a ring plus a drop shadow that
+   survive both basemaps.
+
+   Two invariants:
 
    1. NO z-index. The ladder in globals.css is the only place paint order is
-      decided (styles/zScale.test.ts enforces it), and floating chrome needs
-      no new rung: `.topbar` already carries --z-chrome, and staying a
-      positioned element with that token keeps its stacking context — and its
-      dropdowns sealed inside it — exactly as the banner had them.
+      decided (styles/zScale.test.ts enforces it), and floating chrome needs no
+      new rung: `.topbar` already carries --z-chrome, and staying a positioned
+      element with that token keeps its stacking context — and its dropdowns
+      sealed inside it — exactly as the banner had them.
    2. The topbar's BOX still means "map you cannot reach". GraphLayer measures
-      `.topbar`'s rect bottom to keep a proposal card from sliding under the
-      chrome, so the floating layout deliberately stays a full-width band that
-      is only as tall as the plates inside it (~145px), rather than a narrow
-      column whose height would push cards down across the whole viewport.
+      `.topbar`'s rect bottom so a proposal card never slides under the chrome.
+      Holding the banner's height keeps that clamp where it has always been.
    ========================================================================== */
 
 .topbar[data-chrome="float"] {
+  /* Tight to the viewport, and the SAME on every edge — this is the only inset
+     in the sheet, so nothing can drift out of alignment with anything else. */
+  --float-gutter: 10px;
+
+  /* Translucency is the point. At 92% the plate was a fill and the map died
+     under it; 72% over a heavy blur lets the map through as texture and still
+     clears 5.9:1 for body text against the worst case the plate can composite
+     to — and that worst case is conservative, because what sits behind a plate
+     is the BLURRED average of the tiles, never a single bright pixel. */
+  --plate-tint: color-mix(in srgb, var(--paper) 92%, var(--ink));
+  --plate-bg: color-mix(in srgb, var(--plate-tint) 72%, transparent);
+  --plate-blur: blur(18px) saturate(1.25);
+  /* The edge does the separating on a dark basemap, where a black drop shadow
+     has nothing left to darken. */
+  --plate-line: color-mix(in srgb, var(--ink) 26%, transparent);
+  --plate-sheen: rgba(255, 255, 255, 0.07);
+  --plate-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.32),
+    0 4px 10px rgba(0, 0, 0, 0.26),
+    0 16px 40px -12px rgba(0, 0, 0, 0.55);
+
+  /* Square, like the rest of the app: the global --radius-* tokens are 0 by
+     design and the floating chrome is no exception. These two exist only so
+     every shape in this sheet reads from one place — set them to a length and
+     the whole band rounds together; they are 0 and stay 0.
+
+     Losing radius means the "this is above the map" signal rests entirely on
+     the other three, so each is pushed harder than it would otherwise be: the
+     plate is translucent enough to read the map through, the shadow is a
+     three-stop stack rather than a single soft blur, and every plate is inset
+     from the viewport edge so the map wraps around the band on all sides. */
+  --float-radius: 0;
+  --float-pill: 0;
+
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  padding: var(--space-3);
-  gap: var(--space-3);
-  align-items: start;
+  /* The banner's own row, kept: wordmark, then content. */
+  flex-direction: row;
+  align-items: center;
+  padding: var(--float-gutter);
+  gap: var(--float-gutter);
   background: transparent;
   border-bottom: 0;
   /* The band covers map the user must still be able to click, drag and zoom.
-     Only the plates themselves take the pointer back (below). */
+     Only the plates themselves take the pointer back. */
   pointer-events: none;
-
-  /* Plate tokens, local to this sheet. Both are derived from the theme's own
-     --paper/--ink, so a plate re-tints itself for a light basemap the same way
-     every other surface in the app does. */
-  --plate-bg: color-mix(in srgb, var(--paper) 92%, transparent);
-  --plate-line: color-mix(in srgb, var(--ink) 24%, transparent);
-  /* Two shadows doing different jobs: the tight one seats the plate on the
-     tiles, the wide one separates it from busy label-dense areas. On a dark
-     basemap neither reads much — there the border is what carries the edge,
-     which is why it is stepped up from --hairline. */
-  --plate-shadow: 0 1px 2px rgba(0, 0, 0, 0.14), 0 8px 24px -8px rgba(0, 0, 0, 0.38);
 }
 
+/* --plate-tint lifts the plate off --paper before it is made translucent. On
+   the dark basemaps --paper is #0d0d0d and the tiles are nearly as dark, so a
+   plate of pure paper reads at any opacity as a HOLE cut in the map rather
+   than an object resting on it. The light theme needs no such help: its paper
+   is already lighter than its tiles, and there a white top highlight reads as
+   glass where on dark it would blow out. */
+[data-basemap="light"] .topbar[data-chrome="float"] {
+  --plate-tint: var(--paper);
+  --plate-sheen: rgba(255, 255, 255, 0.55);
+  --plate-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.14),
+    0 4px 10px rgba(0, 0, 0, 0.12),
+    0 16px 40px -12px rgba(0, 0, 0, 0.28);
+}
+
+/* One definition of "a thing floating on the map", worn by every plate. */
 .topbar[data-chrome="float"] .logo-container,
 .topbar[data-chrome="float"] .logo-mobile-banner,
-.topbar[data-chrome="float"] .topbar-legend,
+.topbar[data-chrome="float"] .topbar-legend > *,
 .topbar[data-chrome="float"] .mode-switcher-group,
 .topbar[data-chrome="float"] .vote-switcher-group,
 .topbar[data-chrome="float"] .nav-group,
-.topbar[data-chrome="float"] .cast-group,
+.topbar[data-chrome="float"] .btn-cast,
 .topbar[data-chrome="float"] .btn-header,
 .topbar[data-chrome="float"] .calculating-indicator {
   background: var(--plate-bg);
-  backdrop-filter: blur(10px) saturate(1.15);
-  -webkit-backdrop-filter: blur(10px) saturate(1.15);
+  backdrop-filter: var(--plate-blur);
+  -webkit-backdrop-filter: var(--plate-blur);
   border: 1px solid var(--plate-line);
-  box-shadow: var(--plate-shadow);
+  box-shadow: var(--plate-shadow), inset 0 1px 0 var(--plate-sheen);
   pointer-events: auto;
 }
 
-/* The rail is two plates (its .nav-groups), not one — the gap between them is
-   the read/act split. The rail itself stays a transparent carrier. */
-.topbar[data-chrome="float"] .nav-rail {
+.topbar[data-chrome="float"] .nav-rail,
+.topbar[data-chrome="float"] .actions-group {
   pointer-events: none;
 }
 
 .topbar[data-chrome="float"] .nav-group,
-.topbar[data-chrome="float"] .actions-group > * {
+.topbar[data-chrome="float"] .actions-group > *,
+.topbar[data-chrome="float"] .mode-selector,
+.topbar[data-chrome="float"] .vote-type-selector,
+.topbar[data-chrome="float"] .mode-prefix-label,
+.topbar[data-chrome="float"] .cast-prefix-label {
   pointer-events: auto;
 }
 
 
 /* ==========================================================================
-   Row 1 — the logo and the legend; the meta rail at the far right.
+   The wordmark — the band's anchor.
+
+   In the banner this is a 96px-tall mark in a stretched 150px column, and it
+   is the app's signature at a glance. Floating it broke that: the plate was
+   pinned to --control-height and the absolutely-positioned art was measured
+   against it, so the box stayed large while the mark inside collapsed to a
+   glyph. The fix is to stop sizing the BOX and start sizing the MARK — the art
+   goes back in flow at its banner height and the plate is only padding around
+   it, so the background fits the mark instead of the mark rattling inside it.
+
+   It is also the one element that cannot go bare: light-grey line art built
+   for a dark basemap dissolves over tiles.
    ========================================================================== */
 
-/* The wordmark is the one element that cannot go bare: it is light-grey line
-   art built for a dark basemap, and over tiles it dissolves. It keeps a plate
-   at every breakpoint. */
+/* The island's padding is the logo's OWN square-to-square gap, so the box
+   reads as one more cell of the crossword rather than a frame around it.
+   Everything below is derived from the artwork in Logo.tsx, not eyeballed:
+
+     const CELL = 24, GAP = 6, strokeWidth 1.5, viewBox "-5 0 183 118"
+
+   The squares are pitched CELL + GAP = 30 apart, so 6 user units separate one
+   square's edge from the next. But each edge is a 1.5-wide stroke centred on
+   that boundary, so the WHITESPACE a reader actually sees between two squares
+   is GAP - STROKE = 4.5 units. That is the gap to match: the eye compares
+   bands of empty space, not construction lines. (Measured both ways first —
+   matching the 6-unit pitch instead leaves the island visibly loose.)
+
+   The mark is height-constrained (`height` set, `width: auto`), so one user
+   unit renders at height/118 px: 0.8136px at 96px, putting the gap at 3.66px.
+
+   The catch is that the viewBox is NOT tight to the art. Including the stroke
+   the drawing occupies x 0.25..175.75, y 0.25..115.75, leaving 5.25 / 2.25 /
+   0.25 / 2.25 units of built-in slack on left / right / top / bottom — uneven,
+   and on the left already wider than the gap we want. Uniform padding alone
+   would therefore render four different visual gaps, and no positive padding
+   could ever tighten the left. So the art is pulled back by exactly that slack
+   with negative margins, and then ONE uniform padding — the gap itself — is
+   what remains on all four sides. */
 .topbar[data-chrome="float"] .logo-container {
-  align-self: start;
+  --logo-mark-h: 96px;
+  --logo-u: calc(var(--logo-mark-h) / 118);        /* one SVG user unit, in px */
+  --logo-gap: calc((6 - 1.5) * var(--logo-u));     /* GAP - STROKE */
+
+  position: relative;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  /* Hug the art in both axes — no --logo-width column, no stretched height. */
   width: auto;
-  min-width: 128px;
-  height: 52px;
+  height: auto;
+  box-sizing: content-box;
+  padding: var(--logo-gap);
+  border-radius: var(--float-radius);
+  /* The wordmark is the one plate that stays near-solid: at 72% the crossword
+     rules and the map's streets interleave and both become noise. */
+  background: color-mix(in srgb, var(--plate-tint) 90%, transparent);
+}
+
+/* Cancels the viewBox's built-in slack so the padding above is the whole gap. */
+.topbar[data-chrome="float"] .logo-img {
+  margin:
+    calc(-0.25 * var(--logo-u))
+    calc(-2.25 * var(--logo-u))
+    calc(-2.25 * var(--logo-u))
+    calc(-5.25 * var(--logo-u));
 }
 
 .topbar[data-chrome="float"] .logo-img {
-  top: 10px;
-  left: 12px;
-  right: 12px;
-  height: calc(100% - 20px);
-}
-
-.topbar[data-chrome="float"] .topbar-content {
-  flex: 1;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-2);
-  padding: 0;
-  min-width: 0;
-}
-
-/* Shrink-wrapped, so the plate ends where the legend ends and the rest of the
-   band is map. (The banner let it stretch; there was no cost when the whole
-   strip was opaque anyway.) */
-.topbar[data-chrome="float"] .topbar-legend {
-  width: fit-content;
-  max-width: 100%;
-  align-self: start;
-}
-
-/* Its own hairlines are the grid's internal dividers — keep those, but let the
-   plate's stronger edge draw the outside. */
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(odd) {
-  border-right-color: var(--hairline);
-}
-
-.topbar[data-chrome="float"] .topbar-legend > :nth-child(1) {
-  border-bottom-color: var(--hairline);
-}
-
-/* Pinned to the band's far corner: the meta links are the one group that has
-   nothing to do with the current selection, and in the banner they only sat
-   beside the pickers because the 2x2 grid needed a fourth cell. */
-.topbar[data-chrome="float"] .topbar-actions > .nav-rail {
-  position: absolute;
-  top: var(--space-3);
-  right: var(--space-3);
+  position: static;
+  top: auto;
+  left: auto;
+  right: auto;
+  /* The banner's mark height, kept. */
+  height: var(--logo-mark-h);
+  width: auto;
+  display: block;
 }
 
 
 /* ==========================================================================
-   Row 2 — the pickers, as pills under the legend.
+   The band — one grid, six columns, two rows.
 
-   The Citizen pattern: a field on top, and under it a row of pills carrying
-   the state you switch. "Map:" and "Proposal:" were deliberate words and they
-   survive — but as a kicker set INSIDE the pill it labels, rather than a
-   full-size word standing next to it. The pill still says what it switches;
-   it just stops spending a control's worth of width to say it.
+   The markup nests the controls in three wrappers (.topbar-legend, then
+   .topbar-actions, then .actions-group inside it), which is why the first
+   floating pass could only ever stack those wrappers as blocks. `display:
+   contents` dissolves all three, so every control becomes a direct item of one
+   grid and can be placed anywhere in it. No JSX was rearranged to get this
+   order — the DOM is still the banner's.
+
+     col 1  Start        / End
+     col 2  Selection    / Votes          (the legend, moved forward)
+     col 3  map          / vote           (one column: equal width, one left edge)
+     col 4  minus-plus   / Clear          (sized to content, not to the inputs)
+     col 5  spacer, absorbs the slack
+     col 6  the meta rail and Donate, held against the right margin
+
+   The horizontal budget is deliberately tilted toward column 3: the map name
+   and the vote type are the longest, most variable strings in the band and the
+   two things a reader actually reads, so that column is the widest and the
+   action pair beside it is the narrowest. Its extra width comes from the
+   spacer (col 5), which collapses first, and from col 4, which is now sized to
+   its own glyphs instead of matching its neighbours. Under real pressure cols
+   1 and 3 are minmax() and give way — the Start/End address ellipsises — so
+   nothing can reach the right edge.
    ========================================================================== */
 
-.topbar[data-chrome="float"] .topbar-actions {
-  display: flex;
-  flex-direction: row;
+.topbar[data-chrome="float"] .topbar-content {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns:
+    minmax(120px, auto)      /* Start / End         */
+    auto                     /* Selection / Votes   */
+    minmax(220px, 460px)     /* Map / Vote          */
+    auto                     /* -/+ / Clear         */
+    1fr                      /* slack               */
+    auto;                    /* rail                */
+  grid-template-rows: var(--control-height) var(--control-height);
   align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  width: auto;
+  /* Was --space-2; the pills read as crowded against their neighbours at 8. */
+  column-gap: var(--space-3);
+  row-gap: 0;
+  padding: 0;
 }
 
+/* `display: contents` leaves these three with no box at all, so their own
+   backgrounds, borders and the legend's inherited 4px radius never paint. The
+   radius is zeroed anyway: a sweep of the band should come back clean without
+   anyone having to first work out which elements still generate a box. */
+.topbar[data-chrome="float"] .topbar-legend,
+.topbar[data-chrome="float"] .topbar-actions,
+.topbar[data-chrome="float"] .actions-group {
+  display: contents;
+  border-radius: 0;
+}
+
+/* Legend cells, in DOM order: Start, Selection, End, Votes. */
+.topbar[data-chrome="float"] .topbar-legend > :nth-child(1) { grid-area: 1 / 1; }
+.topbar[data-chrome="float"] .topbar-legend > :nth-child(3) { grid-area: 2 / 1; }
+.topbar[data-chrome="float"] .topbar-legend > :nth-child(2) { grid-area: 1 / 2; }
+.topbar[data-chrome="float"] .topbar-legend > :nth-child(4) { grid-area: 2 / 2; }
+
+.topbar[data-chrome="float"] .mode-switcher-group { grid-area: 1 / 3; }
+.topbar[data-chrome="float"] .vote-switcher-group { grid-area: 2 / 3; }
+.topbar[data-chrome="float"] .cast-group          { grid-area: 1 / 4; }
+.topbar[data-chrome="float"] .btn-clear           { grid-area: 2 / 4; }
+
+/* Spans both rows and sits centred: with Cast and Clear moved out, nothing
+   else occupies this column's second row. */
+.topbar[data-chrome="float"] .nav-rail {
+  grid-area: 1 / 6 / 3 / 7;
+  align-self: center;
+  justify-self: end;
+}
+
+/* It was absolutely positioned inside .actions-group, whose box `display:
+   contents` has just removed. Parked in the same cell as the controls it
+   replaces — it is `visibility: hidden` until routing starts, and by then both
+   of those are .hidden-reserve'd, so they never show at once. */
+.topbar[data-chrome="float"] .calculating-indicator {
+  position: static;
+  grid-area: 1 / 4 / 3 / 5;
+  align-self: center;
+  justify-content: center;
+  height: var(--control-height);
+  box-sizing: border-box;
+  border-radius: var(--float-pill);
+  padding: 0 var(--space-3);
+}
+
+
+/* ==========================================================================
+   Every column is one stacked pill: the top cell rounds its top and hands the
+   divider down, the bottom cell rounds its bottom. Three pairs and a button,
+   all reading in the same shape language.
+   ========================================================================== */
+
+.topbar[data-chrome="float"] .topbar-legend > :nth-child(1),
+.topbar[data-chrome="float"] .topbar-legend > :nth-child(2),
+.topbar[data-chrome="float"] .mode-switcher-group,
+.topbar[data-chrome="float"] .cast-group {
+  border-radius: var(--float-radius) var(--float-radius) 0 0;
+  border-bottom: 0;
+}
+
+.topbar[data-chrome="float"] .topbar-legend > :nth-child(3),
+.topbar[data-chrome="float"] .topbar-legend > :nth-child(4),
+.topbar[data-chrome="float"] .vote-switcher-group,
+.topbar[data-chrome="float"] .btn-clear {
+  border-radius: 0 0 var(--float-radius) var(--float-radius);
+}
+
+/* The banner's own internal rules are replaced by the pill edges above. */
+.topbar[data-chrome="float"] .topbar-legend > :nth-child(odd) {
+  border-right: 1px solid var(--plate-line);
+}
+
+/* Flex children holding a nowrap address: without this the automatic minimum
+   is the whole address and the pill pushes past the viewport. */
+.topbar[data-chrome="float"] .legend-item-coords {
+  min-width: 0;
+}
+
+
+/* ==========================================================================
+   Map / Proposal — the words are gone; the icon and the shape carry it.
+
+   "Map:" and "Proposal:" are removed from the layout, not from the document:
+   each stays as a screen-reader-only span in its original reading position, so
+   the affordance that was carried by the words is still carried by them for
+   anyone listening. For everyone else the signal is the control's own icon,
+   its fixed position in the band, and the kind of thing written in it — a
+   place name above, an action phrase below. The two triggers also gained real
+   accessible names (`Map: NYC Walkways`) and hover titles, which they never
+   had; before this they were labelled only by proximity to a bare span.
+   ========================================================================== */
+
+/* "Cast:" stays gone — the -/+ pair speaks for itself and .cast-group already
+   carries role="group" with its own aria-label. */
+.topbar[data-chrome="float"] .cast-prefix-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* "Map:" and "Vote:" sit INSIDE their pill, ahead of the icon and the current
+   value. No divider rule — the colon is the separator.
+
+   They are RIGHT-aligned in a shared 5ch box ("Vote:" being the longer of the
+   two). That is the whole trick: the words are different lengths, so aligning
+   them left leaves the colons ragged and the two rows read as unrelated, while
+   aligning them right stacks the colons on one x and the pair reads as a single
+   column — the same vertical rhythm the labels gave the banner, now carried
+   inside the shapes instead of in a column beside them.
+
+   Sized with --control-font-size-compact, which already exists for exactly this
+   (dense topbar field text) and shrinks with the rest at each breakpoint. No
+   literal px is introduced here, so a global step-down of the type scale flows
+   straight through. */
+.topbar[data-chrome="float"] .mode-prefix-label {
+  flex: 0 0 auto;
+  width: 5ch;
+  text-align: right;
+  font-size: var(--control-font-size-compact);
+}
+
+/* Both problems were real, so both are fixed: the pills were tight INSIDE
+   (label against the left wall, chevron against the right) and tight OUTSIDE
+   (8px to their neighbours, now 12 via the grid's column-gap above).
+
+   On the unit: the logo island's padding is derived from the crossword gap
+   because that island has to read as one more cell of that grid — but the
+   value it yields is 4.5 SVG units, 3.66px at the rendered mark height, which
+   is far too small to seat a control's contents and is not a round multiple of
+   anything else in the band. Worse, keying control padding to it would couple
+   every pill's inset to the logo's rendered height. The band's actual shared
+   rhythm is the app's 4px --space-* scale, which the gutter, the column-gap
+   and every gap in this sheet already use; --space-4 is 4 steps of it. So the
+   island keeps the artwork-derived value for the reason it was asked for, and
+   the controls stay on the one spacing scale the rest of the chrome speaks.
+
+   Vertical padding is real but cannot change the box: height is pinned to
+   --control-height with border-box, so the pills stay exactly as tall as the
+   legend and the action pair beside them. */
 .topbar[data-chrome="float"] .mode-switcher-group,
 .topbar[data-chrome="float"] .vote-switcher-group {
   gap: var(--space-2);
-  padding: 0 var(--space-2) 0 var(--space-3);
+  min-width: 0;
   height: var(--control-height);
   box-sizing: border-box;
+  padding: var(--space-2) var(--space-4);
 }
 
-.topbar[data-chrome="float"] .mode-prefix-label,
-.topbar[data-chrome="float"] .cast-prefix-label {
-  /* Deliberately off the --control-font-size scale: this is the one piece of
-     topbar text that must NOT track its neighbours. It is a caption on the
-     control it sits in, and it reads as one only by being smaller than the
-     value it introduces. */
-  font-size: 10px;
-  line-height: 1;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  /* Quieted with colour, not `opacity`: opacity would fade the divider border
-     with it, and at 10px the text needs every point of contrast it can keep.
-     72% of --ink over a 92%-opaque plate stays above 4.5:1 against the worst
-     case the plate can composite to on either basemap (bright heat under a
-     dark plate, dark tiles under a light one). */
-  color: color-mix(in srgb, var(--ink) 72%, transparent);
-  padding: 3px var(--space-2) 3px 0;
-  margin-right: var(--space-1);
-  border-right: 1px solid var(--hairline);
+/* The group is the pill, so the trigger inside it is bare — one box, not two —
+   and simply fills whatever the label leaves. */
+.topbar[data-chrome="float"] .mode-selector,
+.topbar[data-chrome="float"] .vote-type-selector {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
-/* The picker's own box is redundant once the group is the plate — one border,
+/* The picker's inner box is redundant once the group is the pill — one edge,
    not two nested ones. */
 .topbar[data-chrome="float"] .mode-btn {
-  width: auto;
-  padding-left: 0;
-  padding-right: 0;
   border: 0;
   background: transparent;
-  white-space: nowrap;
+  width: 100%;
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .topbar[data-chrome="float"] .mode-btn:hover,
 .topbar[data-chrome="float"] .mode-btn:active {
   background: transparent;
-  opacity: 0.72;
 }
 
-/* Hug the label instead of filling the old grid track. */
-.topbar[data-chrome="float"] .mode-selector {
-  flex: 0 1 auto;
-}
-
+/* One line that truncates: a pill is a single row of type, and the ellipsis is
+   what keeps a long map name inside it. */
 .topbar[data-chrome="float"] .mode-btn .mode-label {
-  max-width: 22ch;
-  -webkit-line-clamp: 1;
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+/* The vote-type trigger is NOT a .mode-btn — it is .vote-type-control, with its
+   own opaque fill, its own border and a FIXED 290px width. Inside a rounded
+   pill that fill painted a square box over the shape, and that width is what
+   pushed "Add pedestrian signal" past the right edge. */
+.topbar[data-chrome="float"] .vote-type-control {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.topbar[data-chrome="float"] .vote-type-control:hover,
+.topbar[data-chrome="float"] .vote-type-selector.active .vote-type-control {
+  background: transparent;
+  border: 0;
+}
+
+.topbar[data-chrome="float"] .mode-switcher-group:hover,
+.topbar[data-chrome="float"] .vote-switcher-group:hover {
+  background: color-mix(in srgb, var(--plate-tint) 84%, transparent);
 }
 
 
 /* ==========================================================================
-   Row 2, continued — Cast / Clear, when there is a selection to act on.
+   Minus / plus over Clear.
+
+   "Cast:" is deleted outright. It was only ever a <span> — the -/+ buttons
+   already call castVote(-1) / castVote(+1) and commit on click (aria-pressed
+   marks the direction you hold, and clicking the same one again removes it),
+   and .cast-group already carries role="group" with its own aria-label. So
+   nothing had to be rewired to take the word away: there was never a separate
+   commit step to lose.
    ========================================================================== */
 
-.topbar[data-chrome="float"] .actions-group {
-  gap: var(--space-2);
-  justify-content: flex-start;
+/* GEOMETRY, stated exactly.
+
+   The unit is --control-height: the height of one control row in this band.
+   That is the only unit that makes the -/+ row exactly as tall as the legend
+   and the pills beside it AND makes each cell square, and it steps down with
+   the breakpoints on its own (44 / 36 / 34 / 32), so the block stays two
+   squares wide at every width. The logo island's unit — the gap between the
+   crossword squares, 3.66px — is deliberately NOT reused here: that is a
+   SPACING value for an inset, and sizing a control from it would neither match
+   the row height nor produce a square. One rhythm per job.
+
+     minus, plus   --control-height square each, side by side
+     shared seam   the two overlap by their 1px border (margin-left: -1px, the
+                   idiom globals already uses), so the pair measures
+                   2 x --control-height - 1
+     Clear         exactly that, so the block is 2 wide, flush on both edges
+
+   The group itself is no longer a plate — a bordered box around two bordered
+   boxes could never make the inner cells square without fractional maths. Each
+   cell carries the plate instead, which is also how the legend column works. */
+.topbar[data-chrome="float"] .cast-group {
+  gap: 0;
+  padding: 0;
+  width: fit-content;
+  height: var(--control-height);
+  justify-self: start;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  overflow: visible;
 }
 
-.topbar[data-chrome="float"] .cast-group {
-  padding: 0 var(--space-2) 0 var(--space-3);
+.topbar[data-chrome="float"] .btn-cast {
+  flex: 0 0 auto;
+  width: var(--control-height);
   height: var(--control-height);
   box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  border-radius: 0;
+  /* Clear's top border is the divider between the rows. */
+  border-bottom: 0;
 }
 
-/* Same move as .mode-btn: the +/- keep their dividing borders and their
-   hover/cast states, but drop the opaque fill so the plate reads as one box. */
-.topbar[data-chrome="float"] .btn-cast {
-  background: transparent;
-  pointer-events: auto;
+/* The shared seam: the two squares overlap by one border. */
+.topbar[data-chrome="float"] .btn-cast-up {
+  margin-left: -1px;
+}
+
+.topbar[data-chrome="float"] .btn-clear {
+  width: calc(2 * var(--control-height) - 1px);
+  height: var(--control-height);
+  box-sizing: border-box;
+  justify-self: start;
+  justify-content: center;
+  padding: 0;
+  min-width: 0;
 }
 
 
 /* ==========================================================================
-   Narrow screens.
-
-   The band is the same three things at every width — logo, legend, pills — so
-   the mobile layout is the desktop one with the logo moved above the stack
-   instead of beside it. Two things have to change, both of them holdovers from
-   a bar that spanned the screen: the mobile wordmark was a full-width strip
-   with a bottom rule (it becomes a plate), and the legend/actions were subgrid
-   tracks of a bar that no longer exists.
+   The right cluster.
    ========================================================================== */
 
-@media (max-width: 1080px) {
-  /* One wordmark, not two. `.topbar h1` outranks the plain `.logo-container`
-     rule that was meant to hide this below 1080, so it takes a selector with
-     the attribute on it to actually win. */
-  .topbar[data-chrome="float"] .logo-container {
-    display: none;
-  }
-
-  .topbar[data-chrome="float"] {
-    padding: var(--space-2);
-    gap: var(--space-2);
-  }
-
-  .topbar[data-chrome="float"] .logo-mobile-banner {
-    align-self: flex-start;
-    width: fit-content;
-    padding: 7px var(--space-3) 5px;
-    /* The rule under it was the banner's own bottom edge. The plate has four. */
-    border-bottom: 1px solid var(--plate-line);
-  }
-
-  .topbar[data-chrome="float"] .logo-mobile-svg {
-    height: 16px;
-  }
-
-  .topbar[data-chrome="float"] .topbar-content {
-    display: flex;
-    gap: var(--space-2);
-    padding: 0;
-  }
-
-  /* Both were `grid-template-columns: subgrid` against the bar's grid; the
-     stack is a flex column now, so they own their own tracks again. */
-  .topbar[data-chrome="float"] .topbar-legend {
-    width: 100%;
-    grid-column: auto;
-    grid-template-columns: 1fr auto;
-  }
-
-  .topbar[data-chrome="float"] .topbar-actions {
-    grid-column: auto;
-    width: 100%;
-    grid-template-rows: none;
-  }
-
-  /* Row 1 is the wordmark and the rail, so the rail sits level with it. */
-  .topbar[data-chrome="float"] .topbar-actions > .nav-rail {
-    top: var(--space-2);
-    right: var(--space-2);
-  }
-
-  /* "CAST" is a kicker at this size, and the glyphs carry the meaning — but
-     the pickers' kickers stay: those two pills are otherwise two unlabelled
-     icons that look like the same control. */
-  .topbar[data-chrome="float"] .cast-prefix-label {
-    display: none;
-  }
-}
-
-/* Landscape phones: the legend is already dropped at this height, so the band
-   is one row of pills with the wordmark and rail at either end. */
-@media (max-height: 500px) and (orientation: landscape) {
-  .topbar[data-chrome="float"] {
-    padding: var(--space-2) var(--space-3);
-  }
-
-  .topbar[data-chrome="float"] .topbar-actions {
-    grid-template-columns: none;
-    grid-template-rows: none;
-  }
+/* NO `overflow: hidden` here. It was added only to clip the icon buttons to the
+   group's rounded corners, and once the radius went to 0 it had nothing left to
+   clip except `.nav-btn::after` — the hover label, which renders BELOW the
+   button (`top: calc(100% + 7px)`) and so fell entirely outside the group's
+   box. The labels were rendering and correctly stacked the whole time; they
+   were being clipped by an ancestor. */
+.topbar[data-chrome="float"] .nav-group {
+  border-radius: var(--float-pill);
 }
 
 
 /* ==========================================================================
    Menus opened from a plate.
 
-   These already carry an opaque --paper fill and a hairline (they have to:
-   they list map names over map). What they lacked once their trigger started
-   casting a shadow was the same lift — without it an open menu read as a flat
-   panel hanging off a raised pill. Fill and border stay as they are; this adds
-   only the elevation, and only in float mode.
+   These carry an opaque fill on purpose — they list map names over map and
+   have to be read, not admired. What they lacked once their trigger started
+   floating was the same shaping and lift.
    ========================================================================== */
 
 .topbar[data-chrome="float"] .mode-dropdown,
 .topbar[data-chrome="float"] .vote-type-dropdown {
   border-color: var(--plate-line);
+  border-radius: var(--float-radius);
   box-shadow: var(--plate-shadow);
+  overflow: hidden;
+}
+
+
+/* ==========================================================================
+   Narrow screens.
+
+   The banner already restacks here — wordmark on its own line, then the legend
+   and the picker rows full width — so again this only changes the material.
+   The two legend pills stack instead of sitting side by side, because 390px
+   cannot hold both.
+   ========================================================================== */
+
+@media (max-width: 1080px) {
+  .topbar[data-chrome="float"] {
+    --float-gutter: 8px;
+    /* NOTE: --float-radius is NOT re-declared here. It was, at 10px, and that
+       is precisely how the band came out square on desktop and rounded on a
+       phone: every shape reads the token, so one override inside one media
+       query rounded the whole band at a width nobody had screenshotted. The
+       radius tokens are declared exactly once, in the block at the top. */
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+
+  /* One wordmark, not two. `.topbar h1` outranks the plain `.logo-container`
+     rule meant to hide this below 1080, so it takes the attribute to win. */
+  .topbar[data-chrome="float"] .logo-container {
+    display: none;
+  }
+
+  .topbar[data-chrome="float"] .logo-mobile-banner {
+    align-self: flex-start;
+    width: fit-content;
+    padding: 6px var(--space-3);
+    border: 1px solid var(--plate-line);
+    border-radius: var(--float-radius);
+  }
+
+  /* 390px cannot hold six columns, so the same six pairs fold into two: the
+     inputs and the two pickers down the left, the legend and the selection
+     actions down the right. Map still sits directly under End and directly
+     over Proposal, so its column keeps one left edge and one width. */
+  .topbar[data-chrome="float"] .topbar-content {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: repeat(4, var(--control-height));
+  }
+
+  .topbar[data-chrome="float"] .topbar-legend > :nth-child(1) { grid-area: 1 / 1; }
+  .topbar[data-chrome="float"] .topbar-legend > :nth-child(3) { grid-area: 2 / 1; }
+  .topbar[data-chrome="float"] .mode-switcher-group           { grid-area: 3 / 1; }
+  .topbar[data-chrome="float"] .vote-switcher-group           { grid-area: 4 / 1; }
+
+  .topbar[data-chrome="float"] .topbar-legend > :nth-child(2) { grid-area: 1 / 2; }
+  .topbar[data-chrome="float"] .topbar-legend > :nth-child(4) { grid-area: 2 / 2; }
+  .topbar[data-chrome="float"] .cast-group                    { grid-area: 3 / 2; }
+  .topbar[data-chrome="float"] .btn-clear                     { grid-area: 4 / 2; }
+  .topbar[data-chrome="float"] .calculating-indicator         { grid-area: 3 / 2 / 5 / 3; }
+
+  /* Beside the wordmark, out of the grid entirely. */
+  .topbar[data-chrome="float"] .nav-rail {
+    position: absolute;
+    top: var(--float-gutter);
+    right: var(--float-gutter);
+    grid-area: auto;
+  }
+
+  /* Stacked in one column, End sits above Map, so the pill edges fall between
+     different pairs than they do on the desktop grid. */
+  .topbar[data-chrome="float"] .topbar-legend > :nth-child(3) {
+    border-radius: 0 0 var(--float-radius) var(--float-radius);
+    margin-bottom: var(--space-2);
+  }
+
+  .topbar[data-chrome="float"] .topbar-legend > :nth-child(4) {
+    margin-bottom: var(--space-2);
+  }
+
+  .topbar[data-chrome="float"] .cast-group {
+    margin-top: var(--space-2);
+  }
+
+  .topbar[data-chrome="float"] .btn-clear {
+    margin-top: 0;
+  }
+}
+
+/* Landscape phones: the legend is already dropped at this height, so the band
+   is the wordmark and the picker row with the rail at the far end. The mark's
+   96px is sized against a full-height desktop band; on a 390px-tall screen
+   that is a sixth of the viewport, so it comes down to the row's own scale. */
+@media (max-height: 500px) and (orientation: landscape) {
+  .topbar[data-chrome="float"] {
+    --float-gutter: 8px;
+  }
+
+  /* One knob: the padding is derived from this, so the island stays exactly
+     one crossword gap at the smaller size too. */
+  .topbar[data-chrome="float"] .logo-container {
+    --logo-mark-h: 34px;
+  }
+}
+
+
+/* ==========================================================================
+   Interactive states.
+
+   This section exists because of a systemic bug, not three separate ones. Every
+   plate rule above sets `background` (and some set `border`) at a specificity of
+   one attribute + two classes. Nearly every state in this bar is expressed by
+   globals.css as a background or border change at a LOWER or EQUAL specificity
+   — `.legend-tool.active`, `.btn-cast-up.is-cast`, `.btn-header:hover` — so
+   turning the band into plates silently flattened all of them at once while
+   leaving each control's resting appearance untouched. That is why the losses
+   surfaced one at a time: the default state of everything still looked right.
+
+   So the states are re-asserted here, together, above the plate. Two rules:
+
+   1. A translucent plate must be COMPOSITED with, not replaced by, a state
+      tint — `background: var(--hover-bg)` alone would delete the plate and the
+      blur with it. Stacking a solid-colour gradient over the plate paints the
+      tint on top and keeps the surface underneath, which is exactly the
+      relationship the opaque banner had.
+   2. A state that CONFIRMS something is opaque on purpose. `.is-cast` is the
+      only feedback a person gets that their vote registered, so it is a full
+      fill, not a tint over glass.
+   ========================================================================== */
+
+/* --- Start / End -------------------------------------------------------- */
+
+/* ARMED TOOL — `.active` marks the tool the next map click will place.
+   On load that is Start, with the pointer nowhere near it.
+
+   globals paints `.active` with --hover-bg-strong, which is the SAME token it
+   uses for :hover. So an armed control is pixel-identical to a hovered one,
+   and the armed Start reads as a hover highlight that refuses to turn off.
+   It is not one: there are zero JS hover handlers on these buttons (the only
+   onMouseEnter in this chrome is AddressSearch syncing its autocomplete
+   cursor), and prod's banner puts the same class on the same button at the
+   same moment — measured by flipping data-chrome on one live page and
+   comparing. Nothing here is hand-managed, so there is no set/clear pair to
+   get out of sync; the browser owns enter and leave, which is where this
+   stays.
+
+   The fix is to stop borrowing the hover token: armed now wears the colour of
+   the waypoint it is about to drop — cyan for Start, red for End, the same two
+   the markers use — plus an inset edge in that colour. Hover keeps the neutral
+   lift. The two can no longer be confused, in either direction. */
+.topbar[data-chrome="float"] .topbar-legend > :nth-child(1).legend-tool.active,
+.topbar[data-chrome="float"] .topbar-legend > :nth-child(1).legend-tool.typing {
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--color-start) 16%, transparent),
+      color-mix(in srgb, var(--color-start) 16%, transparent)),
+    var(--plate-bg);
+  box-shadow:
+    var(--plate-shadow),
+    inset 0 1px 0 var(--plate-sheen),
+    inset 2px 0 0 var(--color-start);
+}
+
+.topbar[data-chrome="float"] .topbar-legend > :nth-child(3).legend-tool.active,
+.topbar[data-chrome="float"] .topbar-legend > :nth-child(3).legend-tool.typing {
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--color-end) 16%, transparent),
+      color-mix(in srgb, var(--color-end) 16%, transparent)),
+    var(--plate-bg);
+  box-shadow:
+    var(--plate-shadow),
+    inset 0 1px 0 var(--plate-sheen),
+    inset 2px 0 0 var(--color-end);
+}
+
+/* Hover, native and neutral. Gated on a real hovering pointer: on touch,
+   `:hover` latches after a tap and stays until you tap elsewhere, which is the
+   stuck-highlight complaint again in the one place CSS can actually produce
+   it. The rail's tooltips are already gated this way for the same reason. */
+@media (hover: hover) {
+  .topbar[data-chrome="float"] .topbar-legend > .legend-tool:hover:not(:disabled):not(.active) {
+    background:
+      linear-gradient(var(--hover-bg), var(--hover-bg)),
+      var(--plate-bg);
+  }
+}
+
+/* --- minus / plus ------------------------------------------------------- */
+
+/* The standing "you hold this direction" state. Opaque, and each direction
+   keeps its own identity colour — the same two the map's markers use. */
+.topbar[data-chrome="float"] .btn-cast-up.is-cast {
+  background: var(--color-start);
+  color: var(--marker-ink, #0d0d0d);
+}
+
+.topbar[data-chrome="float"] .btn-cast-down.is-cast {
+  background: var(--color-end);
+  color: var(--marker-ink, #0d0d0d);
+}
+
+/* Hover previews the direction. The banner carried this on `border-color`,
+   which this sheet removes to keep the pair one shape, so it moves to a tint. */
+@media (hover: hover) {
+  .topbar[data-chrome="float"] .btn-cast-up:hover:not(:disabled):not(.is-cast) {
+    background:
+      linear-gradient(rgba(0, 196, 212, 0.22), rgba(0, 196, 212, 0.22)),
+      var(--plate-bg);
+  }
+}
+
+@media (hover: hover) {
+  .topbar[data-chrome="float"] .btn-cast-down:hover:not(:disabled):not(.is-cast) {
+    background:
+      linear-gradient(rgba(220, 52, 59, 0.22), rgba(220, 52, 59, 0.22)),
+      var(--plate-bg);
+  }
+}
+
+/* --- Clear -------------------------------------------------------------- */
+
+@media (hover: hover) {
+  .topbar[data-chrome="float"] .btn-header:hover:not(:disabled) {
+    background:
+      linear-gradient(var(--hover-bg), var(--hover-bg)),
+      var(--plate-bg);
+  }
+}
+
+/* --- Keyboard ----------------------------------------------------------- */
+
+/* .nav-btn already had this; nothing else in the band did, so tabbing through
+   the bar had no visible focus at all on the plates. Same treatment, so the
+   whole band answers the keyboard the same way. */
+.topbar[data-chrome="float"] .legend-tool:focus-visible,
+.topbar[data-chrome="float"] .mode-btn:focus-visible,
+.topbar[data-chrome="float"] .vote-type-control:focus-within,
+.topbar[data-chrome="float"] .btn-cast:focus-visible,
+.topbar[data-chrome="float"] .btn-header:focus-visible {
+  outline: 1px solid var(--ink-strong);
+  outline-offset: -3px;
 }

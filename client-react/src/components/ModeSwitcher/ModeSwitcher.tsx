@@ -161,6 +161,13 @@ export const ModeSwitcher = memo(function ModeSwitcher() {
         }}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
+        // The "Map:" beside this button is a bare sibling <span>, not a
+        // <label for>, so it never named the control to assistive tech — the
+        // button announced only the map's name, with nothing saying what
+        // picking it would change. Naming it here is what makes that survive
+        // however the label is styled or placed.
+        aria-label={`Map: ${current.name}`}
+        title={`Map: ${current.name}`}
       >
         <img className="mode-icon-img" src={iconSrc(current.symbol)} alt={current.name} />
         <span className="mode-label">{current.name}</span>
