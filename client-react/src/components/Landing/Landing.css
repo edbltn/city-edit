@@ -64,6 +64,19 @@
   /* Icon box. The add tile's mark and a map's symbol are peers and share it. */
   --landing-symbol: 56px;
 
+  /* Wordmark height. Fluid for the same reason the type scale is: as a frozen
+     pixel value it held 26% of the measure at 1280px and 14% of the viewport at
+     1920px — it did not get smaller, the page got bigger around it, which is
+     what "the logo looks tiny" actually was. Sizing it off vw keeps its share
+     of the page roughly constant, and the two ends of the clamp are the two
+     things worth protecting: below 200px the crossword grid's letters stop
+     being readable, and above 280px the header starts pushing the first row of
+     cards under the fold on a laptop. The narrow block re-points this the same
+     way it re-points the type, and the ranges are chosen to MEET at 720/721 —
+     the old fixed pair jumped the wordmark from 24% to 39% of the viewport
+     across that one pixel. */
+  --landing-logo: clamp(200px, 22vw, 280px);
+
   height: 100vh;
   /* dvh tracks the *visible* viewport as mobile browser chrome shows/hides, so
      the footer isn't stuck below the fold and the page scrolls to the bottom. */
@@ -86,7 +99,11 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-3);
+  /* One step wider than the rest of the page's rhythm: the wordmark is a large
+     graphic and the tagline is a small line of text, so at --space-3 the two
+     read as one crowded block once the mark scaled up. The narrow block puts it
+     back to --space-3, where the mark is small enough not to need the air. */
+  gap: var(--space-4);
   width: 100%;
   max-width: 1100px;
   margin: 0 auto;
@@ -127,8 +144,9 @@
   opacity: 0.7;
 }
 
+/* Height drives it; the width follows from the SVG's own viewBox aspect. */
 .landing-logo {
-  height: 180px;
+  height: var(--landing-logo);
   width: auto;
   display: block;
 }
@@ -429,9 +447,11 @@
     --landing-body: var(--font-size-xs);
     --landing-ui: var(--font-size-2xs);
     --landing-symbol: 48px;
+    --landing-logo: clamp(112px, 34vw, 190px);
   }
 
   .landing-header {
+    gap: var(--space-3);
     padding: 40px var(--space-4) var(--space-4);
   }
 
@@ -439,10 +459,6 @@
      Back in the column it centres under the tagline, clear of everything. */
   .landing-nav {
     position: static;
-  }
-
-  .landing-logo {
-    height: 112px;
   }
 
   .landing-grid {
