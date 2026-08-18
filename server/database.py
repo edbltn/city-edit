@@ -226,6 +226,16 @@ def init_db():
             # 0.2ms with it). The identity key can't help: it leads with edge_id.
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_map_vt_device "
                            "ON edge_votes(map_slug, vote_type_id, device_id)")
+            # "Has this person ever voted?" (database.has_voted_before), asked
+            # once per visit on the page-load path by the first-run flow. Both
+            # probes are single-column EXISTS lookups; the composite index above
+            # can't serve them because it leads with map_slug and the question
+            # is deliberately map-agnostic — somebody who voted on the bikes map
+            # is not a first-timer on the trees one.
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_device "
+                           "ON edge_votes(device_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_edge_votes_ip "
+                           "ON edge_votes(ip_hash)")
 
             # Vote-type lists: named collections (preset or user-created custom).
             cursor.execute("""
@@ -691,6 +701,47 @@ def count_unique_voters_for_edges(
     if not edge_ids:
         return []
     return count_unique_voters_for_edge_sets(map_slug, [list(edge_ids)])[0]
+
+
+def has_voted_before(device_id: str, ip_hash: Optional[str]) -> tuple[bool, Optional[str]]:
+    """Has the person behind this request ever cast a vote — on any map?
+
+    The question the first-run flow asks, and it is asked on the COUNTING
+    identity (vote_identity) rather than on the browser, for the reason that
+    module exists: `device_id` fragments, and a first run keyed on something that
+    fragments repeats itself at exactly the people it should leave alone.
+
+    Two indexed EXISTS probes rather than one on COALESCE(ip_hash, device_id) —
+    a functional expression can't use the plain column indexes, and this has to
+    stay cheap enough to sit on the page-load path. Under the "device" counting
+    scheme only the device is probed, so the answer always means the same thing
+    the block layer means.
+
+    Returns (voted, by) where `by` is "ip" | "device" | None — which key
+    answered, so an operator reading a log can tell a returning browser from a
+    co-NAT stranger.
+    """
+    if not DATABASE_URL:
+        return False, None
+    try:
+        with get_cursor() as cursor:
+            if vote_identity.COUNT_BY == "ip" and ip_hash:
+                cursor.execute(
+                    "SELECT EXISTS (SELECT 1 FROM edge_votes WHERE ip_hash = %s)",
+                    (ip_hash,),
+                )
+                if cursor.fetchone()[0]:
+                    return True, "ip"
+            cursor.execute(
+                "SELECT EXISTS (SELECT 1 FROM edge_votes WHERE device_id = %s)",
+                (device_id,),
+            )
+            return (True, "device") if cursor.fetchone()[0] else (False, None)
+    except Exception as e:
+        # Never let this decide anything by failing: the caller treats an error
+        # as "returning visitor" (see the client's fail-closed rule).
+        logger.warning(f"[DB] has_voted_before failed: {e}")
+        raise
 
 
 # ── Vote types (label ↔ id) ─────────────────────────────────────────────────

@@ -1,0 +1,375 @@
+/* ==========================================================================
+   First run — the wall of sentences, and the coach that follows it
+   ==========================================================================
+   The wall is the wordmark at paragraph size. CITY EDIT is drawn as letters in
+   1px boxes; this is the same construction holding whole sentences, ruled into
+   one continuous grid so the slips read as a single sheet rather than as a set
+   of cards. Everything comes from the app's own tokens — mono type, square
+   corners, hairline rules, the map's accent — because the point of the screen is
+   that the app has already started.
+   ========================================================================== */
+
+.opener-wall {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Not opaque: the live map glows through, so the first thing the wall says is
+     "you are already looking at your city". */
+  background:
+    radial-gradient(
+      120% 80% at 12% 0%,
+      color-mix(in srgb, var(--accent) 14%, transparent),
+      transparent 60%
+    ),
+    color-mix(in srgb, var(--paper) 96%, transparent);
+  font-family: var(--font-main);
+  color: var(--ink);
+  animation: opener-wall-in 260ms ease both;
+}
+
+.opener-wall:focus {
+  outline: none;
+}
+
+.opener-wall-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  /* Clear of the topbar: the wall covers it (it is a dialog), but the chrome
+     still reads faintly through the scrim, and a masthead sitting on top of
+     "click map to set start" looks like a rendering fault rather than a
+     deliberate transparency. */
+  padding: calc(var(--topbar-min-height) + clamp(16px, 4vh, 40px))
+           var(--space-5) var(--space-6);
+}
+
+/* ── The masthead ───────────────────────────────────────────────────────── */
+
+.opener-head {
+  margin-bottom: var(--space-6);
+  animation: opener-rise 340ms ease both;
+}
+
+.opener-kicker {
+  margin: 0 0 var(--space-3);
+  font-size: var(--font-size-2xs);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--ink) 55%, transparent);
+}
+
+.opener-title {
+  margin: 0;
+  /* The one piece of type in the app allowed to be big. It is a question being
+     asked of the reader, not a heading over a form. */
+  font-size: clamp(28px, 6vw, 52px);
+  font-weight: 500;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  color: var(--ink-strong);
+}
+
+.opener-sub {
+  max-width: 46ch;
+  margin: var(--space-3) 0 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--ink) 72%, transparent);
+}
+
+/* ── The grid of slips ──────────────────────────────────────────────────── */
+
+/* One continuous rule: the container draws top + left, each cell draws right +
+   bottom, so neighbouring slips share a single hairline instead of doubling it. */
+.opener-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+  border-top: 1px solid var(--hairline);
+  border-left: 1px solid var(--hairline);
+}
+
+.opener-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-height: 132px;
+  padding: var(--space-4);
+  border: none;
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  background: transparent;
+  font-family: var(--font-main);
+  text-align: left;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+  animation: opener-slip-in 300ms ease both;
+}
+
+.opener-tile:hover,
+.opener-tile:focus-visible {
+  background: var(--hover-bg-strong);
+  color: var(--ink-strong);
+  outline: none;
+  /* An inset rule rather than a border: a real border on hover would shift the
+     text by a pixel and make the whole wall twitch as the pointer crosses it. */
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.opener-tile-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  opacity: 0.75;
+  transition: opacity 0.14s ease;
+}
+
+.opener-tile-glyph {
+  display: inline-flex;
+  color: color-mix(in srgb, var(--ink) 70%, transparent);
+}
+
+.opener-tile:hover .opener-tile-icon,
+.opener-tile:focus-visible .opener-tile-icon {
+  opacity: 1;
+}
+
+.opener-tile-text {
+  flex: 1 1 auto;
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+
+.opener-tile-foot {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--ink) 45%, transparent);
+}
+
+/* The vote type the sentence commits to, said plainly. The wall is a friendlier
+   way IN to the vote types, not a way of hiding which one you picked. */
+.opener-tile-kind {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.opener-tile-go {
+  margin-left: auto;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.14s ease, transform 0.14s ease;
+}
+
+.opener-tile:hover .opener-tile-go,
+.opener-tile:focus-visible .opener-tile-go {
+  opacity: 1;
+  transform: translateX(0);
+  color: var(--accent);
+}
+
+/* ── The way out ────────────────────────────────────────────────────────── */
+
+.opener-foot {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-6) 0 var(--space-4);
+}
+
+.opener-skip {
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: transparent;
+  font-family: var(--font-main);
+  font-size: var(--font-size-xs);
+  color: color-mix(in srgb, var(--ink) 55%, transparent);
+  cursor: pointer;
+  transition: color 0.14s ease;
+}
+
+.opener-skip:hover {
+  color: var(--ink);
+}
+
+@keyframes opener-wall-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes opener-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes opener-slip-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── The coach ──────────────────────────────────────────────────────────── */
+/* Layout, palette, stacking and safe-area insets come from MapNotice; this owns
+   only the two-line voice and the cast pair. */
+
+.onboard-coach {
+  flex: 1 1 100%;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.onboard-lines {
+  min-width: 0;
+}
+
+/* The sentence they chose, kept on screen the whole way through so the flow
+   reads as finishing it rather than as following instructions. */
+.onboard-sentence {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-2xs);
+  color: color-mix(in srgb, var(--ink) 55%, transparent);
+}
+
+.onboard-ask {
+  margin: 2px 0 0;
+  font-size: var(--font-size-xs);
+  color: var(--ink-strong);
+}
+
+.onboard-actions {
+  flex: 0 0 auto;
+}
+
+.onboard-search {
+  flex: 0 0 auto;
+  margin-left: auto;
+  pointer-events: auto;
+}
+
+/* The strip lives at the bottom of the screen, so its autocomplete has to open
+   upwards or it opens off the bottom edge of the phone. */
+.onboard-search .autocomplete-results {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: var(--space-1);
+}
+
+.onboard-cast {
+  min-width: 92px;
+  font-variant-numeric: tabular-nums;
+}
+
+.onboard-cast-up {
+  border-color: var(--color-start);
+  color: var(--color-start);
+}
+
+.onboard-cast-up:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-start) 16%, transparent);
+}
+
+/* Present, equal in weight, second in order. Downvoting is real in this data
+   model, and a first run that hides it teaches people the map only takes
+   agreement — but the sentence they picked is a request for something, so the
+   affirmative is the one that completes it. */
+.onboard-cast-down {
+  border-color: color-mix(in srgb, var(--color-end) 70%, transparent);
+  color: var(--color-end);
+}
+
+.onboard-cast-down:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-end) 14%, transparent);
+}
+
+.onboard-cast:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.onboard-close {
+  align-self: flex-start;
+}
+
+@media (max-width: 600px) {
+  .opener-wall-inner {
+    /* The bar plus one control row: on a phone the topbar wraps its controls
+       onto a second line, and the masthead has to clear both or it lands on
+       the ghost of "Selection / Votes" showing through the scrim. */
+    padding: calc(var(--topbar-min-height) + var(--control-height))
+             var(--space-3) var(--space-4);
+  }
+
+  .opener-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .opener-tile {
+    min-height: 118px;
+    padding: var(--space-3);
+  }
+
+  .opener-tile-text {
+    font-size: var(--font-size-sm-mobile);
+  }
+
+  .onboard-coach {
+    position: relative;
+    flex-wrap: wrap;
+    /* Room for the close button, which is lifted out of the flow below. */
+    padding-right: 26px;
+  }
+
+  /* Wrapped, the × was landing on a line of its own under the buttons, which
+     reads as a stray control rather than as this strip's dismissal. Corner it. */
+  .onboard-close {
+    position: absolute;
+    top: -2px;
+    right: -4px;
+  }
+
+  .onboard-actions {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+  }
+
+  .onboard-search {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+
+  .onboard-search .address-search {
+    width: 100%;
+  }
+}
+
+/* A phone in portrait fits one readable sentence per row; two columns of six
+   words each is a word search, not a wall. */
+@media (max-width: 420px) {
+  .opener-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .opener-tile {
+    min-height: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .opener-wall,
+  .opener-head,
+  .opener-tile {
+    animation: none;
+  }
+
+  .opener-tile-go {
+    transition: none;
+  }
+}

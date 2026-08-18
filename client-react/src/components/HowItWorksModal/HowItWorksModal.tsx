@@ -2,6 +2,7 @@ import { memo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { COLOR_START, COLOR_END } from "../../colors";
 import { iconSrc } from "../../themes";
+import { requestOnboarding } from "../../onboarding/active";
 import "./HowItWorksModal.css";
 
 interface Props {
@@ -95,6 +96,30 @@ export const HowItWorksModal = memo(function HowItWorksModal({ isOpen, onClose }
               infrastructural constraints exist) and vote for the route you'd most
               want to see. Every vote for a desired commute shapes the heatmap.
             </p>
+          </section>
+
+          {/* The way back into the first-run flow. It exists because the flow's
+              "have you been here before?" key is the IP hash, which deliberately
+              treats a new person on a network somebody else voted from as a
+              returning visitor (onboarding/firstRun.ts). Rather than loosen a
+              key that was chosen to stop real users being onboarded twice, the
+              wall is one click away for anyone who wants it. */}
+          <section className="how-it-works-section">
+            <h3>Not sure where to start?</h3>
+            <p>
+              Pick a sentence and finish it on the map — it walks you through one
+              vote from start to cast.
+            </p>
+            <button
+              type="button"
+              className="hiw-start-sentence"
+              onClick={() => {
+                requestOnboarding();
+                onClose();
+              }}
+            >
+              Start a sentence →
+            </button>
           </section>
 
           <section className="how-it-works-section">

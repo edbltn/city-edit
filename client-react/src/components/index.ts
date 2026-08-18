@@ -14,3 +14,4 @@ export { BoundaryLayer } from "./BoundaryLayer";
 export { ModeSwitcher } from "./ModeSwitcher";
 export { ErrorBoundary } from "./ErrorBoundary/ErrorBoundary";
 export { CoPresence } from "./CoPresence";
+export { Onboarding } from "./Onboarding";

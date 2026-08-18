@@ -3,7 +3,7 @@ import {
   RouteProvider, WebSocketProvider, GhostPinProvider, GraphSnapProvider,
   ThemeProvider, MapProvider, HeatmapProvider,
 } from "./context";
-import { TopBar, MapView, ErrorToast, EventBanner, Landing, ErrorBoundary, CoPresence } from "./components";
+import { TopBar, MapView, ErrorToast, EventBanner, Landing, ErrorBoundary, CoPresence, Onboarding } from "./components";
 import { PasscodeGate } from "./components/PasscodeGate/PasscodeGate";
 import { useRoute, useHeatmap } from "./context";
 import { isLandingHost, subdomainRedirectUrl } from "./themes";
@@ -77,6 +77,12 @@ function AppContent() {
           costs nothing on a quiet map. Mounted behind the splash for the
           same reason the banner is: its entrance is wasted under the loader. */}
       {!isInitialLoading && <CoPresence />}
+      {/* First run: the wall of sentences, then the coach that follows one to a
+          cast. Mounted behind the splash for the same reason as the two above —
+          and because a wall that appears over a half-drawn map is a worse first
+          impression than the map alone. It decides for itself whether this
+          visitor is a first-timer (onboarding/firstRun.ts). */}
+      {!isInitialLoading && <Onboarding />}
       <PasscodeGate />
       {getCurrentMap()?.staging && (
         <div className="staging-ribbon" aria-hidden>STAGING</div>

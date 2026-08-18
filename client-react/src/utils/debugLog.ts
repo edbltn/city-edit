@@ -26,11 +26,12 @@ export type DebugChannel =
   | "maplibre"   // MapLibre lifecycle: load, webgl fallback, source errors
   | "sticker"    // scanned-sticker resolution: lookup, location, pinning
   | "audience"   // proposal view counts + live co-presence
+  | "onboard"    // first-run flow: visitor probe, tile pick, step transitions
   | "ws";        // websocket connect/disconnect/messages
 
 const ALL_CHANNELS: readonly DebugChannel[] = [
   "topo", "votes", "cast", "store", "blocks", "proposals", "maplibre",
-  "sticker", "audience", "ws",
+  "sticker", "audience", "onboard", "ws",
 ];
 
 const STORAGE_KEY = "cityedit_debug";

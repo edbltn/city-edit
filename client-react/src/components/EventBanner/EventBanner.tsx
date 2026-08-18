@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { getCurrentMap } from "../../map/runtime";
 import { MapNotice } from "../MapNotice";
+import { useOnboardingActive } from "../../onboarding/active";
 
 // ==========================================================================
 // Event banner — a one-off promo strip for an upcoming City Edit meetup.
@@ -52,9 +53,14 @@ function rememberDismissal(): void {
 
 export function EventBanner() {
   const [dismissed, setDismissed] = useState(wasDismissed);
+  // A first-timer's coach owns the bottom slot while it is up. This banner is
+  // durably dismissible and the event is a week out, so it waits for their
+  // second visit rather than sharing the strip with "tap the map to start".
+  const onboarding = useOnboardingActive();
 
   const inAudience = AUDIENCE_CITIES.has(getCurrentMap()?.cityId ?? "");
-  const visible = !dismissed && inAudience && Date.now() < EVENT_ENDS_AT;
+  const visible =
+    !dismissed && !onboarding && inAudience && Date.now() < EVENT_ENDS_AT;
 
   const dismiss = useCallback(() => {
     rememberDismissal();

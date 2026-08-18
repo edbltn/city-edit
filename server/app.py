@@ -2570,6 +2570,40 @@ def client_timing():
 
 # ── Printed stickers (QR codes on poles) ────────────────────────────────────
 
+@app.route("/api/visitor", methods=["GET"])
+def visitor():
+    """Has the person making this request ever cast a vote?
+
+    One boolean, and the whole first-run experience hangs off it (see the client's
+    onboarding/firstRun.ts). It is answered on vote_identity's COUNTING identity —
+    the IP hash, falling back to the device — and NOT on the browser's stored
+    voter_id, because that id demonstrably fragments: prod recorded one iPhone
+    minting six of them in three minutes on 2026-08-13. A first run keyed on a
+    fragmenting id repeats itself in front of the same real person, which is a
+    worse outcome than never showing it.
+
+    Two costs of the coarser key, both accepted deliberately and both in the same
+    direction as the vote counter's own trade (server/vote_identity.py):
+      · a newcomer behind a voted-from NAT is treated as a returning visitor and
+        sees no first run — recoverable, they can open it from How it Works;
+      · a returning visitor on a new network with cleared storage sees it again —
+        which is why the flow is one tap to dismiss and never blocks the map.
+
+    Never cached: it is per-identity, and a CDN or proxy holding one visitor's
+    answer would hand it to the next.
+    """
+    device_id, ip_hash = _resolve_user(request.args)
+    try:
+        voted, by = database.has_voted_before(device_id, ip_hash)
+    except Exception:
+        # Fail closed, exactly as the client does when the call itself fails:
+        # a database blip must not put a first-run wall in front of everybody.
+        voted, by = True, None
+    resp = jsonify({"hasVoted": bool(voted), "by": by})
+    resp.headers["Cache-Control"] = "no-store, private"
+    return resp
+
+
 @app.route("/api/stickers/<code>", methods=["GET"])
 def sticker_lookup(code):
     """What a scan of a printed sticker should do.
