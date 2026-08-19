@@ -7,10 +7,9 @@ import { hasPendingSticker } from "../../sticker";
 import { MapNotice } from "../MapNotice";
 import { CoachCallout } from "./CoachCallout";
 import { OpenerWall } from "./OpenerWall";
-import { openerFor } from "../../onboarding/phrasebook";
 import { buildTiles, type OpenerTile } from "../../onboarding/tiles";
 import {
-  endIsOptional, onboardingStep, requiresEnd, shouldOnboard,
+  endIsOptional, onboardingStep, requiresEnd, shouldOnboard, stepUsesTheMap,
   type OnboardingFacts,
 } from "../../onboarding/state";
 import { hasVisitedBefore, isSuppressed, suppress } from "../../onboarding/firstRun";
@@ -356,10 +355,28 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
     );
   }
 
-  // The sentence the flow is carrying: the phrasebook's line for whichever label
-  // the selection holds — a tile pick, a sticker's vote type, or a deep link's
-  // `vt=`. One lookup, so a sticker scan and a wall pick read identically.
-  const sentence = pickedLabel ? openerFor(pickedLabel) : null;
+  // THE TILE'S SENTENCE IS NOT CARRIED PAST THE WALL, and that is a correction.
+  //
+  // Every step used to print the phrasebook's line for the chosen label above
+  // its own copy — "I already cut across here, and so does everyone…" — on the
+  // theory that keeping it on screen made the flow read as FINISHING that
+  // sentence rather than as following instructions. The theory was fine and the
+  // display value was wrong: a tile is an ENTRY POINT. It picks a vote type and
+  // is then done, and from that moment the thing worth showing is the vote type,
+  // because that is what will be recorded.
+  //
+  // The gap between the two is not hypothetical, and the cast step is where it
+  // opens: the second coach mark now points at the vote-type picker and says
+  // "Change your vote if you need to". Somebody who takes that invitation has a
+  // tile sentence describing one thing and a vote about to be cast for another —
+  // and the closing line would then report the tile's, confidently, to the one
+  // person who knows it is wrong. Worse than showing nothing.
+  //
+  // So nothing here reads the tile. `voteType` is the RESOLVED type off the live
+  // selection, the same value the picker shows, the cast records and the URL
+  // carries. It is also not the same as `requestedVoteType`: a label whose kind
+  // the map cannot place resolves away to the map's default, and the vote goes
+  // to the resolved one. Reporting the request would be wrong there too.
   const optionalEnd = endIsOptional(facts);
   const line = ask(step, facts, voteType, calculating);
 
@@ -381,17 +398,19 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   if (target && anchor.box) {
     return (
       <>
-        {/* Only the cast step takes the map away. Placing a point IS a map
-            gesture, so greying the map out during `start` or `end` would grey
-            out the thing being asked for; by `cast` the points are placed and
-            the only move left is in the bar. The scrim sits one rung under the
-            chrome, so it covers the map, its furniture and any open proposal
-            card, while the bar stays above it and is greyed by the rules
-            instead — which is what leaves the −/+ pair and the vote-type picker
-            the lit things. It is also why the picker is genuinely CLICKABLE and
-            not merely bright: the scrim is below the chrome, so it was never in
-            front of the control, and the menu it opens is higher still. */}
-        {step === "cast" && createPortal(
+        {/* NOT RENDERED unless the step has nothing to ask of the map — see
+            `stepUsesTheMap`, which owns that rule and is tested. Not rendered
+            rather than restyled, and that distinction is the whole point: a
+            scrim with its colour taken out is an invisible sheet still eating
+            every click, which is worse than a visible grey because the map then
+            looks available and is not.
+
+            Where it IS rendered it sits one rung under the chrome, so it covers
+            the map, its furniture and any open proposal card while the bar stays
+            above it and is greyed by the rules instead — which is what leaves
+            the −/+ pair and the vote-type picker the lit things, and why the
+            picker is genuinely clickable rather than merely bright. */}
+        {!stepUsesTheMap(step) && createPortal(
           <div className="coach-scrim" aria-hidden="true" />,
           document.body
         )}
@@ -428,7 +447,6 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
     <MapNotice tone="notice" anchor aria-label="Getting started">
       <div className="onboard-coach map-notice-body">
         <div className="onboard-lines">
-          {sentence && <p className="onboard-sentence">{sentence}</p>}
           <p className="onboard-ask">{line}</p>
         </div>
 
@@ -495,6 +513,19 @@ function ask(
         : `“${effectiveVoteType}”, right here?`;
     }
     case "done":
+      // NAMES THE VOTE, not the sentence that led to it. This line used to print
+      // the tile's phrasebook opener above it — the prompt — which is the wrong
+      // value everywhere and actively misleading HERE: the cast step invites the
+      // reader to change the vote type, so the tile's implied type and the type
+      // actually cast can legitimately differ, and this is the report that would
+      // then tell the one person who knows better that they cast something else.
+      //
+      // `effectiveVoteType` is read off the live selection, and it cannot go
+      // stale while this line is up: the step is derived from `hasVoted`, so
+      // moving the selection or changing the type off the cast one leaves `done`
+      // on that same tick. The line and the vote it reports arrive and leave
+      // together.
+      //
       // The second sentence is a PROMISE ABOUT A CONTROL, so it was checked
       // against the control before it was written. Pressing +/− when every
       // touched block already holds your vote in that direction plans
@@ -502,7 +533,7 @@ function ask(
       // title ("Remove your vote for"). See planBlockVote/voteButtonState in
       // utils/castVote.ts and their tests. "The button" is unambiguous here
       // because the coach was pointing at that exact pair one step ago.
-      return "Cast! It's on the map. Hit the button again if you need to take back your vote.";
+      return `“${effectiveVoteType}” is on the map. Hit the button again if you need to take back your vote.`;
     default:
       return "";
   }

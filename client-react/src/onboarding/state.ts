@@ -75,6 +75,35 @@ export function onboardingStep(facts: OnboardingFacts): OnboardingStep {
   return "cast";
 }
 
+/**
+ * Is the MAP part of what this step is asking for?
+ *
+ * The coach greys down everything that is not the step's subject, and this is
+ * the rule that decides whether the map is included. It exists as a function
+ * with a test rather than as a condition inline in the render because the same
+ * mistake has now been made twice in different places — once on the vote-type
+ * picker, once nearly on the map — and both times the shape was the same:
+ *
+ *   ANYTHING THE CURRENT STEP IS ASKING THE PERSON TO USE STAYS BRIGHT AND
+ *   LIVE. Greying is for what is genuinely not part of this step. If that means
+ *   almost nothing is greyed at some step, that is the correct outcome.
+ *
+ * Dimming the exact control you are pointing at reads as "this is disabled" at
+ * the moment it needs to read as "use this" — and the failure has a nastier
+ * second half, because the greying over the map is a full-screen scrim. Take
+ * only the colour out of a scrim and you are left with an invisible sheet still
+ * swallowing every click, which is strictly worse than a visible grey: the map
+ * now LOOKS available and is not. So the scrim is not restyled per step, it is
+ * NOT RENDERED unless this returns false.
+ *
+ * `start` and `end` both ask for a tap on the map, so both keep it. `cast` is
+ * the only step whose whole subject is in the bar: the points are placed and
+ * the only move left is the −/+ pair.
+ */
+export function stepUsesTheMap(step: OnboardingStep): boolean {
+  return step === "start" || step === "end";
+}
+
 // ── Who sees this at all ───────────────────────────────────────────────────
 
 export interface TriggerFacts {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  endIsOptional, onboardingStep, requiresEnd, shouldOnboard,
+  endIsOptional, onboardingStep, requiresEnd, shouldOnboard, stepUsesTheMap,
   type OnboardingFacts,
 } from "./state";
 
@@ -113,5 +113,29 @@ describe("who sees the flow", () => {
 
   it("takes a dismissal as final, sticker or not", () => {
     expect(shouldOnboard({ ...trigger, pendingSticker: true, dismissed: true })).toBe(false);
+  });
+});
+
+describe("what the coach may grey out", () => {
+  // The rule, stated once: anything the step is asking the person to USE stays
+  // bright and live. These are the two steps whose instruction is "tap the map",
+  // so the map cannot be the thing that looks switched off.
+  it("leaves the map live on the steps that ask for a tap on it", () => {
+    expect(stepUsesTheMap("start")).toBe(true);
+    expect(stepUsesTheMap("end")).toBe(true);
+  });
+
+  it("takes the map away only once nothing is left to do on it", () => {
+    // By `cast` both points are placed and the whole subject is in the bar.
+    expect(stepUsesTheMap("cast")).toBe(false);
+  });
+
+  it("does not grey anything on the steps that have no callout", () => {
+    // `wall` covers the screen itself and `done` is a report — neither renders a
+    // callout, so neither reaches the scrim at all. Asserted anyway, because the
+    // scrim's condition is the negation of this function and a `true` here would
+    // silently be the difference between "no scrim" and "scrim over everything".
+    expect(stepUsesTheMap("wall")).toBe(false);
+    expect(stepUsesTheMap("done")).toBe(false);
   });
 });

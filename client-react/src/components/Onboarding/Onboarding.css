@@ -199,17 +199,6 @@
   min-width: 0;
 }
 
-/* The sentence they chose, kept on screen the whole way through so the flow
-   reads as finishing it rather than as following instructions. */
-.onboard-sentence {
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: var(--font-size-2xs);
-  color: color-mix(in srgb, var(--ink) 55%, transparent);
-}
-
 .onboard-ask {
   margin: 2px 0 0;
   font-size: var(--font-size-xs);
