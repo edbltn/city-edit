@@ -17,7 +17,7 @@ import { blockCoverage, type VoteDirection } from "../utils/voteStore";
 import { useVotesVersion } from "../utils/useVotesVersion";
 import { castVotes, voteButtonState } from "../utils/castVote";
 import { reverseGeocode } from "../utils/geocode";
-import { dlog, derror } from "../utils/debugLog";
+import { dwarn, derror } from "../utils/debugLog";
 import { useTheme } from "./ThemeContext";
 import { useGraphSnap } from "./GraphSnapContext";
 import type { ForcedCorridor, Selection } from "../selection/types";
@@ -666,7 +666,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
           if (failed.length > 0) {
             // Partial geometry would read as a complete route (and every
             // consumer indexes split paths positionally), so show none of it.
-            dlog("proposals", "no route for segment(s)", failed, "— clearing path");
+            dwarn("proposals", "no route for segment(s)", failed, "— clearing path");
             setSplitDesirePaths([]);
             setError(NO_ROUTE_MESSAGE);
             return;
@@ -715,7 +715,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
         if (calcVersion !== splitCalcVersionRef.current || aborted) return false;
 
         if (failed.length > 0 || paths.length !== mids.length + 1) {
-          dlog("proposals", "no route to dropped waypoint", pending.coords, "— not adding it");
+          dwarn("proposals", "no route to dropped waypoint", pending.coords, "— not adding it");
           setPendingWaypoint(null);
           setError(NO_ROUTE_MESSAGE);
           return false;

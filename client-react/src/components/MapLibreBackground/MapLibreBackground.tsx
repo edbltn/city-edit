@@ -10,7 +10,7 @@ import { useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import { Protocol } from "pmtiles";
 import { CONFIG, type BlockTilesConfig } from "../../config";
-import { dlog, dwarn, debugState } from "../../utils/debugLog";
+import { dlog, dburst, dwarn, debugState } from "../../utils/debugLog";
 import {
   maplibreRasterTiles,
   maplibreLabelTiles,
@@ -1085,8 +1085,13 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
           ?.mark("first-heat-apply");
       }
       applied.current = { heat: next, denomKey, norm };
-      dlog("blocks", `heat apply (${full ? "full" : "diff"}): ${writes} writes, ${next.size} lit`
-        + (animate ? `, ${changes.length} arriving (${arrival.size} in flight)` : ""));
+      // A diff that wrote nothing changed nothing — the interesting applies are
+      // the ones that moved heat, and votes can move it in bursts.
+      if (writes > 0 || full) {
+        dburst("blocks", "heat",
+          `heat apply (${full ? "full" : "diff"}): ${writes} writes, ${next.size} lit`
+          + (animate ? `, ${changes.length} arriving (${arrival.size} in flight)` : ""));
+      }
       debugState("blockHeatNonzero", next.size);
     };
 
@@ -1100,7 +1105,8 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
     // which would also drop the heat key set above.
     const onSelect = (e: Event) => {
       const next = (e as CustomEvent<BlockSelectDetail>).detail.blockIds;
-      dlog("blocks", `select: [${next.slice(0, 12).join(",")}${next.length > 12 ? ",…" : ""}]`);
+      dburst("blocks", "select",
+        `select: [${next.slice(0, 12).join(",")}${next.length > 12 ? ",…" : ""}]`);
       const ml = mapRef.current;
       if (ml && ml.getSource("blocks")) {
         const nextSet = new Set(next);
@@ -1164,7 +1170,6 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
           properties: { key: p.key, text: p.text, count: p.count, rank: p.rank, minz: p.minz },
         })),
       });
-      dlog("maplibre", `proposal labels: ${items.length} features`);
       debugState("proposalLabels", items.length);
     };
 

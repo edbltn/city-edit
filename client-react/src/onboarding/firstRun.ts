@@ -73,7 +73,7 @@
 // ==========================================================================
 
 import { CONFIG } from "../config";
-import { dlog } from "../utils/debugLog";
+import { dlog, dwarn } from "../utils/debugLog";
 import { getVoterId } from "../utils/voterIdentity";
 
 /** Written the moment the wall is shown, and again when the flow ends.
@@ -132,6 +132,9 @@ export function unsuppress(): void {
   }
 }
 
+/** The one in-flight /api/visitor probe, shared by every caller. */
+let visitorProbe: Promise<boolean> | null = null;
+
 /**
  * Has the person behind this request opened a map before this one?
  *
@@ -143,7 +146,16 @@ export function unsuppress(): void {
 export async function hasVisitedBefore(): Promise<boolean> {
   const cached = readStore(window.sessionStorage, ANSWER_KEY);
   if (cached === "1" || cached === "0") return cached === "1";
+  // The sessionStorage answer is only written once the reply lands, so two
+  // callers in the same tick (a remount, two consumers of the flow) would each
+  // fire their own probe and each log its own answer. One in-flight probe is
+  // enough — everyone waits on it.
+  if (visitorProbe) return visitorProbe;
+  visitorProbe = probeVisitor().finally(() => { visitorProbe = null; });
+  return visitorProbe;
+}
 
+async function probeVisitor(): Promise<boolean> {
   try {
     const url =
       `${CONFIG.apiUrl}/visitor?voter_id=${encodeURIComponent(getVoterId())}`;
@@ -155,7 +167,7 @@ export async function hasVisitedBefore(): Promise<boolean> {
     writeStore(window.sessionStorage, ANSWER_KEY, visited ? "1" : "0");
     return visited;
   } catch {
-    dlog("onboard", "visitor probe failed — assuming a returning visitor");
+    dwarn("onboard", "visitor probe failed — assuming a returning visitor");
     return true;
   }
 }

@@ -7,9 +7,13 @@
 // pattern "\[cast\]|\[blocks\]|…") can filter reliably.
 //
 // Channels are off by default in normal use. Enable them per tab:
-//   • open the app with ?tab=<name>   → names the tab AND enables all channels
+//   • open the app with ?tab=<name>   → names the tab AND enables TAB_CHANNELS
+//   • add ?debug=cast,blocks (or ?debug=* / ?debug=off) to override that
 //   • or in the console: cityedit.debug.enable("cast,blocks") / .enable("*")
 //   • or persistently: localStorage.cityedit_debug = "*"
+//
+// Anything that can fire per hover, per delta or per frame goes through
+// dburst() instead of dlog(), so a burst costs two lines, not two hundred.
 //
 // A named tab gets "[dbg:<name>]" appended to its <title> (kept there by a
 // MutationObserver, since the app rewrites the title on map changes) and the
@@ -33,6 +37,12 @@ const ALL_CHANNELS: readonly DebugChannel[] = [
   "topo", "votes", "cast", "store", "blocks", "proposals", "maplibre",
   "sticker", "audience", "onboard", "ws",
 ];
+
+// What a named ?tab=<name> turns on. Every channel is quiet enough now (the
+// per-hover / per-delta streams go through dburst) that all-on stays readable,
+// which is what a debug tab is for: you don't yet know which subsystem is
+// lying to you. Narrow or widen per load with ?debug=<spec>.
+const TAB_CHANNELS: readonly DebugChannel[] = ALL_CHANNELS;
 
 const STORAGE_KEY = "cityedit_debug";
 const TAB_KEY = "cityedit_tab_name";
@@ -63,14 +73,77 @@ export function derror(channel: DebugChannel, ...args: unknown[]): void {
   console.error(`[${channel}]`, ...args);
 }
 
+// ── Bursty events ───────────────────────────────────────────────────────────
+// Some things fire per hover, per delta, per frame. One line each turns the
+// console into a scrollback that nobody reads, so those go through dburst:
+// the first event of a burst prints as usual, the rest are counted, and when
+// the burst goes quiet ONE summary line reports how many there were, how long
+// it took, and what the last one said. `key` separates independent streams
+// within a channel (e.g. "select" vs "heat" in `blocks`).
+
+const BURST_QUIET_MS = 800;   // this much silence ends a burst
+const BURST_MAX_MS = 5000;    // …and a burst that never stops reports anyway
+
+type Burst = {
+  channel: DebugChannel; count: number; last: string;
+  t0: number; deadline: number; timer: ReturnType<typeof setTimeout>;
+};
+const bursts = new Map<string, Burst>();
+
+function nowMs(): number {
+  return typeof performance !== "undefined" ? performance.now() : Date.now();
+}
+
+function flushBurst(key: string): void {
+  const b = bursts.get(key);
+  if (!b) return;
+  bursts.delete(key);
+  clearTimeout(b.timer);
+  if (b.count > 0) {
+    console.log(
+      `[${b.channel}] +${b.count} more in ${Math.round(nowMs() - b.t0)}ms — last: ${b.last}`);
+  }
+}
+
+/** Log `message` if `channel` is on, collapsing bursts into one summary line. */
+export function dburst(channel: DebugChannel, key: string, message: string): void {
+  if (!enabled.has(channel)) return;
+  const k = `${channel}\u0000${key}`;
+  const now = nowMs();
+  let b = bursts.get(k);
+  if (!b) {
+    console.log(`[${channel}]`, message);
+    b = { channel, count: 0, last: message, t0: now, deadline: now + BURST_MAX_MS,
+          timer: 0 as unknown as ReturnType<typeof setTimeout> };
+    bursts.set(k, b);
+  } else {
+    b.count += 1;
+    b.last = message;
+    clearTimeout(b.timer);
+  }
+  // Trailing-edge: the summary lands when the stream stops — but a stream that
+  // never stops still reports every BURST_MAX_MS, so a runaway loop is visible
+  // rather than hidden behind its own first line.
+  b.timer = setTimeout(() => flushBurst(k), Math.max(0, Math.min(BURST_QUIET_MS, b.deadline - now)));
+}
+
 function enable(spec: string = "*"): string[] {
   for (const c of parseSpec(spec)) enabled.add(c);
   try { window.localStorage.setItem(STORAGE_KEY, [...enabled].join(",")); } catch { /* private mode */ }
   return [...enabled];
 }
 
+/** Test hook: set the enabled channels directly, bypassing URL and storage. */
+export function _setDebugChannels(spec: string): void {
+  enabled = parseSpec(spec);
+  for (const b of bursts.values()) clearTimeout(b.timer);
+  bursts.clear();
+}
+
 function disable(): void {
   enabled = new Set();
+  for (const b of bursts.values()) clearTimeout(b.timer);
+  bursts.clear();
   try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* private mode */ }
 }
 
@@ -132,8 +205,22 @@ export function initDebug(): void {
 
   if (name) {
     applyTitleSuffix(name);
-    for (const c of ALL_CHANNELS) enabled.add(c);
-    console.log(`[dbg] tab "${name}" — all debug channels on. cityedit.debug / cityedit.dumpState() available.`);
+    for (const c of TAB_CHANNELS) enabled.add(c);
+  }
+
+  // ?debug=<spec> is the override, and it wins: "*" for everything, a comma
+  // list for exactly those channels, "off" for none (a named tab you want
+  // silent for one reload).
+  let spec: string | null = null;
+  try { spec = new URLSearchParams(window.location.search).get("debug"); } catch { /* private mode */ }
+  if (spec != null) {
+    enabled = spec.trim() === "off" ? new Set() : parseSpec(spec);
+  }
+
+  if (name || enabled.size > 0) {
+    console.log(
+      `[dbg]${name ? ` tab "${name}" —` : ""} channels: ${[...enabled].join(",") || "none"}`
+      + ` (?debug=* for all, cityedit.debug.enable("blocks"), cityedit.dumpState())`);
   }
 
   (window as unknown as Record<string, unknown>).cityedit = {

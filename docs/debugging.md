@@ -19,6 +19,19 @@ Claude can debug the *same* tab together. Three pieces: **named debug tabs**
    `cityedit` console helpers. The name sticks across reloads and in-app
    navigation (sessionStorage), so it survives the app rewriting the URL.
 
+   All channels at once stays readable because the lines that could fire per
+   hover, per delta or per frame are burst-collapsed (see *Bursty lines*
+   below). To narrow it anyway, add `debug`:
+
+   ```
+   ?tab=eric&debug=cast,blocks   # only these two
+   ?tab=eric&debug=off           # named tab, silent console
+   ?debug=votes                  # channels without naming the tab
+   ```
+
+   `?debug=` wins over the tab default and over `localStorage.cityedit_debug`,
+   for that page load only.
+
 2. Reproduce whatever you're testing in that tab.
 
 3. Tell Claude: *"check tab eric"*. Claude will locate the tab by its
@@ -41,10 +54,34 @@ prints as `[channel] message`, so filtering is reliable in devtools
 | `votes` | `/api/graph-votes` loads (rev, legend), WS deltas applied, revision gaps → full refetch |
 | `cast` | **every press**: the planBlockVote decision (`cast`/`clear` counts, or `UNVOTE-ALL`) + the server's response (`changed/cleared/capped/evicted`) |
 | `store` | local my-votes store: load-time server reset (how many stale entries dropped) |
-| `blocks` | block heat broadcasts (how many blocks lit) + block-selection sets |
-| `proposals` | route-proposal recomputes: corridor count, scores, timing |
-| `maplibre` | lifecycle: `load` fired (raster fallback unmounts), WebGL-unavailable fallback, source errors |
-| `ws` | websocket connect / disconnect / bad messages |
+| `blocks` | block heat applies (writes + blocks lit) + block-selection sets (per hover — burst-collapsed) |
+| `proposals` | route-proposal recomputes (count, top 5, timing), label broadcasts, routes that failed to calculate |
+| `maplibre` | lifecycle: `load` fired (raster fallback unmounts), WebGL-unavailable fallback, source errors, canvas/container resizes |
+| `sticker` | scanned-sticker resolution: lookup, location, pinning |
+| `audience` | proposal view counts + live co-presence |
+| `onboard` | first-run flow: visitor probe, tile pick, step transitions |
+| `ws` | websocket connect / disconnect / sync packets / bad messages |
+
+### Bursty lines: `+N more in Mms`
+
+Anything that can fire per hover, per delta or per frame goes through
+`dburst(channel, key, message)` instead of `dlog`. The first event of a burst
+prints normally, the rest are counted, and when the stream goes quiet (or every
+5s if it never does) one summary lands:
+
+```
+[blocks] select: [148339]
+[blocks] +14 more in 5081ms — last: select: [259586]
+```
+
+So a mouse sweep across twenty blocks costs two lines, and a vote storm costs
+two lines per burst — while a runaway loop still announces itself rather than
+hiding behind its own first line. If you need every event (say you are counting
+selection dispatches), read the count off the summary, or watch the
+corresponding `debugState` key with `cityedit.dumpState()`.
+
+Warnings and errors never go through any of this: `dwarn`/`derror` print
+regardless of which channels are on, because a failure is not chatter.
 
 Enabling without a named tab:
 
@@ -52,6 +89,7 @@ Enabling without a named tab:
 cityedit.debug.enable("cast,blocks")   // specific channels
 cityedit.debug.enable("*")             // everything (persisted in localStorage)
 cityedit.debug.disable()
+cityedit.debug.channels()              // what is on right now
 ```
 
 or set `localStorage.cityedit_debug = "*"` and reload.

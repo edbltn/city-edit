@@ -97,7 +97,7 @@ import { pendingCastsFor, settlePendingCastsForDelta } from "../../utils/pending
 import {
   useProposalAudience, describeAudience, MIN_VIEWS_SHOWN,
 } from "../../hooks/useProposalAudience";
-import { dlog, dwarn, derror, debugState, debugProbe } from "../../utils/debugLog";
+import { dlog, dburst, dwarn, derror, debugState, debugProbe } from "../../utils/debugLog";
 import { useVotesVersion } from "../../utils/useVotesVersion";
 import { getVoterId } from "../../utils/voterIdentity";
 import { isHoverSuppressed } from "../../utils/touchHover";
@@ -1567,8 +1567,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   }>({ epoch: -1, eligible: null, byType: new Map(), eligibleLegendLen: 0 });
 
   const publishRouteProposals = useCallback((next: RouteProposal[], note: string) => {
+    // Top few only: the full list is twenty-odd corridors of label#id(score),
+    // which is a paragraph per sweep. cityedit.dumpState() has the count, and
+    // the ranking question is always about the head of the list.
+    const head = next.slice(0, 5).map((p) => `${p.label}#${p.id}(${p.score})`);
     dlog("proposals", `recompute: ${next.length} corridors ${note}`,
-      next.map((p) => `${p.label}#${p.id}(${p.score})`));
+      head.join(" ") + (next.length > head.length ? ` …+${next.length - head.length}` : ""));
     debugState("routeProposals", next.length);
     // Clustering is deterministic, so an unchanged vote state yields an
     // identical list — keep the previous array to avoid remounting diamonds.
@@ -1840,7 +1844,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
   const staleVotesRetriesRef = useRef(0);
   const staleVotesTimerRef = useRef<number | null>(null);
   const scheduleStaleVotesRefetch = useCallback(() => {
-    if (staleVotesRetriesRef.current >= STALE_VOTES_MAX_RETRIES) return;
+    if (staleVotesRetriesRef.current >= STALE_VOTES_MAX_RETRIES) {
+      // Out of retries with the server still serving a snapshot behind its own
+      // revision: the heatmap is now knowingly stale, which is worth saying out
+      // loud once rather than going quiet.
+      if (staleVotesRetriesRef.current === STALE_VOTES_MAX_RETRIES) {
+        staleVotesRetriesRef.current += 1;  // warn once, not once per attempt
+        dwarn("votes", `still served a rev-stale snapshot after `
+          + `${STALE_VOTES_MAX_RETRIES} refetches — heatmap may lag until reload`);
+      }
+      return;
+    }
     if (staleVotesTimerRef.current != null) return; // one pending retry is enough
     staleVotesRetriesRef.current += 1;
     dlog("votes", "served a rev-stale snapshot — refetching in "
@@ -2344,7 +2358,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         return;
       }
 
-      dlog("votes", `delta rev ${delta.rev}: "${delta.vtLabel ?? delta.vt}" `
+      dburst("votes", "delta", `delta rev ${delta.rev}: "${delta.vtLabel ?? delta.vt}" `
         + `edges=${delta.edges.length} blocks=${Object.keys(delta.blockCounts ?? {}).length}`);
       const legendLenBefore = graphDataRef.current?.vote_type_legend?.length ?? 0;
       applyDeltaToGraphData(delta);
@@ -4213,7 +4227,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
         });
       }
     }
-    dlog("proposals", `labels broadcast: ${detail.length}`
+    // Re-broadcast on every winners/proposal change AND again as each corridor's
+    // voter count lands, so this arrives in flurries — one line per flurry.
+    dburst("proposals", "labels", `labels broadcast: ${detail.length}`
       + ` (${points.length} point, ${routes.length} route`
       + `, ${pending} awaiting voter counts)`);
     window.dispatchEvent(new CustomEvent<ProposalLabelDetail[]>(

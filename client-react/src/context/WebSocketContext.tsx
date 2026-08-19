@@ -63,6 +63,12 @@ interface WebSocketContextValue {
     label: string, blockIds: number[]) => Promise<ViewCount | null>;
 }
 
+/** A socket closed by our own teardown carries this flag. The mark lives on the
+ *  socket itself — not in a ref (a remount racing the old socket's close event
+ *  would mistake its own connection for the dead one) and not in a module-level
+ *  set (the dev server can hand out more than one instance of a module). */
+type MarkedSocket = WebSocket & { __cityeditTeardown?: boolean };
+
 const WebSocketContext = createContext<WebSocketContextValue | null>(null);
 
 export function WebSocketProvider({ children }: { children: ReactNode }) {
@@ -201,6 +207,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     };
 
     ws.onclose = () => {
+      // A socket WE closed (provider unmount — in dev, StrictMode's throwaway
+      // first mount) is not a disconnection to warn about, and nothing is left
+      // to reconnect for: the next mount opens its own.
+      if ((ws as MarkedSocket).__cityeditTeardown) {
+        dlog("ws", "closed by teardown");
+        return;
+      }
       dwarn("ws", `disconnected — reconnecting in ${backoffRef.current}ms`);
       setConnectionStatus("disconnected");
       // We can no longer see the room, so we must stop claiming to. Leaving
@@ -225,7 +238,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
     connect();
     return () => {
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (wsRef.current) wsRef.current.close();
+      if (wsRef.current) {
+        (wsRef.current as MarkedSocket).__cityeditTeardown = true;
+        wsRef.current.close();
+      }
     };
   }, [connect]);
 
