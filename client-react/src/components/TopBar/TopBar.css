@@ -58,12 +58,32 @@
   }
 }
 
+/* BOXLESS BY DEFAULT. The wrapper exists so the floating band's bottom row can
+   be given a layout context of its own at the one width where it needs one
+   (TopBarFloat.css, the 580–1080 band). Everywhere else it generates no box at
+   all, so the banner's 2×2 grid and the floating desktop grid keep placing the
+   three controls inside it themselves — a `display: contents` element's
+   children take part in its parent's layout in document order, so adding this
+   wrapper moved nothing. */
+.picker-row {
+  display: contents;
+}
+
 /* The rail shares its grid column with the Cast/Clear group below it, and the
    column is as wide as whichever is wider. Pinning the rail to the column's end
    keeps its right edge flush with the legend's and with Clear's, whichever way
-   that comparison happens to fall (it currently ties almost exactly). */
+   that comparison happens to fall (it currently ties almost exactly).
+
+   Its CELL is explicit now, where auto-placement used to supply it: the rail is
+   the first child of .topbar-actions (it has to sit outside .picker-row, which
+   can only wrap adjacent siblings), so flow placement would put it at (1,1) and
+   push Map, Vote and the action block each one cell along. Stating the cell
+   makes the arrangement independent of the source order instead. Row 1, column
+   2 is where flow placement had it. The floating chrome overrides this with its
+   own grid-area at both of its widths. */
 .topbar-actions > .nav-rail {
   justify-self: end;
+  grid-area: 1 / 2;
 }
 
 /* Loading state pulse animation for route fields */

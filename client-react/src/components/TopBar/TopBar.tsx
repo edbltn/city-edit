@@ -242,72 +242,93 @@ export const TopBar = memo(function TopBar() {
         )}
 
         <div className={`topbar-actions${start.coords ? " has-selection" : ""}`}>
-          <div className="mode-switcher-group">
-            <span className="mode-prefix-label">Map:</span>
-            <ModeSwitcher />
-          </div>
-
           {/* One grid cell: .topbar-actions is a strict 2×2 grid (4-across in
               landscape), so all the meta links share the one rail. How-it-Works
               lives here too — it's something to read, not an action on the
-              current selection, which is what the second row is for. */}
+              current selection, which is what the second row is for.
+
+              FIRST CHILD ON PURPOSE. It is the only one of these four that
+              does NOT belong to the band's bottom row — it sits up on the
+              wordmark's line — so it has to stand outside .picker-row below,
+              and a wrapper can only enclose adjacent siblings. Its cell is
+              stated explicitly in TopBar.css rather than left to
+              auto-placement, which would now hand it (1,1). */}
           <NavRail onHowItWorks={() => setShowHowItWorks(true)} />
 
-          {/* Always visible: this control is now the map's LEGEND as well as
-              the cast-target picker (see VoteTypeSelector) — it says which
-              proposal types are drawn and lets you toggle them — so it can no
-              longer be gated on having a selection to vote on. */}
-          <div className="vote-switcher-group" data-coach="votetype">
-            <span className="mode-prefix-label">Vote:</span>
-            <VoteTypeSelector />
-          </div>
+          {/* THE BAND'S BOTTOM ROW, as one element. Map, Vote and the -/+ over
+              Clear block are one row's worth of controls, and at the width
+              where they sit side by side that row needs a layout context of
+              its own: sharing the bar's column tracks with the Start/End block
+              and the legend above meant the block inherited a track sized for
+              the LEGEND (251px for 117px of content) and the pills could not
+              reach it.
 
-          {/* Row 2, right cell: acts on the current selection only, so it is
-              empty until there is one. How-it-Works used to sit here purely to
-              keep the row from collapsing — the fixed grid-template-rows does
-              that on its own. */}
-          <div className="actions-group">
-            <div className={`calculating-indicator ${isLoading && start.coords && end.coords ? "active" : ""}`}>
-              <div className="spinner"></div>
-              <span>Calculating...</span>
+              The wrapper is BOXLESS (`display: contents`) at every other
+              width, so the banner's 2×2 grid and the floating desktop grid go
+              on placing these three controls exactly as they did before it
+              existed. Only the 580–1080 band gives it a box. */}
+          <div className="picker-row">
+            <div className="mode-switcher-group">
+              <span className="mode-prefix-label">Map:</span>
+              <ModeSwitcher />
             </div>
 
-            <div
-              className={`cast-group ${canVote && !isLoading ? "" : "hidden-reserve"}`}
-              data-coach="cast"
-              role="group"
-              aria-label="Cast a vote for or against"
-            >
-              <span className="cast-prefix-label">Cast:</span>
-              <button
-                type="button"
-                className={`btn-cast btn-cast-down${isDirectionCast(-1) ? " is-cast" : ""}`}
-                onClick={() => castVote(-1)}
-                aria-pressed={isDirectionCast(-1)}
-                title={isDirectionCast(-1) ? "Remove your vote against" : "Vote against"}
-                tabIndex={canVote && !isLoading ? undefined : -1}
-              >
-                −
-              </button>
-              <button
-                type="button"
-                className={`btn-cast btn-cast-up${isDirectionCast(1) ? " is-cast" : ""}`}
-                onClick={() => castVote(1)}
-                aria-pressed={isDirectionCast(1)}
-                title={isDirectionCast(1) ? "Remove your vote for" : "Vote for"}
-                tabIndex={canVote && !isLoading ? undefined : -1}
-              >
-                +
-              </button>
+            {/* Always visible: this control is now the map's LEGEND as well as
+                the cast-target picker (see VoteTypeSelector) — it says which
+                proposal types are drawn and lets you toggle them — so it can no
+                longer be gated on having a selection to vote on. */}
+            <div className="vote-switcher-group" data-coach="votetype">
+              <span className="mode-prefix-label">Vote:</span>
+              <VoteTypeSelector />
             </div>
 
-            <button
-              className={`btn-header btn-clear ${start.coords && !isLoading ? "" : "hidden-reserve"}`}
-              onClick={clearPoints}
-              tabIndex={start.coords && !isLoading ? undefined : -1}
-            >
-              Clear
-            </button>
+            {/* Row 2, right cell: acts on the current selection only, so it is
+                empty until there is one. How-it-Works used to sit here purely to
+                keep the row from collapsing — the fixed grid-template-rows does
+                that on its own. */}
+            <div className="actions-group">
+              <div className={`calculating-indicator ${isLoading && start.coords && end.coords ? "active" : ""}`}>
+                <div className="spinner"></div>
+                <span>Calculating...</span>
+              </div>
+
+              <div
+                className={`cast-group ${canVote && !isLoading ? "" : "hidden-reserve"}`}
+                data-coach="cast"
+                role="group"
+                aria-label="Cast a vote for or against"
+              >
+                <span className="cast-prefix-label">Cast:</span>
+                <button
+                  type="button"
+                  className={`btn-cast btn-cast-down${isDirectionCast(-1) ? " is-cast" : ""}`}
+                  onClick={() => castVote(-1)}
+                  aria-pressed={isDirectionCast(-1)}
+                  title={isDirectionCast(-1) ? "Remove your vote against" : "Vote against"}
+                  tabIndex={canVote && !isLoading ? undefined : -1}
+                >
+                  −
+                </button>
+                <button
+                  type="button"
+                  className={`btn-cast btn-cast-up${isDirectionCast(1) ? " is-cast" : ""}`}
+                  onClick={() => castVote(1)}
+                  aria-pressed={isDirectionCast(1)}
+                  title={isDirectionCast(1) ? "Remove your vote for" : "Vote for"}
+                  tabIndex={canVote && !isLoading ? undefined : -1}
+                >
+                  +
+                </button>
+              </div>
+
+              <button
+                className={`btn-header btn-clear ${start.coords && !isLoading ? "" : "hidden-reserve"}`}
+                onClick={clearPoints}
+                tabIndex={start.coords && !isLoading ? undefined : -1}
+              >
+                Clear
+              </button>
+            </div>
           </div>
         </div>
       </div>
