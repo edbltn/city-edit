@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMap, useRoute } from "../../context";
 import { pointTypeForLabel } from "../../themes";
@@ -146,6 +146,11 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   // later can move it.
   const [arrivedWithSelection] = useState(() => !!start.coords);
 
+  // The second mark's own box, so the first can be told to keep off it. React
+  // lays the secondary out first (it is the earlier child), so by the time the
+  // primary measures, this ref holds a real rect.
+  const secondaryBox = useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     if (visitedBefore !== null || !(hasWall || pendingSticker)) return;
     let cancelled = false;
@@ -191,10 +196,26 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   const target: CoachTarget | null =
     step === "start" ? "start" : step === "end" ? "end" : step === "cast" ? "cast" : null;
   const anchor = useCoachAnchor(active ? target : null);
-  // Anchored = there is a live control to hang the box off AND nobody is in the
-  // middle of typing an address into it. Either failure falls back to the strip
-  // (or, for typing, to silence) rather than to a tip pointing at nothing.
-  const anchored = !!anchor.box && !anchor.typing;
+  // THE SECOND MARK. The cast step puts two boxes on screen at once: one on the
+  // −/+ pair asking the question, and one on the vote-type picker saying the
+  // answer is still yours to change. That second one is not decoration — the
+  // question names a vote type, and a first-timer who disagrees with it has no
+  // way of knowing the picker above is theirs to move. Pointing at it is how
+  // they find out, which is also why the picker is exempt from the greying
+  // below: inviting somebody to use a control you have just faded out is worse
+  // than not inviting them.
+  const secondary = useCoachAnchor(active && step === "cast" ? "votetype" : null);
+
+  // Anchored = there is a live control to hang the box off, and — before a point
+  // exists — nobody is mid-address-search in the field we would be pointing at.
+  //
+  // The typing stand-down is scoped to `start` and `end` ON PURPOSE. Those are
+  // the steps whose own anchor turns into a search box, so a callout hanging off
+  // it would be over the suggestion list. By `cast` the fields are not the
+  // subject any more, and the rule for this step is that NOTHING takes the marks
+  // down except the cast itself.
+  const standsDown = anchor.typing && (step === "start" || step === "end");
+  const anchored = !!anchor.box && !standsDown;
 
   const calculating = isCalculating || isCalculatingSplit;
 
@@ -354,8 +375,8 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
     ) : null;
 
   // Somebody is typing an address into the very field we would be pointing at.
-  // Say nothing at all until they are done — see `typing` in coachAnchor.ts.
-  if (target && anchor.typing) return null;
+  // Say nothing at all until they are done — see `standsDown` above.
+  if (standsDown) return null;
 
   if (target && anchor.box) {
     return (
@@ -366,17 +387,33 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
             the only move left is in the bar. The scrim sits one rung under the
             chrome, so it covers the map, its furniture and any open proposal
             card, while the bar stays above it and is greyed by the rules
-            instead — which is what leaves the +/− the single lit thing. */}
+            instead — which is what leaves the −/+ pair and the vote-type picker
+            the lit things. It is also why the picker is genuinely CLICKABLE and
+            not merely bright: the scrim is below the chrome, so it was never in
+            front of the control, and the menu it opens is higher still. */}
         {step === "cast" && createPortal(
           <div className="coach-scrim" aria-hidden="true" />,
           document.body
         )}
+        {/* The second mark, drawn first so the one carrying the question is the
+            later element and wins any overlap. Skipped when the picker is not on
+            screen at all — short landscape, or a bar too narrow to show it. */}
+        {step === "cast" && secondary.box && (
+          <CoachCallout
+            anchor={secondary.box}
+            ask="Change your vote if you need to"
+            boxRef={secondaryBox}
+            avoidBoxes={[anchor.box]}
+          />
+        )}
         <CoachCallout
           anchor={anchor.box}
-          sentence={sentence}
           ask={line}
           actions={actions}
           onDismiss={handleDismiss}
+          avoidRef={step === "cast" ? secondaryBox : undefined}
+          avoidBoxes={step === "cast" && secondary.box ? [secondary.box] : undefined}
+          prefer={step === "cast" ? "right" : "left"}
         />
       </>
     );
@@ -438,14 +475,24 @@ function ask(
       // as — including when a label of unknown kind let the map's default
       // resolve one.
       //
-      // The old line ended "— or pick another above", pointing at the vote-type
-      // picker. That was written for a strip with nothing lit and nothing dimmed;
-      // the picker is now one of the greyed controls, so an instruction to use it
-      // contradicts the screen. The quoted label still says what will be recorded.
-      const question = facts.hasEnd
+      // `effectiveVoteType` is the RESOLVED vote type off the live selection, not
+      // the label of the tile that started the flow, and the difference is the
+      // whole reason the second mark can point at the picker. Change the type in
+      // that dropdown and this question re-renders naming the new one — the
+      // selection is the single source both read from, so there is no cached
+      // copy here to go stale. Telling somebody to change their vote and then
+      // showing them the old one would be worse than never offering.
+      //
+      // The line used to end "— or pick another above", which was the same
+      // instruction with no way to see what it meant. The mark on the picker
+      // replaces it, so the tail is gone and the question stays a question.
+      // Short on purpose: this box is a LABEL on the −/+ pair, and its tip is
+      // touching them. Naming the buttons in the text as well ("+ for yes, − for
+      // no") was a third line of copy doing the tip's job, and a three-line box
+      // beside a 36px control stops reading as a label on it.
+      return facts.hasEnd
         ? `“${effectiveVoteType}”, all along this stretch?`
         : `“${effectiveVoteType}”, right here?`;
-      return `${question} + for yes, − for no.`;
     }
     case "done":
       // The second sentence is a PROMISE ABOUT A CONTROL, so it was checked

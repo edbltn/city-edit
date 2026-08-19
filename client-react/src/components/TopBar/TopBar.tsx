@@ -257,7 +257,7 @@ export const TopBar = memo(function TopBar() {
               the cast-target picker (see VoteTypeSelector) — it says which
               proposal types are drawn and lets you toggle them — so it can no
               longer be gated on having a selection to vote on. */}
-          <div className="vote-switcher-group">
+          <div className="vote-switcher-group" data-coach="votetype">
             <span className="mode-prefix-label">Vote:</span>
             <VoteTypeSelector />
           </div>

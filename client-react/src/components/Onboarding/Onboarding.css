@@ -423,16 +423,26 @@ body[data-coach-focus] :is(
   transition: opacity 200ms ease, filter 200ms ease;
 }
 
-/* Lit: full colour, and lifted clear of the scrim's fade so the cast pair reads
-   as the live control rather than as one more thing behind glass. Not
-   `pointer-events` — nothing in the bar is ever disabled by the coach. Somebody
-   who wants to move a point they have already placed, or change the vote type
-   before casting, is doing something reasonable, and a first run that traps
-   them teaches the app is a wizard. Only the map is actually taken away, and
-   only once there is nothing left to do on it. */
+/* Lit: full colour, so the control in question reads as live rather than as one
+   more thing behind glass. Not `pointer-events` — nothing in the bar is ever
+   disabled by the coach. Somebody who wants to move a point they have already
+   placed is doing something reasonable, and a first run that traps them teaches
+   that the app is a wizard. Only the map is actually taken away, and only once
+   there is nothing left to do on it.
+
+   THE CAST STEP LIGHTS TWO THINGS. The −/+ pair, because that is the question;
+   and the vote-type picker, because the second coach mark is pointing at it and
+   saying "change your vote if you need to". Fading a control while inviting
+   somebody to use it is worse than not inviting them — and being merely bright
+   would be worse still, so the invitation is checked all the way through: the
+   scrim is BELOW the chrome (`--z-chrome − 1`), so it was never in front of the
+   picker; nothing here sets pointer-events; and the menu the picker opens is
+   `--z-dropdown`, higher again. The control is lit, unblocked, and open for
+   business. */
 body[data-coach-focus="start"] [data-coach="start"],
 body[data-coach-focus="end"] [data-coach="end"],
-body[data-coach-focus="cast"] [data-coach="cast"] {
+body[data-coach-focus="cast"] [data-coach="cast"],
+body[data-coach-focus="cast"] [data-coach="votetype"] {
   filter: none;
   opacity: 1;
 }
@@ -458,9 +468,15 @@ body[data-coach-focus="cast"] [data-coach="cast"] {
 }
 
 /* ── The callout ─────────────────────────────────────────────────────────
-   Position and max-width come from calloutPlacement.ts as inline styles; this
-   owns the surface, the type and the tip. Square, hairline, paper — the same
-   object as every other plate in the app, just small and pointed. */
+   A HORIZONTAL label: wide, short, and sitting BESIDE what it describes with
+   the tip on a vertical edge — `[ bla bla bla ]▶`. A box under a control is a
+   caption; a box beside it with a tip touching it is a label, and labelling is
+   what moving off the bottom strip was for.
+
+   Position, side and max-width come from calloutPlacement.ts as inline styles;
+   this owns the surface, the type and the tip. Square, hairline, paper — the
+   same object as every other plate in the app, just small and pointed. The tip
+   is the only thing allowed to break the rectangle. */
 .coach-callout {
   position: fixed;
   /* Tooltips and hover labels: the ladder's own name for this. It clears the
@@ -469,7 +485,10 @@ body[data-coach-focus="cast"] [data-coach="cast"] {
   z-index: var(--z-transient);
 
   box-sizing: border-box;
-  padding: var(--space-3) 26px var(--space-3) var(--space-3);
+  /* Tight vertically: one or two lines of the ask and nothing else in the box
+     now that the echoed sentence is gone. A tall box beside a 30px control
+     stops reading as a label on it. */
+  padding: var(--space-2) 26px var(--space-2) var(--space-3);
   border: 1px solid var(--ink-strong);
   border-radius: 0;
 
@@ -480,6 +499,19 @@ body[data-coach-focus="cast"] [data-coach="cast"] {
   background: var(--paper);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
   animation: coach-callout-in 200ms ease both;
+
+  /* TRANSPARENT TO THE POINTER, except its own controls — the same rule
+     MapNotice was built on, and here for a sharper reason. The placement tries
+     hard to keep a box off the controls the step is inviting you to use, but a
+     dense bar at 390px can leave it no clear side, and a coach that eats the
+     click meant for the +/− it is pointing at would be the worst version of
+     this feature: it looks available and is not. Nothing in the box needs the
+     pointer except the × and the one action button. */
+  pointer-events: none;
+}
+
+.coach-callout button {
+  pointer-events: auto;
 }
 
 /* Rendered before it has been measured: it must be in the document to have a
@@ -500,29 +532,18 @@ body[data-coach-focus="cast"] [data-coach="cast"] {
   to { opacity: 1; }
 }
 
-/* WRAPS, where the bottom strip's copy of this ellipsised. The strip ran the
-   width of the screen and a truncated tail cost nothing; a 300px callout cuts
-   the sentence in half — "I already cut across here, and s…" — and that
-   sentence is the thing the visitor chose, held on screen so the flow reads as
-   finishing it rather than as following instructions. Two lines, then clamp:
-   long enough for every line in the phrasebook at this size, short enough that
-   the box cannot grow taller than the control it is pointing at. */
-.coach-callout-sentence {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-  margin: 0 0 3px;
-  font-size: var(--font-size-2xs);
-  line-height: 1.35;
-  color: color-mix(in srgb, var(--ink) 55%, transparent);
+/* No × on a secondary mark — reclaim the padding it was reserving. */
+.coach-callout--nodismiss {
+  padding-right: var(--space-3);
 }
 
 .coach-callout-ask {
   margin: 0;
   font-size: var(--font-size-xs);
-  line-height: 1.45;
+  line-height: 1.4;
+  /* Breaks between words, never inside one: a mid-word break in a 180px box at
+     390px is the difference between a label and a smear. */
+  overflow-wrap: break-word;
   color: var(--ink-strong);
 }
 
@@ -567,21 +588,44 @@ body[data-coach-focus="cast"] [data-coach="cast"] {
 
 /* ── The tip ─────────────────────────────────────────────────────────────
    A rotated square with two of its borders showing, sitting half outside the
-   box so the seam falls inside it. `--coach-arrow-left` is the tip's centre
-   measured from the box's own left edge, set by calloutPlacement.ts — it is NOT
-   the box's midpoint, and that is the whole point: when the box is clamped to a
-   viewport edge the box stops moving and the tip keeps sliding, so it stays
-   over the control at every width. */
+   box so the seam falls inside it. `--coach-arrow` is the tip's centre measured
+   along the box's LEADING EDGE — from the left for a vertical tip, from the top
+   for a horizontal one. It is NOT the box's midpoint, and that is the whole
+   point: when the box is clamped to a viewport edge the box stops moving and
+   the tip keeps sliding, so it stays over the control at every width.
+
+   Four sides, named for where the BOX sits: `left` means the box is left of the
+   anchor and the tip is on the box's right edge, pointing right at it. The two
+   horizontal ones are the shape this is meant to have; `above`/`below` are the
+   fallback for widths where no legible box fits beside the control. */
 .coach-callout-tip {
   position: absolute;
-  left: var(--coach-arrow-left, 50%);
   width: 10px;
   height: 10px;
   background: var(--paper);
   border: 1px solid var(--ink-strong);
 }
 
+/* Horizontal — the tip is on a vertical edge and slides down it. */
+.coach-callout--left .coach-callout-tip {
+  top: var(--coach-arrow, 50%);
+  right: -6px;
+  border-left: none;
+  border-bottom: none;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.coach-callout--right .coach-callout-tip {
+  top: var(--coach-arrow, 50%);
+  left: -6px;
+  border-right: none;
+  border-top: none;
+  transform: translateY(-50%) rotate(45deg);
+}
+
+/* Vertical fallback — the tip is on a horizontal edge and slides along it. */
 .coach-callout--below .coach-callout-tip {
+  left: var(--coach-arrow, 50%);
   top: -6px;
   border-right: none;
   border-bottom: none;
@@ -589,6 +633,7 @@ body[data-coach-focus="cast"] [data-coach="cast"] {
 }
 
 .coach-callout--above .coach-callout-tip {
+  left: var(--coach-arrow, 50%);
   bottom: -6px;
   border-left: none;
   border-top: none;

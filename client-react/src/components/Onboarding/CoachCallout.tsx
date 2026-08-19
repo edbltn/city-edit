@@ -1,6 +1,6 @@
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { calloutMaxWidth, placeCallout, type CalloutPlacement } from "../../onboarding/calloutPlacement";
+import { calloutFit, placeCallout, type CalloutPlacement } from "../../onboarding/calloutPlacement";
 import type { AnchorBox } from "../../onboarding/coachAnchor";
 
 // ==========================================================================
@@ -38,39 +38,66 @@ import type { AnchorBox } from "../../onboarding/coachAnchor";
 
 interface Props {
   anchor: AnchorBox;
-  /** The sentence they chose, kept on screen the whole way through. */
-  sentence: string | null;
-  /** What to do right now. */
+  /** What to do right now. One line where it fits — the box is a label on a
+   *  control, not a paragraph about it. */
   ask: string;
   /** A decision the coach owns rather than the chrome — today, exactly one:
    *  declining an end point the flow was only guessing might exist. */
   actions?: ReactNode;
-  onDismiss: () => void;
+  /** Omitted on a SECONDARY mark. The cast step puts two boxes on screen at
+   *  once and two × buttons read as two separate things to deal with; one
+   *  closing control closes the flow, which is what it always did. */
+  onDismiss?: () => void;
+  /** Hand this box its own element, so a later box can be told to avoid it. */
+  boxRef?: RefObject<HTMLDivElement | null>;
+  /** A box already on screen that this one must not land on top of. Read live
+   *  rather than passed as numbers: the other box moves on every resize too, and
+   *  a snapshot taken at render time would be a frame stale exactly when the
+   *  layout is changing. */
+  avoidRef?: RefObject<HTMLDivElement | null>;
+  /** Controls this box must not cover — the OTHER mark's anchor, so a coach
+   *  never lands on the control the other half of it is pointing at. */
+  avoidBoxes?: AnchorBox[];
+  /** Which side of the control this box would rather sit on. The cast step's
+   *  two marks take opposite sides so they cannot meet — see calloutFit. */
+  prefer?: "left" | "right";
 }
 
-export function CoachCallout({ anchor, sentence, ask, actions, onDismiss }: Props) {
-  const ref = useRef<HTMLDivElement>(null);
+export function CoachCallout({
+  anchor, ask, actions, onDismiss, boxRef, avoidRef, avoidBoxes, prefer = "left",
+}: Props) {
+  const own = useRef<HTMLDivElement>(null);
+  const ref = boxRef ?? own;
   const [placement, setPlacement] = useState<CalloutPlacement | null>(null);
 
   const reposition = useCallback(() => {
     const el = ref.current;
     if (!el) return;
+    const other = avoidRef?.current?.getBoundingClientRect();
+    const blockers = [
+      ...(other && other.width > 0
+        ? [{ top: other.top, left: other.left, width: other.width, height: other.height }]
+        : []),
+      ...(avoidBoxes ?? []),
+    ];
     const next = placeCallout(
       anchor,
       { width: el.offsetWidth, height: el.offsetHeight },
-      { width: window.innerWidth, height: window.innerHeight }
+      { width: window.innerWidth, height: window.innerHeight },
+      blockers,
+      prefer
     );
     setPlacement((prev) =>
       prev &&
       prev.top === next.top &&
       prev.left === next.left &&
       prev.side === next.side &&
-      prev.arrowLeft === next.arrowLeft &&
+      prev.arrow === next.arrow &&
       prev.maxWidth === next.maxWidth
         ? prev
         : next
     );
-  }, [anchor]);
+  }, [anchor, avoidRef, avoidBoxes, ref, prefer]);
 
   // Re-run whenever the anchor moves (the hook hands us a new box) and whenever
   // our own content changes size — the ask is a different length at each step,
@@ -82,38 +109,54 @@ export function CoachCallout({ anchor, sentence, ask, actions, onDismiss }: Prop
     const ro = new ResizeObserver(reposition);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [reposition, sentence, ask, actions]);
+  }, [reposition, ask, actions]);
 
-  const maxWidth = placement?.maxWidth ?? calloutMaxWidth(
-    typeof window === "undefined" ? 1024 : window.innerWidth
-  );
+  // Before the first measurement there is no placement to read a width off, and
+  // the width is what decides how the ask wraps — so it comes from the anchor
+  // and the viewport, which are known, rather than from the box, which is not.
+  const maxWidth =
+    placement?.maxWidth ??
+    calloutFit(
+      anchor,
+      {
+        width: typeof window === "undefined" ? 1024 : window.innerWidth,
+        height: typeof window === "undefined" ? 768 : window.innerHeight,
+      },
+      prefer
+    ).maxWidth;
 
   return createPortal(
     <div
       ref={ref}
-      className={`coach-callout${placement ? ` coach-callout--${placement.side}` : " coach-callout--measuring"}`}
+      className={
+        `coach-callout` +
+        (placement ? ` coach-callout--${placement.side}` : " coach-callout--measuring") +
+        (onDismiss ? "" : " coach-callout--nodismiss")
+      }
       style={{
         top: placement ? `${placement.top}px` : 0,
         left: placement ? `${placement.left}px` : 0,
         maxWidth: `${maxWidth}px`,
-        // The tip's offset along the box's edge. Set as a custom property so the
-        // arrow is one CSS rule for both sides rather than two inline styles.
-        ["--coach-arrow-left" as string]: `${placement?.arrowLeft ?? 0}px`,
+        // The tip's offset along the box's leading edge — from the left for a
+        // vertical tip, from the top for a horizontal one. One custom property
+        // for all four sides, read differently by each side's rule.
+        ["--coach-arrow" as string]: `${placement?.arrow ?? 0}px`,
       }}
       role="status"
       aria-live="polite"
     >
-      {sentence && <p className="coach-callout-sentence">{sentence}</p>}
       <p className="coach-callout-ask">{ask}</p>
       {actions && <div className="coach-callout-actions">{actions}</div>}
-      <button
-        type="button"
-        className="coach-callout-close"
-        onClick={onDismiss}
-        aria-label="Close getting started"
-      >
-        ×
-      </button>
+      {onDismiss && (
+        <button
+          type="button"
+          className="coach-callout-close"
+          onClick={onDismiss}
+          aria-label="Close getting started"
+        >
+          ×
+        </button>
+      )}
       <span className="coach-callout-tip" aria-hidden="true" />
     </div>,
     document.body

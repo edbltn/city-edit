@@ -42,8 +42,12 @@
 import { useEffect, useState } from "react";
 
 /** Which piece of chrome the coach is pointing at. Matches `data-coach` in
- *  TopBar.tsx — the only coupling between this flow and the bar. */
-export type CoachTarget = "start" | "end" | "cast";
+ *  TopBar.tsx — the only coupling between this flow and the bar.
+ *
+ *  `votetype` is the odd one out: it is never a STEP, it is the second mark the
+ *  cast step puts up beside the first, on the control the question's answer can
+ *  be changed with. */
+export type CoachTarget = "start" | "end" | "cast" | "votetype";
 
 export interface AnchorBox {
   top: number;
