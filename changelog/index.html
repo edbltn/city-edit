@@ -29,6 +29,21 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-19-proposal-stacking.html">
+    <div class="date">2026-08-19</div>
+    <h2>Stacking: pins before words, and latitude before votes</h2>
+    <p>Two requests about paint order that live in two different renderers. The words beside a top
+    proposal are MapLibre symbols on the GL canvas; the pins are Leaflet DOM above it, so
+    &ldquo;text on top of icons&rdquo; is not a z-index anyone can write &mdash; and both ways to make
+    it one (labels out of GL, or pins into it) cost more than the bug. So the text <strong>yields</strong>
+    instead: every pin&rsquo;s footprint is now placed before a single word is, and <strong>no claim is
+    drawn under a pin</strong> at any zoom (5 of 10 labels were struck at z12, 2 of 15 at z14). The
+    second request needed the opposite move &mdash; Leaflet already stacks markers by latitude, and we
+    were burying that under each proposal&rsquo;s vote count, then under a band per KIND that put every
+    corridor in front of every point pin. Both constants are gone; a square and a diamond now order by
+    which one is further south, and swapping their latitudes flips them.</p>
+  </a>
+
   <a class="entry" href="./2026-08-19-onboarding-voice-and-vocabulary.html">
     <div class="date">2026-08-19</div>
     <h2>The wall asks for a need, not for a volunteer</h2>

@@ -1,0 +1,1001 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stacking: pins before words, and latitude before votes — 2026-08-19</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Stacking: pins before words, and latitude before votes</h1>
+    <div class="dateline">2026-08-19 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#engines">Two renderers, and why neither one moved</a>
+<a href="#labels">One collision pass where there should have been two</a>
+<a href="#pins">Latitude was already there; a vote count was standing on it</a>
+<a href="#kinds">The same bug, one level up: a band per KIND</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Two requests about paint order that turned out to live in two different renderers. The words beside a top proposal are MapLibre symbols on the GL canvas; the pins are Leaflet DOM above it, so &ldquo;text on top of icons&rdquo; is not a z-index anyone can write &mdash; and both ways to make it one (labels out of GL, or pins into it) cost more than the bug. So the text <strong>yields</strong> instead: every pin&rsquo;s footprint is now placed before a single word is, and no claim is drawn under a pin at any zoom. The second request needed the opposite move &mdash; Leaflet already stacks markers by latitude, and we were burying that under each proposal&rsquo;s vote count. Taking the count off hands the order back to geography &mdash; and then, once it was, a second constant showed through underneath it: corridors sat in bands of their own above every point pin, so latitude worked inside each kind and not between them. Both kinds now share one scale.</p>
+
+  
+    <section class="card" id="engines">
+      <div class="tag">THE DECISION</div>
+      <h2>Two renderers, and why neither one moved</h2>
+      <h3>Symptom</h3>
+      <p>The ask was for the text under a top-proposal pin to draw ON TOP of other icons. It cannot, and no z-index anywhere in the app can make it.</p>
+      <h3>Root cause</h3>
+      <ul><li>The words are <strong>MapLibre symbols</strong>, drawn on the GL canvas. The pins are <strong>Leaflet divIcons</strong>, drawn in a marker pane above that entire canvas &mdash; <code>MapLibreBackground</code> renders as a sibling before <code>MapContainer</code>. A pin therefore paints over GL text no matter how the GL style is ordered, and inside GL the proposal text is already on top of everything.</li>
+<li>The z-index ladder cannot help either, and correctly so: <code>#map</code> and <code>.leaflet-container</code> each open a stacking context on purpose, which is the box that keeps Leaflet's six-figure marker offsets from painting over the topbar. Nothing inside the map can outrank anything outside it, and nothing outside it can reach in.</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Rejected: move the labels into Leaflet.</strong> That trades away MapLibre's global collision index &mdash; the single reason the words are GL symbols. It is what makes proposal text push POI names aside, keeps labels off each other, and thins a dense downtown into pins instead of a wall of type. We would be hand-rolling decluttering to win a paint order.</li>
+<li><strong>Rejected: move the pins into MapLibre.</strong> Correct in the abstract &mdash; one engine, one collision index, one z-order &mdash; and a rewrite of drag, hover, the [&times;] badge, the cluster fan-out and the mid-drag gesture against symbols that are not DOM nodes. Far beyond a stacking fix.</li>
+<li><strong>Chosen: make the text yield instead of cover.</strong> The outcome the owner wants is that words are never buried under an icon; overlay is one way to get there and avoidance is the other, and only avoidance is reachable from one renderer. It also protects the rule that the pins stay the loudest thing on the map: text painted OVER pins would inverts exactly the hierarchy the labels are muted to preserve.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="labels">
+      <div class="tag">LABELS</div>
+      <h2>One collision pass where there should have been two</h2>
+      <h3>Symptom</h3>
+      <p>A neighbouring pin sat on a proposal&rsquo;s words: <code>MORE TREE|S</code> with its last letter under a wheelchair pin, <code>BETTER LIGHTI|NG</code> under a pedestrian-signal pin. Measured on nyc-walkways at midtown: <strong>5 of 10 labels struck at z12, 5 of 14 at z13, 2 of 15 at z14</strong>.</p>
+      <h3>Root cause</h3>
+      <ul><li>Each proposal was ONE symbol carrying both the transparent pin puck and the words. Symbols are placed in rank order, so proposal #1&rsquo;s words were placed, and then proposal #2&rsquo;s puck was placed on top of them.</li>
+<li>A puck is <code>icon-allow-overlap</code> and cannot be asked to stand down &mdash; Leaflet is going to draw that pin whatever MapLibre decides &mdash; so the icon of a later symbol always wins against the text of an earlier one. The collision index has no notion of &lsquo;go back and move that label&rsquo;.</li>
+<li>The reveal schedule made it worse at the wide zooms: a proposal whose rank had not unlocked its label yet was filtered out of the layer entirely, so its pin reserved <em>nothing</em> while still being drawn.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The pucks move to <strong>their own layer above the words</strong>. Placement runs top-down, so every pin &mdash; labelled or not, at every zoom &mdash; is in the collision index before the first word is placed. A label that cannot clear the pins now stands down instead of being drawn and buried.</li>
+<li>The puck reserves the pin&rsquo;s <strong>ink</strong> (33px, grown by the 1.1&times; hover scale it pivots through) rather than its 42px element box, whose bottom 6px are empty. That matters now in a way it did not before: the puck is placed BEFORE the label it belongs to, so it can suppress its own label, and the old box left about a pixel of margin.</li>
+<li>A test asserts that clearance across the whole zoom range, because the failure is silent: if the two boxes ever touch, every proposal label vanishes at that zoom with nothing but a non-fatal warning.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</li>
+<li>client-react/src/components/MapLibreBackground/proposalLabelStyle.ts</li>
+<li>client-react/src/components/MapLibreBackground/proposalLabelStyle.test.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="pins">
+      <div class="tag">PINS</div>
+      <h2>Latitude was already there; a vote count was standing on it</h2>
+      <h3>Symptom</h3>
+      <p>Overlapping pins did not stack by latitude, which Leaflet does by default. Something was overriding it.</p>
+      <h3>Root cause</h3>
+      <ul><li>Leaflet sets <code>zIndex = layerPoint.y + zIndexOffset</code>, and y grows southward, so the southern (nearer) pin paints on top for free.</li>
+<li>Our offset was a state band PLUS the proposal&rsquo;s own net votes (capped at 50k) or a corridor&rsquo;s score (capped at 48k). y only reaches a few hundred among pins that can actually overlap, so a term in the tens of thousands did not merely outrank latitude &mdash; it erased it. Measured live: the corridor diamonds&rsquo; offsets ran <strong>300200 to 300309</strong>, up to 109 pixels of &lsquo;score lift&rsquo;.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The in-band term is gone; the bands stay. Bands encode a JOB &mdash; fanned out, matched waypoint, open modal, covered corridor &mdash; and a pin doing a job must not be buried by one that is merely present.</li>
+<li>The bands are 100k apart, so the only way y could carry a pin across a band is two pins 100,000 pixels apart, which cannot overlap and so cannot be seen to invert. That is asserted as a test, not assumed.</li>
+<li>Ranking by votes was defensible on its own, but it is not the rule asked for and not one the eye can read: nothing on the map says which of two overlapping pins has more votes, so the stacking simply looked arbitrary.</li>
+<li>The bands move out of two inline expressions into <code>pinStacking.ts</code>, where the regression itself &mdash; that no per-proposal quantity is added to an offset &mdash; is a test.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/GraphLayer.tsx</li>
+<li>client-react/src/components/GraphLayer/pinStacking.ts</li>
+<li>client-react/src/components/GraphLayer/pinStacking.test.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="kinds">
+      <div class="tag">PINS · REFINEMENT</div>
+      <h2>The same bug, one level up: a band per KIND</h2>
+      <h3>Symptom</h3>
+      <p>With the vote count gone, latitude ordered the pins correctly WITHIN each kind and not at all between them &mdash; a corridor diamond always drew in front of a point square, however far north it was.</p>
+      <h3>Root cause</h3>
+      <ul><li>Not panes, not layer groups, and not the GL/Leaflet split: both kinds are plain Leaflet markers in the same pane. The corridors simply carried <strong>bands of their own</strong> &mdash; 300000 uncovered, 400000 covered &mdash; above every band a point pin could reach.</li>
+<li>That is the same failure as the vote count, one level up. A constant of 300,000 against a y that reaches a few hundred does not tilt the comparison, it deletes it: every member of the upper group beats every member of the lower one at any latitude.</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The corridor bands are gone. There is now ONE function, <code>pinZIndexOffset</code>, called by both marker memos &mdash; and it takes no argument saying which kind it is looking at, so there is nowhere for a per-kind lift to come back.</li>
+<li>The bands that remain are all states either kind can be in. <code>covered</code> (the corridor the selection is acting on) now shares a band with <code>selected</code> (the point pin holding the open modal), because that is one statement about a pin, not two.</li>
+<li>This deliberately drops the old rule that &ldquo;a corridor is never buried under point pins&rdquo;. That rule IS the reported bug: the two kinds are peers on the map, so they are peers in the stack.</li>
+<li>Both kinds anchor on their tail tip, so screen y is the same measurement for a square and a diamond &mdash; which is what makes one shared scale legitimate rather than merely convenient.</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/GraphLayer/pinStacking.ts</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li>
+<li>client-react/src/components/GraphLayer/pinStacking.test.ts</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li><strong>Struck labels, before &rarr; after</strong>, measured in the running app on <code>nyc-walkways</code> (midtown, same viewport, one arm per page load, the &lsquo;before&rsquo; arm reconstructed at runtime by putting the puck back on the label symbol): z12 <strong>5 &rarr; 0</strong>, z13 <strong>5 &rarr; 0</strong>, z14 <strong>2 &rarr; 0</strong>, z15 <strong>0 &rarr; 0</strong>, z16 <strong>0 &rarr; 0</strong>. A label counts as struck when its text box intersects the drawn INK of any pin, not the pin&rsquo;s empty element box.</li>
+<li><strong>The cost, stated plainly.</strong> Labels that cannot clear the pins no longer draw: total labels at z13 went 14 &rarr; 5 and at z12 10 &rarr; 3. At the default zoom (14) the composition improves outright &mdash; the two mangled labels are gone and <code>FIX CURB CUT</code>, previously silenced by a <code>MORE TREE|S</code> that was drawn across a pin, now speaks. If the wide zooms want more words back, the knob is <code>proposalRevealZoom</code>, already documented as deliberately generous for exactly this reason.</li>
+<li><strong>No self-suppression</strong> &mdash; the silent catastrophe. A proposal centred in the viewport draws its label at every zoom from <strong>11 through 21</strong> on <code>nyc-proposals</code>, with its own puck present in the same frame.</li>
+<li><strong>Latitude ordering, within a kind</strong>: every proposal marker&rsquo;s <code>zIndex</code> minus its screen y is exactly its band constant &mdash; i.e. no per-proposal term survives. Of <strong>31 overlapping pin pairs</strong> across z12&ndash;z16, the southern one is on top in 31. The 5 remaining ties are pins at identical coordinates, which is what the cluster fan-out exists to disambiguate.</li>
+<li><strong>Latitude ordering, ACROSS the kinds</strong>, tested by construction rather than by inspection &mdash; a real square and a real diamond moved next to each other in the running app. Point 18px south: <strong>point in front</strong> (z 1591 vs 1573). Latitudes swapped: <strong>corridor in front</strong> (1591 vs 1573). Both arrangements at <strong>z13, z15 and z17</strong>, and confirmed by eye at z16 &mdash; the wheelchair square over the bike diamond, then the bike diamond over the wheelchair square.</li>
+<li>Client type-checks clean (<code>npx tsc -b</code>) and the full suite passes: <strong>662 tests</strong>, including 6 stacking tests and 2 new label-geometry tests.</li>
+<li>Not deployed. Local only, per the brief.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-walkways</code> at the default zoom and read the labels in midtown &mdash; every word should be whole. Before this, <code>MORE TREES</code> lost its last letter to the wheelchair pin beside it.</li>
+<li>Zoom out to z12&ndash;z13 over Manhattan. Expect FEWER labels than before and none of them crossed by a pin; if that reads as too quiet, say so &mdash; the reveal schedule is the knob, and it is one line.</li>
+<li>Zoom all the way in on a single pin (z19&ndash;z21). Its label must still draw directly under it; if labels vanish at a particular zoom, that is the self-collision failure and it is the one to report loudest.</li>
+<li>Hover a pin so it grows 1.1&times;, and confirm its own label is still clear underneath.</li>
+<li>Find two proposal pins that overlap and check the SOUTHERN one is on top &mdash; then drag the map so their screen positions swap sides and confirm the order follows.</li>
+<li>Do that again with a <strong>square and a diamond</strong> &mdash; a point proposal and a corridor. That is the pairing that was broken: the diamond used to win every time. Now the southern one wins, whichever kind it is.</li>
+<li>Confirm the interaction bands still win: open a proposal (its pin lifts), match a waypoint to one (the [&times;] badge must stay visible over any pin overlapping it), and explode a crowded cluster (the fanned group sits above everything).</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+19</span> / <span class="d-del">-31</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GraphLayer</span>
+        <span class="ctx-sum">The interaction layer: topology, snapping, votes, top-proposal pins and corridors, the cluster fan-out</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~4900 LOC — topology + votes, proposal selection, marker memos, hover/selection plumbing</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports</span><span class="ol-sum">+ pinStacking</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">IndicatorMarker</span><span class="ol-sum">unchanged — the react-leaflet Marker wrapper</span></li><li class="dim"><span class="ol-label">winners / routeProposals recompute</span><span class="ol-sum">unchanged — who becomes a top proposal</span></li><li class="dim"><span class="ol-label">proposal label broadcast</span><span class="ol-sum">unchanged — the payload the GL layers draw</span></li><li class="changed"><span class="ol-label">indicatorMarkers (point pins)</span><span class="ol-sum">zIndexOffset → pinZIndexOffset(state)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">cluster fan-out</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">routeIndicatorMarkers (corridor diamonds)</span><span class="ol-sum">zIndexOffset → pinZIndexOffset(state) — the SAME function</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The 16-line band comment moves to pinStacking.ts, where the bands themselves now live — and both memos end up calling the same function</li><li>Point pins: (override / role / selected / browse) + Math.min(50000, w.count) → the shared band alone</li><li>Corridors: (override / covered / uncovered) + Math.min(48000, p.score) → the SAME bands the squares use, covered mapping to `active`</li><li>Nothing else in the marker memos changes — same states, same order between bands</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index a7656f6..b9c66c9 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -35,6 +35,7 @@ import {</span>
+<span class="d-ctx">   formatProposalCount, proposalLabelText, proposalRevealZoom,</span>
+<span class="d-ctx"> } from &quot;../MapLibreBackground/proposalLabelStyle&quot;;</span>
+<span class="d-ctx"> import { makeVoteTypeIcon } from &quot;./voteTypeIcon&quot;;</span>
+<span class="d-add">+import { pinZIndexOffset } from &quot;./pinStacking&quot;;</span>
+<span class="d-ctx"> import { suggestionGlyphForLabel } from &quot;../../utils/suggestionIcon&quot;;</span>
+<span class="d-ctx"> import {</span>
+<span class="d-ctx">   candidatesForGraph, selectTopProposalsFrom, topLabelForEdges,</span>
+<span class="d-hunk">@@ -4554,30 +4555,16 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           key={w.edgeIdx}</span>
+<span class="d-ctx">           position={[posLat, posLng]}</span>
+<span class="d-ctx">           icon={icon}</span>
+<span class="d-del">-          // Stacking: a state BAND (far-apart bases) plus the proposal&#x27;s net</span>
+<span class="d-del">-          // votes as the in-band offset, so where pins overlap the more-supported</span>
+<span class="d-del">-          // one sits on top — but explode/waypoint/selected still lift a pin into</span>
+<span class="d-del">-          // a higher band regardless of votes. Bands are 100k apart and votes are</span>
+<span class="d-del">-          // capped at 50k, so the vote offset can never bleed one band into the</span>
+<span class="d-del">-          // next. Highest band first (route diamonds slot in between — see</span>
+<span class="d-del">-          // routeIndicatorMarkers):</span>
+<span class="d-del">-          //   500000+  fanned-out (spread override) — the exploded cluster is the</span>
+<span class="d-del">-          //            disambiguation UI, so it reads as one group on top of</span>
+<span class="d-del">-          //            EVERYTHING, route diamonds included.</span>
+<span class="d-del">-          //   400000+  a route diamond covered by the selection (routeIndicator).</span>
+<span class="d-del">-          //   300000+  a route diamond, uncovered (routeIndicator).</span>
+<span class="d-del">-          //   200000+  a MATCHED waypoint (start/end/mid). It carries the [×]</span>
+<span class="d-del">-          //            badge, so it must sit above any overlapping non-matched</span>
+<span class="d-del">-          //            sibling — else the upper icon conceals its badge.</span>
+<span class="d-del">-          //   100000+  the selected (open-modal) proposal.</span>
+<span class="d-del">-          //     1000+  everything else, ordered by votes.</span>
+<span class="d-del">-          zIndexOffset={</span>
+<span class="d-del">-            (override ? 500000</span>
+<span class="d-del">-             : role !== null ? 200000</span>
+<span class="d-del">-             : w.edgeIdx === selectedEdgeIdx ? 100000</span>
+<span class="d-del">-             : 1000)</span>
+<span class="d-del">-            + Math.min(50000, Math.max(0, w.count))</span>
+<span class="d-del">-          }</span>
+<span class="d-add">+          // Stacking: a state BAND and nothing else — the SAME function the</span>
+<span class="d-add">+          // corridor diamonds call, so the two kinds share one ordering space</span>
+<span class="d-add">+          // and latitude decides between them. Inside a band Leaflet&#x27;s own</span>
+<span class="d-add">+          // ordering takes over, which is by latitude: the southern (nearer)</span>
+<span class="d-add">+          // pin paints on top. See pinStacking.ts.</span>
+<span class="d-add">+          zIndexOffset={pinZIndexOffset({</span>
+<span class="d-add">+            fanned: !!override,</span>
+<span class="d-add">+            matchedWaypoint: role !== null,</span>
+<span class="d-add">+            active: w.edgeIdx === selectedEdgeIdx,</span>
+<span class="d-add">+          })}</span>
+<span class="d-ctx">           onActivate={activateIndicator}</span>
+<span class="d-ctx">           onDeactivate={deactivateIndicator}</span>
+<span class="d-ctx">           onClick={handleClick}</span>
+<span class="d-hunk">@@ -4867,13 +4854,14 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">           key={`route-${p.id}`}</span>
+<span class="d-ctx">           position={[posLat, posLng]}</span>
+<span class="d-ctx">           icon={icon}</span>
+<span class="d-del">-          // Route diamonds sit ABOVE every settled point icon (matched/selected/</span>
+<span class="d-del">-          // browse) so a corridor is never buried under point pins; covered ones</span>
+<span class="d-del">-          // outrank uncovered; the fanned-out spread (500000+) alone stays above</span>
+<span class="d-del">-          // them (it&#x27;s the explicit disambiguation gesture) — a fanned diamond</span>
+<span class="d-del">-          // joins that top band with the fanned squares. Bands documented at</span>
+<span class="d-del">-          // the point-icon zIndexOffset.</span>
+<span class="d-del">-          zIndexOffset={(override ? 500000 : covered ? 400000 : 300000) + Math.min(48000, Math.max(0, p.score))}</span>
+<span class="d-add">+          // The SAME bands the point pins use, and no corridor band of its own:</span>
+<span class="d-add">+          // a diamond and a square that overlap are ordered by latitude, like</span>
+<span class="d-add">+          // any two pins. `covered` is a corridor&#x27;s version of &quot;this is the one</span>
+<span class="d-add">+          // being acted on&quot;, so it takes the same band a selected point pin</span>
+<span class="d-add">+          // does. See pinStacking.ts.</span>
+<span class="d-add">+          zIndexOffset={pinZIndexOffset({</span>
+<span class="d-add">+            fanned: !!override, matchedWaypoint: false, active: covered,</span>
+<span class="d-add">+          })}</span>
+<span class="d-ctx">           onActivate={activate}</span>
+<span class="d-ctx">           onDeactivate={deactivate}</span>
+<span class="d-ctx">           onClick={() =&gt; {</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/pinStacking.test.ts</span>
+            <span class="stat"><span class="d-add">+89</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · tests</span>
+        <span class="ctx-sum">The stacking rules, including both regressions: the vote term, and the per-kind band</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">pinStacking.test.ts</span>
+        <span class="ctx-sum">new — ~90 LOC, 6 tests</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">leafletZIndex helper</span><span class="ol-sum">new — models what Leaflet adds: offset + layerPoint.y</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">latitude decides within a band</span><span class="ol-sum">new</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">corridor vs point ordered by latitude, not kind</span><span class="ol-sum">new — the swap test, in both directions</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">adds nothing per-proposal and nothing per-kind</span><span class="ol-sum">new — eight states collapse onto four bands</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">bands survive any overlapping pair</span><span class="ol-sum">new — gap must clear a pin&#x27;s height</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">fan-out on top / the pin being acted on, either kind</span><span class="ol-sum">new</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>&#x27;orders a corridor against a point pin by latitude, not by kind&#x27; asserts BOTH arrangements — point south wins, then swap and corridor south wins</li><li>&#x27;adds nothing per-proposal and nothing per-kind&#x27; also asserts the function&#x27;s arity, so a kind parameter cannot be slipped back in</li><li>The band-gap test uses a pin&#x27;s own height as the largest y difference two OVERLAPPING pins can have — everything further apart is invisible</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/pinStacking.test.ts b/client-react/src/components/GraphLayer/pinStacking.test.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..343b4bb</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/pinStacking.test.ts</span>
+<span class="d-hunk">@@ -0,0 +1,89 @@</span>
+<span class="d-add">+import { describe, it, expect } from &quot;vitest&quot;;</span>
+<span class="d-add">+import { PIN_BAND, pinZIndexOffset } from &quot;./pinStacking&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** What Leaflet adds on top of our offset: `Marker._setPos` sets</span>
+<span class="d-add">+ *  `zIndex = layerPoint.y + zIndexOffset`. Southern = larger y = on top. */</span>
+<span class="d-add">+const leafletZIndex = (offset: number, layerPointY: number) =&gt; offset + layerPointY;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** A settled point proposal (a square) and a settled corridor (a diamond) —</span>
+<span class="d-add">+ *  the two kinds, in the only state most pins are ever in. */</span>
+<span class="d-add">+const point = (over: Partial&lt;Parameters&lt;typeof pinZIndexOffset&gt;[0]&gt; = {}) =&gt;</span>
+<span class="d-add">+  pinZIndexOffset({ fanned: false, matchedWaypoint: false, active: false, ...over });</span>
+<span class="d-add">+const corridor = (over: Partial&lt;Parameters&lt;typeof pinZIndexOffset&gt;[0]&gt; = {}) =&gt;</span>
+<span class="d-add">+  pinZIndexOffset({ fanned: false, matchedWaypoint: false, active: false, ...over });</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;proposal pin stacking&quot;, () =&gt; {</span>
+<span class="d-add">+  // The requirement: of two overlapping pins, the lower-latitude (southern,</span>
+<span class="d-add">+  // larger screen y) one draws on top. Leaflet does this by default; the job</span>
+<span class="d-add">+  // here is to not override it. A pin&#x27;s vote count used to be added to its</span>
+<span class="d-add">+  // offset, which is exactly such an override — and a large one.</span>
+<span class="d-add">+  it(&quot;lets latitude decide between two pins in the same band&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(point()).toBe(point());</span>
+<span class="d-add">+    expect(leafletZIndex(point(), 620)).toBeGreaterThan(leafletZIndex(point(), 600));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // The cross-kind bug. A corridor used to sit in a band of its own (300k</span>
+<span class="d-add">+  // uncovered, 400k covered) above every point pin, so a southern square could</span>
+<span class="d-add">+  // never cover a northern diamond — latitude worked WITHIN each kind and not</span>
+<span class="d-add">+  // at all between them. Both kinds now take the same band for the same state,</span>
+<span class="d-add">+  // which is what puts them on one scale.</span>
+<span class="d-add">+  it(&quot;orders a corridor against a point pin by latitude, not by kind&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(corridor()).toBe(point());</span>
+<span class="d-add">+    // Point further south → point in front.</span>
+<span class="d-add">+    expect(leafletZIndex(point(), 700)).toBeGreaterThan(leafletZIndex(corridor(), 500));</span>
+<span class="d-add">+    // Swap the latitudes → the order flips.</span>
+<span class="d-add">+    expect(leafletZIndex(corridor(), 700)).toBeGreaterThan(leafletZIndex(point(), 500));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // The regression this file exists for. Any per-marker term — votes, score,</span>
+<span class="d-add">+  // rank, or a constant for one kind — added to the offset swamps y, because y</span>
+<span class="d-add">+  // is a screen coordinate (a few hundred among pins that overlap) while those</span>
+<span class="d-add">+  // quantities run to five figures.</span>
+<span class="d-add">+  it(&quot;adds nothing per-proposal and nothing per-kind&quot;, () =&gt; {</span>
+<span class="d-add">+    const offsets = new Set&lt;number&gt;();</span>
+<span class="d-add">+    for (const active of [true, false]) {</span>
+<span class="d-add">+      for (const matchedWaypoint of [true, false]) {</span>
+<span class="d-add">+        for (const fanned of [true, false]) {</span>
+<span class="d-add">+          offsets.add(pinZIndexOffset({ fanned, matchedWaypoint, active }));</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    // Eight combinations, but only the four bands they map onto.</span>
+<span class="d-add">+    expect([...offsets].sort((a, b) =&gt; a - b)).toEqual([</span>
+<span class="d-add">+      PIN_BAND.browse, PIN_BAND.active, PIN_BAND.matchedWaypoint, PIN_BAND.fanned,</span>
+<span class="d-add">+    ]);</span>
+<span class="d-add">+    // And the function has no way to be told what kind of pin it is looking at.</span>
+<span class="d-add">+    expect(pinZIndexOffset.length).toBe(1);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Bands are the part latitude may NOT overturn: a pin doing a job stays on</span>
+<span class="d-add">+  // top of a pin that is merely nearer the viewer. The gap has to clear the</span>
+<span class="d-add">+  // largest y difference two OVERLAPPING pins can have, which is the height of</span>
+<span class="d-add">+  // a pin — everything else is far enough away to be invisible.</span>
+<span class="d-add">+  it(&quot;keeps a band above the one below it for any two overlapping pins&quot;, () =&gt; {</span>
+<span class="d-add">+    const bands = Object.values(PIN_BAND).sort((a, b) =&gt; a - b);</span>
+<span class="d-add">+    const PIN_HEIGHT_PX = 42;</span>
+<span class="d-add">+    for (let i = 0; i &lt; bands.length - 1; i++) {</span>
+<span class="d-add">+      expect(bands[i + 1] - bands[i]).toBeGreaterThan(PIN_HEIGHT_PX);</span>
+<span class="d-add">+      // The southernmost possible overlapping pin in the lower band still loses</span>
+<span class="d-add">+      // to the northernmost in the higher one.</span>
+<span class="d-add">+      expect(leafletZIndex(bands[i], 1000 + PIN_HEIGHT_PX))</span>
+<span class="d-add">+        .toBeLessThan(leafletZIndex(bands[i + 1], 1000));</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;puts a fanned-out pin above everything, whichever kind it is&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(point({ fanned: true, matchedWaypoint: true, active: true })).toBe(PIN_BAND.fanned);</span>
+<span class="d-add">+    expect(corridor({ fanned: true, active: true })).toBe(PIN_BAND.fanned);</span>
+<span class="d-add">+    expect(corridor({ fanned: true })).toBeGreaterThan(point({ matchedWaypoint: true }));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // A matched waypoint carries the [×] badge, and a covered corridor is the one</span>
+<span class="d-add">+  // the route summary is talking about. Those are jobs, so they outrank browse</span>
+<span class="d-add">+  // pins of EITHER kind — but they are states, not kinds.</span>
+<span class="d-add">+  it(&quot;lifts the pin being acted on, of either kind&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(point({ matchedWaypoint: true })).toBeGreaterThan(corridor());</span>
+<span class="d-add">+    expect(corridor({ active: true })).toBeGreaterThan(point());</span>
+<span class="d-add">+    expect(point({ active: true })).toBe(corridor({ active: true }));</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/pinStacking.ts</span>
+            <span class="stat"><span class="d-add">+93</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · GraphLayer · marker stacking</span>
+        <span class="ctx-sum">Where a proposal pin sits in the Leaflet marker stack: state picks the band, latitude orders within it, and KIND does not enter into it</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">pinStacking.ts</span>
+        <span class="ctx-sum">new — ~95 LOC, pure, no Leaflet import</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">module doc</span><span class="ol-sum">new — one scale for both kinds; the two rules; what was removed and why</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">PIN_BAND</span><span class="ol-sum">new — four bands, every one of them a STATE</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">pinZIndexOffset</span><span class="ol-sum">new — the single kind-blind offset both marker memos call</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Rule 1 — STATE decides the band, never KIND: a pin doing a job must not be buried by a pin that is merely present</li><li>Rule 2 — LATITUDE decides within a band, and Leaflet applies it: Marker._setPos sets zIndex = layerPoint.y + zIndexOffset</li><li>Both kinds anchor on their tail tip, so y is the SAME measurement for a square and a diamond — which is what makes one scale legitimate</li><li>The removed terms, recorded: votes capped at 50k on squares, score capped at 48k on diamonds, and then the corridor bands (300k/400k) themselves</li><li>pinZIndexOffset takes no &#x27;kind&#x27; parameter — the type signature is the guardrail</li><li>Bands and screen distance: an inversion needs 100,000px of separation, at which point the two pins cannot overlap and so cannot be seen</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/pinStacking.ts b/client-react/src/components/GraphLayer/pinStacking.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..b059f7d</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/pinStacking.ts</span>
+<span class="d-hunk">@@ -0,0 +1,93 @@</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Where a proposal pin sits in the Leaflet marker stack.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * ONE scale for both kinds. Point proposals (squares) and route proposals</span>
+<span class="d-add">+ * (diamonds) are both Leaflet markers, both anchored on their tail tip, and they</span>
+<span class="d-add">+ * go through the SAME function here — because the moment either kind carries a</span>
+<span class="d-add">+ * base offset the other does not, latitude stops meaning anything between them.</span>
+<span class="d-add">+ * That is not a subtle failure: bands are 100k apart and screen y reaches a few</span>
+<span class="d-add">+ * hundred, so a per-kind band makes EVERY member of one kind draw in front of</span>
+<span class="d-add">+ * EVERY member of the other, whatever their latitudes. Corridors used to sit in</span>
+<span class="d-add">+ * bands of their own (300k uncovered, 400k covered) on the rule that &quot;a corridor</span>
+<span class="d-add">+ * is never buried under point pins&quot;, and that rule is what this file deleted:</span>
+<span class="d-add">+ * the two kinds are peers on the map, so they are peers in the stack.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Two rules remain, and the split between them is the whole design:</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ *   1. STATE decides the band — never KIND. A pin that is fanned out, or</span>
+<span class="d-add">+ *      carrying a route role, or holding the open modal, is doing a JOB, and a</span>
+<span class="d-add">+ *      pin doing a job must not be buried by a pin that is merely present.</span>
+<span class="d-add">+ *      Every band below is a state both kinds can be in (or, for</span>
+<span class="d-add">+ *      `matchedWaypoint`, one that simply never arises for a corridor) — none of</span>
+<span class="d-add">+ *      them is &quot;is this a corridor&quot;.</span>
+<span class="d-add">+ *   2. LATITUDE decides the order inside a band — and it is Leaflet, not this</span>
+<span class="d-add">+ *      module, that applies it. `Marker._setPos` sets `zIndex = layerPoint.y +</span>
+<span class="d-add">+ *      zIndexOffset`, and layer-point y grows southward, so of two overlapping</span>
+<span class="d-add">+ *      pins the SOUTHERN one paints on top by default. That is the near/far</span>
+<span class="d-add">+ *      reading every map with a tilted pin uses, it is free, and because both</span>
+<span class="d-add">+ *      kinds anchor on their tip, y is the same measurement for a square and a</span>
+<span class="d-add">+ *      diamond.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Which means the offsets below carry NO per-marker term. They used to: a pin</span>
+<span class="d-add">+ * was lifted by its own vote count (capped at 50k) and a corridor by its score</span>
+<span class="d-add">+ * (capped at 48k), so where two pins overlapped the better-supported one won.</span>
+<span class="d-add">+ * That is a defensible rule on its own, but it is not the one asked for, and it</span>
+<span class="d-add">+ * is not one the eye can read — nothing on the map says which of two overlapping</span>
+<span class="d-add">+ * pins has more votes, so the stacking looked arbitrary. Worse, y only ever</span>
+<span class="d-add">+ * reaches a few thousand, so a term in the tens of thousands did not merely</span>
+<span class="d-add">+ * outrank latitude, it erased it. Removing it is what hands the order back to</span>
+<span class="d-add">+ * Leaflet; the state bands are untouched.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Bands and screen distance: y is a layer point, not a viewport coordinate, so</span>
+<span class="d-add">+ * two pins far enough apart can differ by more than the 100k band gap and</span>
+<span class="d-add">+ * invert. &quot;Far enough apart&quot; is 100,000 pixels — hundreds of screens — and two</span>
+<span class="d-add">+ * pins that far apart cannot overlap, so an inversion there is not something</span>
+<span class="d-add">+ * anyone can see. The invariant that matters is the local one: pins close</span>
+<span class="d-add">+ * enough to overlap have near-identical y, so their bands hold.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * The bands, highest first. 100k apart — far enough that the y term (a few</span>
+<span class="d-add">+ * thousand at most among pins that can actually overlap) can never carry one</span>
+<span class="d-add">+ * pin into its neighbour&#x27;s band.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Read the list for what is NOT in it: there is no band for &quot;corridor&quot; and none</span>
+<span class="d-add">+ * for &quot;point&quot;. Every rung is a state.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export const PIN_BAND = {</span>
+<span class="d-add">+  /** Fanned out by the spread. The exploded cluster is the disambiguation UI,</span>
+<span class="d-add">+   *  so it reads as one group on top of EVERYTHING — including, for a fanned</span>
+<span class="d-add">+   *  square, the corridors it was overlapping a moment ago. */</span>
+<span class="d-add">+  fanned: 500_000,</span>
+<span class="d-add">+  /** A MATCHED waypoint (start/end/mid). It carries the [×] badge, so it must</span>
+<span class="d-add">+   *  sit above any overlapping sibling — else the upper icon conceals its</span>
+<span class="d-add">+   *  badge. Only point pins are ever matched to a waypoint; a corridor simply</span>
+<span class="d-add">+   *  never asks for this band rather than being excluded from it. */</span>
+<span class="d-add">+  matchedWaypoint: 200_000,</span>
+<span class="d-add">+  /** The one being acted on: a point proposal holding the open modal, or a</span>
+<span class="d-add">+   *  corridor covered by the current selection. Same band, because it is the</span>
+<span class="d-add">+   *  same statement — this is the proposal in play. */</span>
+<span class="d-add">+  active: 100_000,</span>
+<span class="d-add">+  /** Everything else, of either kind. */</span>
+<span class="d-add">+  browse: 1_000,</span>
+<span class="d-add">+} as const;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Stacking offset for a proposal pin — squares and diamonds alike.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Deliberately kind-blind: it takes no parameter saying which family the pin</span>
+<span class="d-add">+ * belongs to, so there is nowhere for a per-kind lift to be reintroduced.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function pinZIndexOffset(state: {</span>
+<span class="d-add">+  /** Displaced by the cluster fan-out. */</span>
+<span class="d-add">+  fanned: boolean;</span>
+<span class="d-add">+  /** Matched to a route waypoint (start/end/mid). Corridors pass false. */</span>
+<span class="d-add">+  matchedWaypoint: boolean;</span>
+<span class="d-add">+  /** Holding the open modal (point), or covered by the selection (corridor). */</span>
+<span class="d-add">+  active: boolean;</span>
+<span class="d-add">+}): number {</span>
+<span class="d-add">+  if (state.fanned) return PIN_BAND.fanned;</span>
+<span class="d-add">+  if (state.matchedWaypoint) return PIN_BAND.matchedWaypoint;</span>
+<span class="d-add">+  if (state.active) return PIN_BAND.active;</span>
+<span class="d-add">+  return PIN_BAND.browse;</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+            <span class="stat"><span class="d-add">+60</span> / <span class="d-del">-30</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · MapLibre base map</span>
+        <span class="ctx-sum">The GL map UNDER Leaflet: basemap raster, block heat and selection, place labels, proposal labels — camera-synced to the Leaflet map that owns interaction</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapLibreBackground.tsx</span>
+        <span class="ctx-sum">~1230 LOC — event payloads, place labels, proposal labels, the style builder, the React component</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">BlockVotesDetail / BlockSelectDetail / ProposalLabelDetail</span><span class="ol-sum">unchanged — the CustomEvent payloads GraphLayer broadcasts</span></li><li class="dim"><span class="ol-label">block hit-test bridge</span><span class="ol-sum">unchanged — point → block resolver for GraphLayer&#x27;s hover constraint</span></li><li class="dim"><span class="ol-label">addPlaceLabels</span><span class="ol-sum">unchanged — the POI tier, added BEFORE proposals so proposals place first</span></li><li class="changed"><span class="ol-label">PROPOSAL_SOURCE / PROPOSAL_LAYER / PROPOSAL_PUCK_LAYER</span><span class="ol-sum">+1 id — one source, now two layers</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">registerProposalPuck</span><span class="ol-sum">the transparent image is now PIN_W × PROPOSAL_PUCK_H (ink, not element box)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">addProposalLabels</span><span class="ol-sum">split: a text-only layer, then a puck-only layer above it</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">buildStyle</span><span class="ol-sum">unchanged — raster basemap, block heat/selection, CARTO label raster</span></li><li class="dim"><span class="ol-label">MapLibreBackground component</span><span class="ol-sum">unchanged — camera sync, heat apply, label source updates</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>PROPOSAL_PUCK_LAYER: the pin footprints get their own id, because they are now their own placement pass</li><li>registerProposalPuck: PIN_W × PROPOSAL_PUCK_H zeroed RGBA — collision boxes come from an image&#x27;s dimensions, never its contents</li><li>addProposalLabels doc: WHY IT IS TWO LAYERS — words and footprints are placed in separate passes, footprints first, and that ordering is the entire point</li><li>The label layer loses icon-image / icon-size / icon-anchor / icon-offset / icon-allow-overlap and text-optional (which only ever governed icon-without-text)</li><li>text-padding moves to the named PROPOSAL_TEXT_PADDING, because the label&#x27;s clearance under its own puck is now measured against it</li><li>The new proposal-pucks layer: NO filter and NO minzoom — the reveal schedule decides which proposals get WORDS; every proposal gets a PIN at every zoom, and it is the pin whose footprint must be reserved</li><li>icon-allow-overlap: true so a puck is never suppressed; icon-ignore-placement left at false, which is what puts it INTO the index for everything below to avoid</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index cbb2b2b..8e61ac0 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -30,14 +30,15 @@ import { registerPlaceIcons, placeIconExpression } from &quot;./placeIcons&quot;;</span>
+<span class="d-ctx"> import { PLACE_LABEL_TEXT_SIZE } from &quot;./placeLabelStyle&quot;;</span>
+<span class="d-ctx"> import {</span>
+<span class="d-ctx">   PIN_W,</span>
+<span class="d-del">-  PIN_H,</span>
+<span class="d-ctx">   PROPOSAL_LABEL_FILTER,</span>
+<span class="d-ctx">   PROPOSAL_LABEL_FONT,</span>
+<span class="d-ctx">   PROPOSAL_LABEL_TEXT_SIZE,</span>
+<span class="d-ctx">   PROPOSAL_MIN_LEAFLET_ZOOM,</span>
+<span class="d-add">+  PROPOSAL_PUCK_H,</span>
+<span class="d-ctx">   PROPOSAL_PUCK_IMAGE,</span>
+<span class="d-del">-  PROPOSAL_PUCK_OFFSET,</span>
+<span class="d-add">+  PROPOSAL_PUCK_PADDING,</span>
+<span class="d-ctx">   PROPOSAL_PUCK_SIZE,</span>
+<span class="d-add">+  PROPOSAL_TEXT_PADDING,</span>
+<span class="d-ctx">   PROPOSAL_TEXT_MAX_WIDTH,</span>
+<span class="d-ctx">   PROPOSAL_TEXT_OFFSET_EM,</span>
+<span class="d-ctx">   proposalTextField,</span>
+<span class="d-hunk">@@ -349,9 +350,11 @@ async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise&lt;</span>
+<span class="d-ctx">   dlog(&quot;maplibre&quot;, &quot;place labels added&quot;, url);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/** Source and layer ids for the proposal label layer. */</span>
+<span class="d-add">+/** Source and layer ids for the proposal label layers. One source, two layers:</span>
+<span class="d-add">+ *  the words, and above them the invisible pin footprints they have to dodge. */</span>
+<span class="d-ctx"> const PROPOSAL_SOURCE = &quot;proposal-labels&quot;;</span>
+<span class="d-ctx"> const PROPOSAL_LAYER = &quot;proposal-labels&quot;;</span>
+<span class="d-add">+const PROPOSAL_PUCK_LAYER = &quot;proposal-pucks&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** An empty payload, so the layer can exist before GraphLayer has anything to</span>
+<span class="d-ctx">  *  say — the alternative is adding the layer late and having to re-establish</span>
+<span class="d-hunk">@@ -363,10 +366,10 @@ const EMPTY_PROPOSALS: GeoJSON.FeatureCollection = { type: &quot;FeatureCollection&quot;,</span>
+<span class="d-ctx">  *</span>
+<span class="d-ctx">  * The pins are Leaflet divIcons floating above the GL canvas, so MapLibre has</span>
+<span class="d-ctx">  * no idea they exist and will cheerfully place a deli&#x27;s name straight through</span>
+<span class="d-del">- * one. This puts a PIN_W × PIN_H hole in the collision index at each proposal&#x27;s</span>
+<span class="d-del">- * location: fully transparent pixels (a zeroed RGBA buffer — collision boxes</span>
+<span class="d-del">- * come from the image&#x27;s dimensions, never its contents), positioned by</span>
+<span class="d-del">- * PROPOSAL_PUCK_OFFSET to coincide exactly with the pin drawn over it.</span>
+<span class="d-add">+ * one. This puts a PIN_W × PROPOSAL_PUCK_H hole in the collision index at each</span>
+<span class="d-add">+ * proposal&#x27;s location: fully transparent pixels (a zeroed RGBA buffer —</span>
+<span class="d-add">+ * collision boxes come from the image&#x27;s dimensions, never its contents),</span>
+<span class="d-add">+ * bottom-anchored on the tail tip so it covers exactly the pin&#x27;s ink.</span>
+<span class="d-ctx">  *</span>
+<span class="d-ctx">  * It is registered at pixelRatio 1 rather than placeIcons&#x27; 2 because there is</span>
+<span class="d-ctx">  * nothing to keep crisp; the size is a footprint, not artwork.</span>
+<span class="d-hunk">@@ -375,7 +378,7 @@ function registerProposalPuck(map: maplibregl.Map): void {</span>
+<span class="d-ctx">   if (map.hasImage(PROPOSAL_PUCK_IMAGE)) return;</span>
+<span class="d-ctx">   map.addImage(</span>
+<span class="d-ctx">     PROPOSAL_PUCK_IMAGE,</span>
+<span class="d-del">-    { width: PIN_W, height: PIN_H, data: new Uint8Array(PIN_W * PIN_H * 4) },</span>
+<span class="d-add">+    { width: PIN_W, height: PROPOSAL_PUCK_H, data: new Uint8Array(PIN_W * PROPOSAL_PUCK_H * 4) },</span>
+<span class="d-ctx">     { pixelRatio: 1 },</span>
+<span class="d-ctx">   );</span>
+<span class="d-ctx"> }</span>
+<span class="d-hunk">@@ -397,6 +400,22 @@ function registerProposalPuck(map: maplibregl.Map): void {</span>
+<span class="d-ctx">  * no longer land underneath a proposal pin, which it could before this layer</span>
+<span class="d-ctx">  * existed.</span>
+<span class="d-ctx">  *</span>
+<span class="d-add">+ * WHY IT IS TWO LAYERS. The words and the pin footprints are placed in separate</span>
+<span class="d-add">+ * passes, footprints first, and that ordering is the entire point. Carried on</span>
+<span class="d-add">+ * ONE symbol, a pin&#x27;s puck and its own words go into the collision index</span>
+<span class="d-add">+ * together, in rank order — so proposal #1&#x27;s words are placed, and then</span>
+<span class="d-add">+ * proposal #2&#x27;s puck lands on top of them, because a puck is</span>
+<span class="d-add">+ * `icon-allow-overlap` and cannot be asked to stand down (Leaflet is going to</span>
+<span class="d-add">+ * draw that pin regardless of what MapLibre decides). The result was a headline</span>
+<span class="d-add">+ * claim with its last word sitting under a neighbouring pin. Splitting the puck</span>
+<span class="d-add">+ * into its own layer ABOVE this one puts every pin — including the ones whose</span>
+<span class="d-add">+ * own labels the reveal schedule has not unlocked yet — into the index before</span>
+<span class="d-add">+ * the first word is placed, so a label that cannot clear the pins simply does</span>
+<span class="d-add">+ * not draw. Which is the trade: the fix cannot make the text paint OVER a pin</span>
+<span class="d-add">+ * (that needs one renderer, see the note on PROPOSAL_TEXT_OFFSET_EM), so it</span>
+<span class="d-add">+ * makes the text yield instead. Nothing legible is lost — the labels that stop</span>
+<span class="d-add">+ * drawing are exactly the ones that used to be drawn and then buried.</span>
+<span class="d-add">+ *</span>
+<span class="d-ctx">  * WHY IT IS THE VIVID ONE. Place labels are pulled 58% toward grey (POI_MUTE)</span>
+<span class="d-ctx">  * to leave the proposals room to be the loudest thing on the map. Until now</span>
+<span class="d-ctx">  * that room was spent entirely on pin shapes and glow rings, which can say that</span>
+<span class="d-hunk">@@ -427,15 +446,6 @@ function addProposalLabels(map: maplibregl.Map, mapStyle: MapStyle): void {</span>
+<span class="d-ctx">     minzoom: PROPOSAL_MIN_LEAFLET_ZOOM - 1,</span>
+<span class="d-ctx">     filter: PROPOSAL_LABEL_FILTER,</span>
+<span class="d-ctx">     layout: {</span>
+<span class="d-del">-      // The invisible pin footprint. `icon-allow-overlap` keeps it from ever</span>
+<span class="d-del">-      // being suppressed — the Leaflet pin is drawn whatever MapLibre decides,</span>
+<span class="d-del">-      // so its footprint must always be reserved — while leaving</span>
+<span class="d-del">-      // `icon-ignore-placement` at false so everything else still avoids it.</span>
+<span class="d-del">-      &quot;icon-image&quot;: PROPOSAL_PUCK_IMAGE,</span>
+<span class="d-del">-      &quot;icon-size&quot;: PROPOSAL_PUCK_SIZE,</span>
+<span class="d-del">-      &quot;icon-anchor&quot;: &quot;bottom&quot;,</span>
+<span class="d-del">-      &quot;icon-offset&quot;: PROPOSAL_PUCK_OFFSET,</span>
+<span class="d-del">-      &quot;icon-allow-overlap&quot;: true,</span>
+<span class="d-ctx">       // Text hangs BELOW the tail tip, the one side of the anchor the pin does</span>
+<span class="d-ctx">       // not occupy. Deliberately a fixed anchor rather than</span>
+<span class="d-ctx">       // `text-variable-anchor`: letting labels hop around their pins to dodge</span>
+<span class="d-hunk">@@ -447,12 +457,6 @@ function addProposalLabels(map: maplibregl.Map, mapStyle: MapStyle): void {</span>
+<span class="d-ctx">       // guarded across the zoom range — see PROPOSAL_TEXT_OFFSET_EM, which also</span>
+<span class="d-ctx">       // explains why this cannot be solved with a z-index.</span>
+<span class="d-ctx">       &quot;text-offset&quot;: PROPOSAL_TEXT_OFFSET_EM,</span>
+<span class="d-del">-      // Without this, a label that cannot place takes the puck down with it and</span>
+<span class="d-del">-      // the pin loses its reserved footprint. With it, a crowded pin keeps its</span>
+<span class="d-del">-      // space and simply goes quiet — the same graceful degradation the place</span>
+<span class="d-del">-      // labels use, and the reason a dense downtown thins to pins rather than</span>
+<span class="d-del">-      // turning into a wall of type.</span>
+<span class="d-del">-      &quot;text-optional&quot;: true,</span>
+<span class="d-ctx">       &quot;text-field&quot;: proposalTextField(colors.count),</span>
+<span class="d-ctx">       &quot;text-font&quot;: [PROPOSAL_LABEL_FONT],</span>
+<span class="d-ctx">       &quot;text-size&quot;: PROPOSAL_LABEL_TEXT_SIZE,</span>
+<span class="d-hunk">@@ -462,12 +466,9 @@ function addProposalLabels(map: maplibregl.Map, mapStyle: MapStyle): void {</span>
+<span class="d-ctx">       // is also the second half of the tier signal (place labels sit at 0.01).</span>
+<span class="d-ctx">       &quot;text-letter-spacing&quot;: 0.05,</span>
+<span class="d-ctx">       &quot;text-justify&quot;: &quot;center&quot;,</span>
+<span class="d-del">-      // Tighter than the place labels&#x27; 6. Started at 8, on the reasoning that</span>
+<span class="d-del">-      // two labels close enough to read as one paragraph is worse than dropping</span>
+<span class="d-del">-      // one — but padding is charged on EVERY side of a three-line block, so 8</span>
+<span class="d-del">-      // was silencing neighbours that had real room between them. 4 still keeps</span>
+<span class="d-del">-      // a visible gutter and buys back the placements.</span>
+<span class="d-del">-      &quot;text-padding&quot;: 4,</span>
+<span class="d-add">+      // Charged on every side, and the top side is the one that has to fit</span>
+<span class="d-add">+      // between the label and its own puck — see PROPOSAL_TEXT_PADDING.</span>
+<span class="d-add">+      &quot;text-padding&quot;: PROPOSAL_TEXT_PADDING,</span>
+<span class="d-ctx">       // Lower sorts first and wins placement, and rank 0 is the strongest</span>
+<span class="d-ctx">       // proposal — so when two labels want the same space, the one with more</span>
+<span class="d-ctx">       // votes behind it takes it. Ties never happen: rank is a dense sequence.</span>
+<span class="d-hunk">@@ -489,7 +490,36 @@ function addProposalLabels(map: maplibregl.Map, mapStyle: MapStyle): void {</span>
+<span class="d-ctx">       &quot;text-halo-blur&quot;: 0.2,</span>
+<span class="d-ctx">     },</span>
+<span class="d-ctx">   });</span>
+<span class="d-del">-  dlog(&quot;maplibre&quot;, &quot;proposal labels added&quot;);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // The pin footprints — placed FIRST, because this layer is added last and</span>
+<span class="d-add">+  // placement runs top-down. Nothing is drawn: the image is transparent, and</span>
+<span class="d-add">+  // this layer exists only to occupy space in the collision index.</span>
+<span class="d-add">+  map.addLayer({</span>
+<span class="d-add">+    id: PROPOSAL_PUCK_LAYER,</span>
+<span class="d-add">+    type: &quot;symbol&quot;,</span>
+<span class="d-add">+    source: PROPOSAL_SOURCE,</span>
+<span class="d-add">+    // No filter and no minzoom, on purpose. The reveal schedule decides which</span>
+<span class="d-add">+    // proposals get WORDS; every proposal gets a PIN at every zoom, and it is</span>
+<span class="d-add">+    // the pin — not the label — whose footprint has to be reserved. Filtering</span>
+<span class="d-add">+    // this layer the way the label layer is filtered would leave the wide zooms</span>
+<span class="d-add">+    // (where the schedule holds most labels back, and where the pins crowd</span>
+<span class="d-add">+    // hardest) reserving almost nothing.</span>
+<span class="d-add">+    layout: {</span>
+<span class="d-add">+      &quot;icon-image&quot;: PROPOSAL_PUCK_IMAGE,</span>
+<span class="d-add">+      &quot;icon-size&quot;: PROPOSAL_PUCK_SIZE,</span>
+<span class="d-add">+      // Bottom-anchored on the tail tip, which is the feature&#x27;s own coordinate:</span>
+<span class="d-add">+      // the puck rises from the location the way the pin does.</span>
+<span class="d-add">+      &quot;icon-anchor&quot;: &quot;bottom&quot;,</span>
+<span class="d-add">+      // `icon-allow-overlap` keeps a puck from ever being suppressed — the</span>
+<span class="d-add">+      // Leaflet pin is drawn whatever MapLibre decides, so its footprint must</span>
+<span class="d-add">+      // always be reserved, including where pins overlap each other — while</span>
+<span class="d-add">+      // leaving `icon-ignore-placement` at its default false, which is what</span>
+<span class="d-add">+      // puts the puck INTO the index for everything below to avoid.</span>
+<span class="d-add">+      &quot;icon-allow-overlap&quot;: true,</span>
+<span class="d-add">+      &quot;icon-padding&quot;: PROPOSAL_PUCK_PADDING,</span>
+<span class="d-add">+    },</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+  dlog(&quot;maplibre&quot;, &quot;proposal labels added (words + pucks)&quot;);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> function buildStyle(</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/proposalLabelStyle.test.ts</span>
+            <span class="stat"><span class="d-add">+31</span> / <span class="d-del">-4</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · tests</span>
+        <span class="ctx-sum">Guards for the expressions that fail SILENTLY — a malformed one makes MapLibre drop the layer with only a warning</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">proposalLabelStyle.test.ts</span>
+        <span class="ctx-sum">~330 LOC — zoom-curve counting, contrast floors, the reveal schedule, the pin footprint</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">proposal label expressions</span><span class="ol-sum">unchanged — one zoom curve per expression</span></li><li class="dim"><span class="ol-label">proposal labels vs place labels</span><span class="ol-sum">unchanged — size step and contrast floors</span></li><li class="dim"><span class="ol-label">the reveal schedule</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">the pin footprint</span><span class="ol-sum">puck geometry rewritten; + the self-clearance guard</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">label text</span><span class="ol-sum">unchanged — casing, count formatting, glyph coverage</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The geometry assertion now pins the puck to the pin&#x27;s INK (37 ≥ 33×1.1, and strictly less than the 42px element box)</li><li>New: &#x27;leaves the label clear of its own puck, which is placed before it&#x27; — walks z11..z20 and requires &gt;2px between the text box top and the puck bottom</li><li>That one exists because the failure is invisible: if the boxes touch, EVERY proposal label stops drawing at that zoom</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/proposalLabelStyle.test.ts b/client-react/src/components/MapLibreBackground/proposalLabelStyle.test.ts</span>
+<span class="d-meta">index 9753d5e..9f9a67d 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/proposalLabelStyle.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/proposalLabelStyle.test.ts</span>
+<span class="d-hunk">@@ -7,8 +7,10 @@ import {</span>
+<span class="d-ctx">   PROPOSAL_LABEL_FILTER,</span>
+<span class="d-ctx">   PROPOSAL_LABEL_TEXT_SIZE,</span>
+<span class="d-ctx">   PROPOSAL_MIN_LEAFLET_ZOOM,</span>
+<span class="d-del">-  PROPOSAL_PUCK_OFFSET,</span>
+<span class="d-add">+  PROPOSAL_PUCK_H,</span>
+<span class="d-add">+  PROPOSAL_PUCK_PADDING,</span>
+<span class="d-ctx">   PROPOSAL_PUCK_SIZE,</span>
+<span class="d-add">+  PROPOSAL_TEXT_PADDING,</span>
+<span class="d-ctx">   PROPOSAL_TEXT_MAX_WIDTH,</span>
+<span class="d-ctx">   PROPOSAL_TEXT_OFFSET_EM,</span>
+<span class="d-ctx">   pinTailBelowAnchorPx,</span>
+<span class="d-hunk">@@ -243,9 +245,34 @@ describe(&quot;the pin footprint&quot;, () =&gt; {</span>
+<span class="d-ctx">   // and these don&#x27;t, the reserved hole stops matching the pin drawn over it.</span>
+<span class="d-ctx">   it(&quot;matches the divIcon geometry the Leaflet pin is drawn at&quot;, () =&gt; {</span>
+<span class="d-ctx">     expect([PIN_W, PIN_H]).toEqual([34, 42]);</span>
+<span class="d-del">-    // Bottom-anchored the puck covers y ∈ [−42, 0]; the pin, anchored at its</span>
+<span class="d-del">-    // tail tip (17, 36), covers [−36, +6]. The offset is the difference.</span>
+<span class="d-del">-    expect(PROPOSAL_PUCK_OFFSET).toEqual([0, 6]);</span>
+<span class="d-add">+    // Bottom-anchored on the tail tip, the puck covers y in [-37, 0]: the pin&#x27;s</span>
+<span class="d-add">+    // INK (its square starts at y=3, its tip is the anchor at y=36, so 33 tall)</span>
+<span class="d-add">+    // grown by the 1.1 hover scale it pivots through. NOT the 42px element box,</span>
+<span class="d-add">+    // whose bottom 6px are empty — reserving those would eat the clearance the</span>
+<span class="d-add">+    // label has under its own pin, and this puck is placed before that label.</span>
+<span class="d-add">+    expect(PROPOSAL_PUCK_H).toBe(37);</span>
+<span class="d-add">+    expect(PROPOSAL_PUCK_H).toBeGreaterThanOrEqual((36 - 3) * 1.1);</span>
+<span class="d-add">+    expect(PROPOSAL_PUCK_H).toBeLessThan(PIN_H);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // The one that fails silently and catastrophically. The puck is placed in its</span>
+<span class="d-add">+  // own layer ABOVE the words, so it goes into the collision index first — and</span>
+<span class="d-add">+  // a symbol has no idea that the puck sitting on it belongs to the very</span>
+<span class="d-add">+  // proposal it is labelling. If the two boxes ever touch, EVERY proposal label</span>
+<span class="d-add">+  // stops drawing at that zoom, with nothing in the console to say why.</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  // Boxes, relative to the anchor (down is positive): the puck ends at 0 and is</span>
+<span class="d-add">+  // grown by its own padding; the text starts at text-offset (in ems of the</span>
+<span class="d-add">+  // type size, which rides its own zoom ramp) and is grown UPWARD by its</span>
+<span class="d-add">+  // padding. The gap between them is what this asserts.</span>
+<span class="d-add">+  it(&quot;leaves the label clear of its own puck, which is placed before it&quot;, () =&gt; {</span>
+<span class="d-add">+    const offsetEm = PROPOSAL_TEXT_OFFSET_EM[1];</span>
+<span class="d-add">+    for (let z = 11; z &lt;= 20; z++) {</span>
+<span class="d-add">+      const size = rampAt(PROPOSAL_LABEL_TEXT_SIZE, z - 1);</span>
+<span class="d-add">+      const textBoxTop = offsetEm * size - PROPOSAL_TEXT_PADDING;</span>
+<span class="d-add">+      const puckBottom = PROPOSAL_PUCK_PADDING;</span>
+<span class="d-add">+      expect(textBoxTop - puckBottom).toBeGreaterThan(2);</span>
+<span class="d-add">+    }</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // The label cannot win a z-fight with its own pin: the pins are Leaflet DOM</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/proposalLabelStyle.ts</span>
+            <span class="stat"><span class="d-add">+51</span> / <span class="d-del">-18</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · MapLibre background · label style</span>
+        <span class="ctx-sum">Pure style expressions and text formatting for the top-proposal label layer — testable without a GL context</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">proposalLabelStyle.ts</span>
+        <span class="ctx-sum">~300 LOC — pin footprint, zoom ramps, reveal schedule, text field</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">PROPOSAL_LABEL_FONT</span><span class="ol-sum">unchanged — the one SDF stack we bake</span></li><li class="changed"><span class="ol-label">The pin footprint (PIN_W / PIN_H / PIN_TIP_Y)</span><span class="ol-sum">+ PIN_INK_TOP_Y, + PROPOSAL_PUCK_H, + the two padding constants; − PROPOSAL_PUCK_OFFSET</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">PROPOSAL_TEXT_OFFSET_EM</span><span class="ol-sum">doc rewritten — clearance now defends against its OWN pin only</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">pinTailBelowAnchorPx / PROPOSAL_PUCK_SIZE</span><span class="ol-sum">unchanged — the zoom curve the pins ride</span></li><li class="dim"><span class="ol-label">PROPOSAL_LABEL_TEXT_SIZE / COUNT_SCALE / MAX_WIDTH</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">proposalRevealZoom + PROPOSAL_LABEL_FILTER</span><span class="ol-sum">unchanged — but now the knob for the wide zooms</span></li><li class="dim"><span class="ol-label">proposalLabelText / formatProposalCount / proposalTextField</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>PIN_INK_TOP_Y = 3: voteTypeIcon draws its square from y=3 to the tail tip at y=36 — the element&#x27;s bottom 6px are empty</li><li>PROPOSAL_PUCK_H = ceil((36 − 3) × 1.1) = 37 — the ink, grown by the hover scale it pivots through, ending exactly at the anchor</li><li>PROPOSAL_PUCK_PADDING = 0 — MapLibre&#x27;s default 2 would push the reserved box BELOW the anchor, back into the strip the label needs</li><li>PROPOSAL_TEXT_PADDING = 4 — named because the label&#x27;s top padding is what has to fit between it and its own puck</li><li>PROPOSAL_PUCK_OFFSET deleted: with the puck sized to the ink there is nothing left to shift</li><li>The clearance doc now says what defends against WHICH pin: text-offset against its own, collision against every other</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/proposalLabelStyle.ts b/client-react/src/components/MapLibreBackground/proposalLabelStyle.ts</span>
+<span class="d-meta">index 23edc6f..25fa1c2 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/proposalLabelStyle.ts</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/proposalLabelStyle.ts</span>
+<span class="d-hunk">@@ -20,36 +20,69 @@ export const PROPOSAL_LABEL_FONT = &quot;Red Hat Mono Regular&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> // ── The pin footprint ───────────────────────────────────────────────────────</span>
+<span class="d-ctx"> // The proposal pin is a Leaflet divIcon, drawn in the OTHER renderer, on top of</span>
+<span class="d-del">-// the GL canvas. MapLibre cannot see it, so it would happily place a POI name</span>
+<span class="d-del">-// straight through one. These are voteTypeIcon.ts&#x27;s SVG_W / SVG_H / TIP: a</span>
+<span class="d-del">-// 34×42 pin whose tail tip — the anchor, the point that sits on the location —</span>
+<span class="d-del">-// is at (17, 36). Relative to that anchor the pin body occupies y ∈ [−36, +6].</span>
+<span class="d-del">-// A transparent image of this size registered on the symbol keeps the pin&#x27;s</span>
+<span class="d-del">-// footprint in MapLibre&#x27;s collision index; see PROPOSAL_PUCK_OFFSET.</span>
+<span class="d-add">+// the GL canvas. MapLibre cannot see it, so it would happily place a POI name —</span>
+<span class="d-add">+// or another proposal&#x27;s own words — straight through one. These are</span>
+<span class="d-add">+// voteTypeIcon.ts&#x27;s SVG_W / SVG_H / TIP: a 34×42 element whose tail tip — the</span>
+<span class="d-add">+// anchor, the point that sits on the location — is at (17, 36). A transparent</span>
+<span class="d-add">+// image registered on the symbol keeps that footprint in MapLibre&#x27;s collision</span>
+<span class="d-add">+// index; the `proposal-pucks` layer is what places it (see addProposalLabels).</span>
+<span class="d-ctx"> export const PIN_W = 34;</span>
+<span class="d-ctx"> export const PIN_H = 42;</span>
+<span class="d-ctx"> const PIN_TIP_Y = 36;</span>
+<span class="d-add">+/** Top edge of the pin&#x27;s INK — voteTypeIcon.ts draws its square from y=3. */</span>
+<span class="d-add">+const PIN_INK_TOP_Y = 3;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/** Bottom-anchored, the puck covers y ∈ [−42, 0]; the pin covers [−36, +6].</span>
+<span class="d-del">- *  Shift it down by the difference so the two coincide exactly. */</span>
+<span class="d-del">-export const PROPOSAL_PUCK_OFFSET: [number, number] = [0, PIN_H - PIN_TIP_Y];</span>
+<span class="d-add">+/** The 1.1x the pin grows on hover and when selected. It pivots on the tail tip</span>
+<span class="d-add">+ *  (`transform-origin: 17px 36px`), so the element&#x27;s empty tail grows DOWN,</span>
+<span class="d-add">+ *  into the label, while the ink can only grow UP. */</span>
+<span class="d-add">+const PIN_HOVER_SCALE = 1.1;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Height of the reserved footprint — the pin&#x27;s INK, not its element box.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * The two differ, and the difference is what makes the collision reservation</span>
+<span class="d-add">+ * safe to place before the text instead of alongside it. The element is 42px</span>
+<span class="d-add">+ * tall anchored 36 down, so its box runs y ∈ [−36, +6]; but the shape inside it</span>
+<span class="d-add">+ * runs from y=3 to the tail tip at y=36, i.e. y ∈ [−33, 0] — the bottom 6px are</span>
+<span class="d-add">+ * empty, and nothing is ever drawn below the anchor. Reserving the empty strip</span>
+<span class="d-add">+ * cost the label 6px of the ~7px of clearance it has under its own pin, which</span>
+<span class="d-add">+ * is fine while the puck rides along with the text in one symbol (a symbol</span>
+<span class="d-add">+ * never collides with itself) and fatal the moment the puck is placed first, in</span>
+<span class="d-add">+ * its own layer, where it CAN suppress its own label.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Hovered, the ink scales about the tip: 33 × 1.1 = 36.3 above the anchor, so</span>
+<span class="d-add">+ * 37 covers a hovered pin and still stops exactly at the anchor.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export const PROPOSAL_PUCK_H = Math.ceil((PIN_TIP_Y - PIN_INK_TOP_Y) * PIN_HOVER_SCALE);</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Collision padding on the puck. Zero, deliberately: MapLibre&#x27;s default of 2</span>
+<span class="d-add">+ *  would push the reserved box 2px BELOW the anchor — back into the strip the</span>
+<span class="d-add">+ *  label needs — for no gain, since the box is already 3px larger than the ink</span>
+<span class="d-add">+ *  it stands in for. Every pixel here is spent twice, once against neighbouring</span>
+<span class="d-add">+ *  labels and once against the label directly underneath. */</span>
+<span class="d-add">+export const PROPOSAL_PUCK_PADDING = 0;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Collision padding around the label text. Tighter than the place labels&#x27; 6:</span>
+<span class="d-add">+ *  padding is charged on EVERY side of a three-line block, and at 8 it was</span>
+<span class="d-add">+ *  silencing neighbours with real room between them. Named here because the</span>
+<span class="d-add">+ *  clearance under the pin is measured against it. */</span>
+<span class="d-add">+export const PROPOSAL_TEXT_PADDING = 4;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** How far the pin&#x27;s tail hangs BELOW its anchor, before scaling. */</span>
+<span class="d-ctx"> const PIN_TAIL_BELOW_ANCHOR = PIN_H - PIN_TIP_Y;</span>
+<span class="d-del">-/** The 1.1x the pin grows on hover and when selected. It pivots on the tail tip</span>
+<span class="d-del">- *  (`transform-origin: 17px 36px`), so the tail grows DOWN, into the label. */</span>
+<span class="d-del">-const PIN_HOVER_SCALE = 1.1;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /**</span>
+<span class="d-ctx">  * Clearance between the pin&#x27;s tail and the top of the label, in ems of the text</span>
+<span class="d-ctx">  * size (`text-offset`, paired with `text-anchor: &quot;top&quot;`).</span>
+<span class="d-ctx">  *</span>
+<span class="d-del">- * This is the ONLY defence the label has against being covered by its pin, and</span>
+<span class="d-del">- * it cannot be replaced by a z-index. The pins are Leaflet DOM in a pane above</span>
+<span class="d-del">- * the entire GL canvas — MapLibreBackground renders as a sibling before</span>
+<span class="d-del">- * MapContainer at `zIndex: 0` — so a pin always paints over GL text no matter</span>
+<span class="d-del">- * how the style is ordered. (Inside GL the text is already in front of every</span>
+<span class="d-del">- * icon: `proposal-labels` is the topmost symbol layer.)</span>
+<span class="d-add">+ * This is the ONLY defence the label has against its OWN pin, and it cannot be</span>
+<span class="d-add">+ * replaced by a z-index. The pins are Leaflet DOM in a pane above the entire GL</span>
+<span class="d-add">+ * canvas — MapLibreBackground renders as a sibling before MapContainer at</span>
+<span class="d-add">+ * `zIndex: 0` — so a pin always paints over GL text no matter how the style is</span>
+<span class="d-add">+ * ordered. Against every OTHER pin the defence is collision, not clearance: the</span>
+<span class="d-add">+ * `proposal-pucks` layer reserves all of them before a single word is placed,</span>
+<span class="d-add">+ * so a label that would land under a neighbour&#x27;s pin now stands down instead of</span>
+<span class="d-add">+ * being drawn and then buried.</span>
+<span class="d-ctx">  *</span>
+<span class="d-ctx">  * It started at 0.55em, which was flush and therefore wrong — ~6px at the mid</span>
+<span class="d-ctx">  * zooms against a tail that hangs exactly 6px, so the first line of text began</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
