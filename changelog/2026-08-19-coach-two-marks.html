@@ -1,0 +1,1736 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two marks at the cast, and a shape that points sideways — 2026-08-19</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Two marks at the cast, and a shape that points sideways</h1>
+    <div class="dateline">2026-08-19 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#shape">Horizontal: a label beside the control, not a caption under it</a>
+<a href="#two">Two marks, and nothing takes them down but the vote</a>
+<a href="#usable">The picker is exempt from the greying — and actually usable</a>
+<a href="#reactive">The question follows the picker</a>
+<a href="#avoid">Keeping off the other mark — and off its control</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Six notes on the coach, and they are one change: the cast step stops being a single box asking a closed question and becomes TWO marks — the question, and the fact that its answer is still yours to change. The marks are horizontal now, sitting beside their controls with the pointer on a side (<code>[ bla bla bla ]▶</code>) rather than underneath them. The vote-type picker is exempt from the greying, because the second mark is pointing at it and saying “change your vote if you need to” — and that exemption was checked all the way through to <code>elementFromPoint</code>, since a control that LOOKS available and swallows the click is worse than one honestly greyed out. The question reads the live selection, so changing the type in that dropdown changes the question. Neither mark leaves until the vote is cast. And each is told to keep off not just the other mark’s box but the other mark’s CONTROL — which at 390px is the difference between a working invitation and a callout sitting on top of the thing it just told you to press.</p>
+
+  
+    <section class="card" id="shape">
+      <div class="tag">SHAPE</div>
+      <h2>Horizontal: a label beside the control, not a caption under it</h2>
+      <h3>Symptom</h3>
+      <p>The marks were boxes under their controls with the pointer on a horizontal edge. The owner wants the pointer on a SIDE, aimed across at what it describes — <code>[ bla bla bla ]▶</code>.</p>
+      <h3>Root cause</h3>
+      <ul><li>The first version placed below by default because every anchor is in the top bar and below is where the map is. That is a good reason to put a box somewhere and no reason at all for what it should LOOK like</li>
+<li>A box under a control reads as a caption on it; a box beside it with a tip touching it reads as a label. Labelling is what moving off the bottom strip was for in the first place</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The tip now grows out of a VERTICAL edge and the box sits beside its control, left by default. The four sides are named for where the BOX sits, so <code>left</code> means the box is left of the anchor with its tip on its own right edge</li>
+<li>The tip slides DOWN the box's edge to stay on the control when the box is clamped — the same rule as before, now on the other axis. One custom property, <code>--coach-arrow</code>, read from the left for a vertical tip and from the top for a horizontal one</li>
+<li><strong>Where nothing legible fits either side it goes back under.</strong> At 390px the Start/End plate is nearly the whole screen: 9px of room to its left. A 40px-wide callout obeying the shape rule is worse than a readable one below it, so under a floor of 168px the tip moves to a horizontal edge — the box stays wide and short either way</li>
+<li>Which orientation is in play is decided from the ANCHOR AND VIEWPORT ALONE, never from the box's own size, so the caller can ask before the box exists and apply it as a max-width. Asking the other way round is circular: the width decides the wrapping, which decides the height, which decides where a vertical box can go</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/onboarding/calloutPlacement.ts</li>
+<li>client-react/src/components/Onboarding/Onboarding.css</li></ul>
+    </section>
+    
+
+    <section class="card" id="two">
+      <div class="tag">THE CAST STEP</div>
+      <h2>Two marks, and nothing takes them down but the vote</h2>
+      <h3>Symptom</h3>
+      <p>One box asked a closed question naming a vote type, and a first-timer who disagreed with that type had no way of knowing the picker above it was theirs to move.</p>
+      <h3>Root cause</h3>
+      <ul><li>The line used to end “— or pick another above”, which is the same instruction with nothing to look at. It was dropped when the chrome started greying, because an instruction to use a faded control contradicts the screen</li>
+<li>Nothing else on the screen said the answer was still open, and the greying actively said the opposite</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Two marks at once.</strong> The left one points at the vote-type picker and reads “Change your vote if you need to”; the right one asks the question. One ×, on the mark carrying the question — two closing controls read as two separate things to deal with</li>
+<li><strong>Neither leaves until the vote is cast.</strong> The address-search stand-down is now scoped to <code>start</code> and <code>end</code>, which are the only steps whose own anchor turns into a search box. At <code>cast</code> the fields are not the subject and the rule is that the marks stay</li>
+<li>They take opposite sides by construction — the picker's mark goes left, the pair's goes right — which is also why each gets the width of the side it will actually use. Flipping after measuring would leave a box sized for the roomier side trying to fit in the narrower one</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/Onboarding/Onboarding.tsx</li>
+<li>client-react/src/onboarding/coachAnchor.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="usable">
+      <div class="tag">THE INVITATION</div>
+      <h2>The picker is exempt from the greying — and actually usable</h2>
+      <h3>Symptom</h3>
+      <p>The greying faded every control except the step's own target. A mark telling somebody to use the vote-type picker, over a faded and possibly click-swallowing vote-type picker, is worse than not offering.</p>
+      <h3>Root cause</h3>
+      <ul><li>“Undimmed” and “interactive” are different claims, and only one of them is visible. A control that looks available and is not is a worse failure than one that is honestly greyed out</li>
+<li>There are three separate ways this could have been broken: a scrim in front of it, a <code>pointer-events</code> rule, or a menu opening underneath something</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The lit rule now covers <code>[data-coach="votetype"]</code> as well as the cast pair, for the <code>cast</code> step only</li>
+<li>Checked all three ways, not assumed: the scrim is <code>calc(var(--z-chrome) - 1)</code> so it was never in front of the bar; nothing sets pointer-events on it; and the menu it opens is <code>--z-dropdown</code>, higher again</li>
+<li><strong>Verified by hit-testing</strong> — <code>elementFromPoint</code> at the picker's centre returns the picker's own input, at 1200px and at 390px — and by opening the menu with a real click, which produced all 13 rows at z-index 700 with both marks still on screen</li>
+<li>And belt-and-braces on the coach's own side: the callout box is <code>pointer-events: none</code> except its buttons, the rule MapNotice was built on. A coach must never eat a click meant for the app</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/Onboarding/Onboarding.css</li></ul>
+    </section>
+    
+
+    <section class="card" id="reactive">
+      <div class="tag">THE OTHER HALF</div>
+      <h2>The question follows the picker</h2>
+      <h3>Symptom</h3>
+      <p>Inviting somebody to change the vote type, and then showing them the old one, would be worse than never offering.</p>
+      <h3>Root cause</h3>
+      <ul><li>The mark's other half. Point 3 and point 6 of the brief are one change: the invitation is only honest if the screen answers it</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The question reads the RESOLVED vote type off the live selection — the same source the picker, the map and the URL all read — rather than the label of the tile that started the flow. There is no cached copy to go stale</li>
+<li>Verified end to end: with both marks up, the type was changed to <code>Chalk walk-time wayfinding</code> in the dropdown and the question re-rendered naming it, with the URL following</li>
+<li>The ECHOED SENTENCE is gone from the marks. It was there to make the flow read as finishing the sentence the visitor picked; in a box beside a control it was a second voice in a label, and at 300px it truncated the visitor's own words. The closing strip still carries it, which is where a report can afford one</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/Onboarding/Onboarding.tsx</li>
+<li>client-react/src/components/Onboarding/CoachCallout.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="avoid">
+      <div class="tag">GEOMETRY</div>
+      <h2>Keeping off the other mark — and off its control</h2>
+      <h3>Symptom</h3>
+      <p>Two marks whose controls are neighbours both take their preferred side and overlap. Worse: at 390px the box on the −/+ pair lands squarely on the picker.</p>
+      <h3>Root cause</h3>
+      <ul><li>The picker and the −/+ pair are adjacent columns on a desktop bar and stacked rows on a phone. Measured at 1200px they are 621–791 and 804–876; at 390px they are 8–311 on one row and 320–381 on the row above</li>
+<li>Two overlapping callouts read as one broken one — and a callout covering the control it has just told you to press is the same failure as greying it out, only harder to notice</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Each mark is told what to keep off: the other mark's BOX (read live from its element, because that box moves on every resize too) and the other mark's CONTROL</li>
+<li>Sides are tried in order — preferred, its opposite, below, above — and the first that clears every blocker wins. At 390px that puts the pair's mark ABOVE the pair, clear of the picker below it</li>
+<li>Trying sides rather than NUDGING is the point: a nudge moves the box off its own control and the tip has to stretch or lie, whereas every candidate in that list is still a box pointing straight at its anchor</li>
+<li>If nothing clears, the preferred placement stands and the code says so. An overlap is better than a box in the wrong place entirely, and a stated last resort is better than a silent fifth fallback</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/onboarding/calloutPlacement.ts</li>
+<li>client-react/src/onboarding/calloutPlacement.test.ts</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li><code>npx vitest run</code> — <strong>683 passed, 1 skipped, 41 files</strong>, including 21 placement tests (up from 13). <code>npx tsc -b</code> clean.</li>
+<li>The new tests cover the horizontal shape, the fallback under the control, the two marks taking opposite sides, each getting the width of the side it actually takes, and the 390px case where the pair's mark must clear the picker — written against the REAL measured anchor rects, not invented ones.</li>
+<li><strong>At 1200px</strong>, live: two marks, sides left and right, 10px from each anchor, both tips inside their anchors, no overlap. Boxes 268×36 and 306×54 — wide and short.</li>
+<li><strong>At 390px</strong> (a same-origin iframe — this Chrome refuses to resize a window below ~1200px): the picker's mark falls below the picker, the pair's mark flips ABOVE the pair to clear it. No overlap, neither covers the other's control, both fully on screen, both tips on their anchors.</li>
+<li>The picker's interactivity was hit-tested rather than eyeballed at both widths: <code>elementFromPoint</code> at its centre returns <code>INPUT.vote-type-input</code>, opacity 1, filter none, pointer-events auto. A real click opened the menu (13 rows, z-index 700) with both marks still up.</li>
+<li>The whole flow, in order: reach the cast step → open the picker → change the type to <code>Chalk walk-time wayfinding</code> → the question re-renders naming it → both marks still up → press <strong>+</strong> → both marks gone, scrim gone, greying gone, closing line on the bottom strip.</li>
+<li>The 28 verification votes were deleted from the local DB afterwards and all three Redis layers rebuilt through <code>rebuild_redis_for_map</code>; the revision moved 208 → 209, forward as it must.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Reach the cast step on <code>/m/nyc-tactical</code> and confirm TWO marks: one on the vote-type picker reading “Change your vote if you need to”, one on the −/+ pair asking the question. Both pointing sideways at their controls.</li>
+<li>Click the vote-type picker — it should open normally, with both marks still on screen. Pick a different type and watch the question change to name it.</li>
+<li>Click around: the map, the greyed controls, the marks themselves. Nothing should take the marks down.</li>
+<li>Press <strong>+</strong>. Both marks should go at once, with the closing line arriving at the bottom of the map.</li>
+<li>Drag the window narrow. Around a phone width the marks stop pointing sideways and go above/below their controls — that is deliberate, and the thing to check is that neither one ever lands on the picker or the −/+ pair.</li>
+<li>Check the marks no longer echo the tile you picked. That line lives only on the closing strip now.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/components/Onboarding/CoachCallout.tsx</span>
+            <span class="stat"><span class="d-add">+71</span> / <span class="d-del">-28</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run coach (the box)</span>
+        <span class="ctx-sum">The portalled callout: measures itself, places itself, draws the tip</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">CoachCallout.tsx</span>
+        <span class="ctx-sum">~120 → ~140 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">header · portal, measure, no Escape</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">Props · sentence</span><span class="ol-sum">REMOVED — the marks no longer echo the tile</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Props · onDismiss optional, boxRef, avoidRef, avoidBoxes, prefer</span><span class="ol-sum">NEW</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">reposition()</span><span class="ol-sum">collects blockers, passes `prefer`</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">render</span><span class="ol-sum">one ask, an optional ×, the tip</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>`onDismiss` optional is what makes a SECONDARY mark: two × buttons read as two things to deal with</li><li>The avoid rect is read LIVE from the other box&#x27;s element, because that box moves on every resize too and a render-time snapshot is stale exactly when the layout is changing</li><li>The max-width before the first measurement comes from calloutFit — the anchor and viewport are known, the box is not</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/Onboarding/CoachCallout.tsx b/client-react/src/components/Onboarding/CoachCallout.tsx</span>
+<span class="d-meta">index 7b6a4a2..b45bb48 100644</span>
+<span class="d-meta">--- a/client-react/src/components/Onboarding/CoachCallout.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/Onboarding/CoachCallout.tsx</span>
+<span class="d-hunk">@@ -1,6 +1,6 @@</span>
+<span class="d-del">-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from &quot;react&quot;;</span>
+<span class="d-add">+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from &quot;react&quot;;</span>
+<span class="d-ctx"> import { createPortal } from &quot;react-dom&quot;;</span>
+<span class="d-del">-import { calloutMaxWidth, placeCallout, type CalloutPlacement } from &quot;../../onboarding/calloutPlacement&quot;;</span>
+<span class="d-add">+import { calloutFit, placeCallout, type CalloutPlacement } from &quot;../../onboarding/calloutPlacement&quot;;</span>
+<span class="d-ctx"> import type { AnchorBox } from &quot;../../onboarding/coachAnchor&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-hunk">@@ -38,39 +38,66 @@ import type { AnchorBox } from &quot;../../onboarding/coachAnchor&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> interface Props {</span>
+<span class="d-ctx">   anchor: AnchorBox;</span>
+<span class="d-del">-  /** The sentence they chose, kept on screen the whole way through. */</span>
+<span class="d-del">-  sentence: string | null;</span>
+<span class="d-del">-  /** What to do right now. */</span>
+<span class="d-add">+  /** What to do right now. One line where it fits — the box is a label on a</span>
+<span class="d-add">+   *  control, not a paragraph about it. */</span>
+<span class="d-ctx">   ask: string;</span>
+<span class="d-ctx">   /** A decision the coach owns rather than the chrome — today, exactly one:</span>
+<span class="d-ctx">    *  declining an end point the flow was only guessing might exist. */</span>
+<span class="d-ctx">   actions?: ReactNode;</span>
+<span class="d-del">-  onDismiss: () =&gt; void;</span>
+<span class="d-add">+  /** Omitted on a SECONDARY mark. The cast step puts two boxes on screen at</span>
+<span class="d-add">+   *  once and two × buttons read as two separate things to deal with; one</span>
+<span class="d-add">+   *  closing control closes the flow, which is what it always did. */</span>
+<span class="d-add">+  onDismiss?: () =&gt; void;</span>
+<span class="d-add">+  /** Hand this box its own element, so a later box can be told to avoid it. */</span>
+<span class="d-add">+  boxRef?: RefObject&lt;HTMLDivElement | null&gt;;</span>
+<span class="d-add">+  /** A box already on screen that this one must not land on top of. Read live</span>
+<span class="d-add">+   *  rather than passed as numbers: the other box moves on every resize too, and</span>
+<span class="d-add">+   *  a snapshot taken at render time would be a frame stale exactly when the</span>
+<span class="d-add">+   *  layout is changing. */</span>
+<span class="d-add">+  avoidRef?: RefObject&lt;HTMLDivElement | null&gt;;</span>
+<span class="d-add">+  /** Controls this box must not cover — the OTHER mark&#x27;s anchor, so a coach</span>
+<span class="d-add">+   *  never lands on the control the other half of it is pointing at. */</span>
+<span class="d-add">+  avoidBoxes?: AnchorBox[];</span>
+<span class="d-add">+  /** Which side of the control this box would rather sit on. The cast step&#x27;s</span>
+<span class="d-add">+   *  two marks take opposite sides so they cannot meet — see calloutFit. */</span>
+<span class="d-add">+  prefer?: &quot;left&quot; | &quot;right&quot;;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-export function CoachCallout({ anchor, sentence, ask, actions, onDismiss }: Props) {</span>
+<span class="d-del">-  const ref = useRef&lt;HTMLDivElement&gt;(null);</span>
+<span class="d-add">+export function CoachCallout({</span>
+<span class="d-add">+  anchor, ask, actions, onDismiss, boxRef, avoidRef, avoidBoxes, prefer = &quot;left&quot;,</span>
+<span class="d-add">+}: Props) {</span>
+<span class="d-add">+  const own = useRef&lt;HTMLDivElement&gt;(null);</span>
+<span class="d-add">+  const ref = boxRef ?? own;</span>
+<span class="d-ctx">   const [placement, setPlacement] = useState&lt;CalloutPlacement | null&gt;(null);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const reposition = useCallback(() =&gt; {</span>
+<span class="d-ctx">     const el = ref.current;</span>
+<span class="d-ctx">     if (!el) return;</span>
+<span class="d-add">+    const other = avoidRef?.current?.getBoundingClientRect();</span>
+<span class="d-add">+    const blockers = [</span>
+<span class="d-add">+      ...(other &amp;&amp; other.width &gt; 0</span>
+<span class="d-add">+        ? [{ top: other.top, left: other.left, width: other.width, height: other.height }]</span>
+<span class="d-add">+        : []),</span>
+<span class="d-add">+      ...(avoidBoxes ?? []),</span>
+<span class="d-add">+    ];</span>
+<span class="d-ctx">     const next = placeCallout(</span>
+<span class="d-ctx">       anchor,</span>
+<span class="d-ctx">       { width: el.offsetWidth, height: el.offsetHeight },</span>
+<span class="d-del">-      { width: window.innerWidth, height: window.innerHeight }</span>
+<span class="d-add">+      { width: window.innerWidth, height: window.innerHeight },</span>
+<span class="d-add">+      blockers,</span>
+<span class="d-add">+      prefer</span>
+<span class="d-ctx">     );</span>
+<span class="d-ctx">     setPlacement((prev) =&gt;</span>
+<span class="d-ctx">       prev &amp;&amp;</span>
+<span class="d-ctx">       prev.top === next.top &amp;&amp;</span>
+<span class="d-ctx">       prev.left === next.left &amp;&amp;</span>
+<span class="d-ctx">       prev.side === next.side &amp;&amp;</span>
+<span class="d-del">-      prev.arrowLeft === next.arrowLeft &amp;&amp;</span>
+<span class="d-add">+      prev.arrow === next.arrow &amp;&amp;</span>
+<span class="d-ctx">       prev.maxWidth === next.maxWidth</span>
+<span class="d-ctx">         ? prev</span>
+<span class="d-ctx">         : next</span>
+<span class="d-ctx">     );</span>
+<span class="d-del">-  }, [anchor]);</span>
+<span class="d-add">+  }, [anchor, avoidRef, avoidBoxes, ref, prefer]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Re-run whenever the anchor moves (the hook hands us a new box) and whenever</span>
+<span class="d-ctx">   // our own content changes size — the ask is a different length at each step,</span>
+<span class="d-hunk">@@ -82,38 +109,54 @@ export function CoachCallout({ anchor, sentence, ask, actions, onDismiss }: Prop</span>
+<span class="d-ctx">     const ro = new ResizeObserver(reposition);</span>
+<span class="d-ctx">     ro.observe(el);</span>
+<span class="d-ctx">     return () =&gt; ro.disconnect();</span>
+<span class="d-del">-  }, [reposition, sentence, ask, actions]);</span>
+<span class="d-add">+  }, [reposition, ask, actions]);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  const maxWidth = placement?.maxWidth ?? calloutMaxWidth(</span>
+<span class="d-del">-    typeof window === &quot;undefined&quot; ? 1024 : window.innerWidth</span>
+<span class="d-del">-  );</span>
+<span class="d-add">+  // Before the first measurement there is no placement to read a width off, and</span>
+<span class="d-add">+  // the width is what decides how the ask wraps — so it comes from the anchor</span>
+<span class="d-add">+  // and the viewport, which are known, rather than from the box, which is not.</span>
+<span class="d-add">+  const maxWidth =</span>
+<span class="d-add">+    placement?.maxWidth ??</span>
+<span class="d-add">+    calloutFit(</span>
+<span class="d-add">+      anchor,</span>
+<span class="d-add">+      {</span>
+<span class="d-add">+        width: typeof window === &quot;undefined&quot; ? 1024 : window.innerWidth,</span>
+<span class="d-add">+        height: typeof window === &quot;undefined&quot; ? 768 : window.innerHeight,</span>
+<span class="d-add">+      },</span>
+<span class="d-add">+      prefer</span>
+<span class="d-add">+    ).maxWidth;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   return createPortal(</span>
+<span class="d-ctx">     &lt;div</span>
+<span class="d-ctx">       ref={ref}</span>
+<span class="d-del">-      className={`coach-callout${placement ? ` coach-callout--${placement.side}` : &quot; coach-callout--measuring&quot;}`}</span>
+<span class="d-add">+      className={</span>
+<span class="d-add">+        `coach-callout` +</span>
+<span class="d-add">+        (placement ? ` coach-callout--${placement.side}` : &quot; coach-callout--measuring&quot;) +</span>
+<span class="d-add">+        (onDismiss ? &quot;&quot; : &quot; coach-callout--nodismiss&quot;)</span>
+<span class="d-add">+      }</span>
+<span class="d-ctx">       style={{</span>
+<span class="d-ctx">         top: placement ? `${placement.top}px` : 0,</span>
+<span class="d-ctx">         left: placement ? `${placement.left}px` : 0,</span>
+<span class="d-ctx">         maxWidth: `${maxWidth}px`,</span>
+<span class="d-del">-        // The tip&#x27;s offset along the box&#x27;s edge. Set as a custom property so the</span>
+<span class="d-del">-        // arrow is one CSS rule for both sides rather than two inline styles.</span>
+<span class="d-del">-        [&quot;--coach-arrow-left&quot; as string]: `${placement?.arrowLeft ?? 0}px`,</span>
+<span class="d-add">+        // The tip&#x27;s offset along the box&#x27;s leading edge — from the left for a</span>
+<span class="d-add">+        // vertical tip, from the top for a horizontal one. One custom property</span>
+<span class="d-add">+        // for all four sides, read differently by each side&#x27;s rule.</span>
+<span class="d-add">+        [&quot;--coach-arrow&quot; as string]: `${placement?.arrow ?? 0}px`,</span>
+<span class="d-ctx">       }}</span>
+<span class="d-ctx">       role=&quot;status&quot;</span>
+<span class="d-ctx">       aria-live=&quot;polite&quot;</span>
+<span class="d-ctx">     &gt;</span>
+<span class="d-del">-      {sentence &amp;&amp; &lt;p className=&quot;coach-callout-sentence&quot;&gt;{sentence}&lt;/p&gt;}</span>
+<span class="d-ctx">       &lt;p className=&quot;coach-callout-ask&quot;&gt;{ask}&lt;/p&gt;</span>
+<span class="d-ctx">       {actions &amp;&amp; &lt;div className=&quot;coach-callout-actions&quot;&gt;{actions}&lt;/div&gt;}</span>
+<span class="d-del">-      &lt;button</span>
+<span class="d-del">-        type=&quot;button&quot;</span>
+<span class="d-del">-        className=&quot;coach-callout-close&quot;</span>
+<span class="d-del">-        onClick={onDismiss}</span>
+<span class="d-del">-        aria-label=&quot;Close getting started&quot;</span>
+<span class="d-del">-      &gt;</span>
+<span class="d-del">-        ×</span>
+<span class="d-del">-      &lt;/button&gt;</span>
+<span class="d-add">+      {onDismiss &amp;&amp; (</span>
+<span class="d-add">+        &lt;button</span>
+<span class="d-add">+          type=&quot;button&quot;</span>
+<span class="d-add">+          className=&quot;coach-callout-close&quot;</span>
+<span class="d-add">+          onClick={onDismiss}</span>
+<span class="d-add">+          aria-label=&quot;Close getting started&quot;</span>
+<span class="d-add">+        &gt;</span>
+<span class="d-add">+          ×</span>
+<span class="d-add">+        &lt;/button&gt;</span>
+<span class="d-add">+      )}</span>
+<span class="d-ctx">       &lt;span className=&quot;coach-callout-tip&quot; aria-hidden=&quot;true&quot; /&gt;</span>
+<span class="d-ctx">     &lt;/div&gt;,</span>
+<span class="d-ctx">     document.body</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/Onboarding/Onboarding.css</span>
+            <span class="stat"><span class="d-add">+81</span> / <span class="d-del">-36</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run styling</span>
+        <span class="ctx-sum">The wall, the strip, and the coach marks</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Onboarding.css</span>
+        <span class="ctx-sum">~560 → ~600 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">the wall / the strip</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">.coach-scrim + greying rules</span><span class="ol-sum">the lit rule gains the picker at the cast step</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.coach-callout</span><span class="ol-sum">horizontal proportions, tighter padding, pointer-events: none</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.coach-callout-sentence</span><span class="ol-sum">REMOVED</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.coach-callout--nodismiss</span><span class="ol-sum">NEW — reclaims the ×&#x27;s padding on a secondary mark</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.coach-callout-tip · four sides</span><span class="ol-sum">REWRITTEN — left/right on a vertical edge, above/below on a horizontal one</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The lit rule now spells out the whole invitation check — scrim below the chrome, no pointer-events, menu higher again — because “undimmed” and “interactive” are different claims</li><li>pointer-events: none on the box with auto on its buttons, the MapNotice rule, so a mark can never eat a click meant for the control it points at</li><li>The tip block is one square rotated 45° with two borders showing, positioned from --coach-arrow along whichever edge the side implies</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/Onboarding/Onboarding.css b/client-react/src/components/Onboarding/Onboarding.css</span>
+<span class="d-meta">index f54d2ba..c108df2 100644</span>
+<span class="d-meta">--- a/client-react/src/components/Onboarding/Onboarding.css</span>
+<span class="d-meta">+++ b/client-react/src/components/Onboarding/Onboarding.css</span>
+<span class="d-hunk">@@ -423,16 +423,26 @@ body[data-coach-focus] :is(</span>
+<span class="d-ctx">   transition: opacity 200ms ease, filter 200ms ease;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/* Lit: full colour, and lifted clear of the scrim&#x27;s fade so the cast pair reads</span>
+<span class="d-del">-   as the live control rather than as one more thing behind glass. Not</span>
+<span class="d-del">-   `pointer-events` — nothing in the bar is ever disabled by the coach. Somebody</span>
+<span class="d-del">-   who wants to move a point they have already placed, or change the vote type</span>
+<span class="d-del">-   before casting, is doing something reasonable, and a first run that traps</span>
+<span class="d-del">-   them teaches the app is a wizard. Only the map is actually taken away, and</span>
+<span class="d-del">-   only once there is nothing left to do on it. */</span>
+<span class="d-add">+/* Lit: full colour, so the control in question reads as live rather than as one</span>
+<span class="d-add">+   more thing behind glass. Not `pointer-events` — nothing in the bar is ever</span>
+<span class="d-add">+   disabled by the coach. Somebody who wants to move a point they have already</span>
+<span class="d-add">+   placed is doing something reasonable, and a first run that traps them teaches</span>
+<span class="d-add">+   that the app is a wizard. Only the map is actually taken away, and only once</span>
+<span class="d-add">+   there is nothing left to do on it.</span>
+<span class="d-add">+</span>
+<span class="d-add">+   THE CAST STEP LIGHTS TWO THINGS. The −/+ pair, because that is the question;</span>
+<span class="d-add">+   and the vote-type picker, because the second coach mark is pointing at it and</span>
+<span class="d-add">+   saying &quot;change your vote if you need to&quot;. Fading a control while inviting</span>
+<span class="d-add">+   somebody to use it is worse than not inviting them — and being merely bright</span>
+<span class="d-add">+   would be worse still, so the invitation is checked all the way through: the</span>
+<span class="d-add">+   scrim is BELOW the chrome (`--z-chrome − 1`), so it was never in front of the</span>
+<span class="d-add">+   picker; nothing here sets pointer-events; and the menu the picker opens is</span>
+<span class="d-add">+   `--z-dropdown`, higher again. The control is lit, unblocked, and open for</span>
+<span class="d-add">+   business. */</span>
+<span class="d-ctx"> body[data-coach-focus=&quot;start&quot;] [data-coach=&quot;start&quot;],</span>
+<span class="d-ctx"> body[data-coach-focus=&quot;end&quot;] [data-coach=&quot;end&quot;],</span>
+<span class="d-del">-body[data-coach-focus=&quot;cast&quot;] [data-coach=&quot;cast&quot;] {</span>
+<span class="d-add">+body[data-coach-focus=&quot;cast&quot;] [data-coach=&quot;cast&quot;],</span>
+<span class="d-add">+body[data-coach-focus=&quot;cast&quot;] [data-coach=&quot;votetype&quot;] {</span>
+<span class="d-ctx">   filter: none;</span>
+<span class="d-ctx">   opacity: 1;</span>
+<span class="d-ctx"> }</span>
+<span class="d-hunk">@@ -458,9 +468,15 @@ body[data-coach-focus=&quot;cast&quot;] [data-coach=&quot;cast&quot;] {</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /* ── The callout ─────────────────────────────────────────────────────────</span>
+<span class="d-del">-   Position and max-width come from calloutPlacement.ts as inline styles; this</span>
+<span class="d-del">-   owns the surface, the type and the tip. Square, hairline, paper — the same</span>
+<span class="d-del">-   object as every other plate in the app, just small and pointed. */</span>
+<span class="d-add">+   A HORIZONTAL label: wide, short, and sitting BESIDE what it describes with</span>
+<span class="d-add">+   the tip on a vertical edge — `[ bla bla bla ]▶`. A box under a control is a</span>
+<span class="d-add">+   caption; a box beside it with a tip touching it is a label, and labelling is</span>
+<span class="d-add">+   what moving off the bottom strip was for.</span>
+<span class="d-add">+</span>
+<span class="d-add">+   Position, side and max-width come from calloutPlacement.ts as inline styles;</span>
+<span class="d-add">+   this owns the surface, the type and the tip. Square, hairline, paper — the</span>
+<span class="d-add">+   same object as every other plate in the app, just small and pointed. The tip</span>
+<span class="d-add">+   is the only thing allowed to break the rectangle. */</span>
+<span class="d-ctx"> .coach-callout {</span>
+<span class="d-ctx">   position: fixed;</span>
+<span class="d-ctx">   /* Tooltips and hover labels: the ladder&#x27;s own name for this. It clears the</span>
+<span class="d-hunk">@@ -469,7 +485,10 @@ body[data-coach-focus=&quot;cast&quot;] [data-coach=&quot;cast&quot;] {</span>
+<span class="d-ctx">   z-index: var(--z-transient);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   box-sizing: border-box;</span>
+<span class="d-del">-  padding: var(--space-3) 26px var(--space-3) var(--space-3);</span>
+<span class="d-add">+  /* Tight vertically: one or two lines of the ask and nothing else in the box</span>
+<span class="d-add">+     now that the echoed sentence is gone. A tall box beside a 30px control</span>
+<span class="d-add">+     stops reading as a label on it. */</span>
+<span class="d-add">+  padding: var(--space-2) 26px var(--space-2) var(--space-3);</span>
+<span class="d-ctx">   border: 1px solid var(--ink-strong);</span>
+<span class="d-ctx">   border-radius: 0;</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -480,6 +499,19 @@ body[data-coach-focus=&quot;cast&quot;] [data-coach=&quot;cast&quot;] {</span>
+<span class="d-ctx">   background: var(--paper);</span>
+<span class="d-ctx">   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);</span>
+<span class="d-ctx">   animation: coach-callout-in 200ms ease both;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  /* TRANSPARENT TO THE POINTER, except its own controls — the same rule</span>
+<span class="d-add">+     MapNotice was built on, and here for a sharper reason. The placement tries</span>
+<span class="d-add">+     hard to keep a box off the controls the step is inviting you to use, but a</span>
+<span class="d-add">+     dense bar at 390px can leave it no clear side, and a coach that eats the</span>
+<span class="d-add">+     click meant for the +/− it is pointing at would be the worst version of</span>
+<span class="d-add">+     this feature: it looks available and is not. Nothing in the box needs the</span>
+<span class="d-add">+     pointer except the × and the one action button. */</span>
+<span class="d-add">+  pointer-events: none;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.coach-callout button {</span>
+<span class="d-add">+  pointer-events: auto;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /* Rendered before it has been measured: it must be in the document to have a</span>
+<span class="d-hunk">@@ -500,29 +532,18 @@ body[data-coach-focus=&quot;cast&quot;] [data-coach=&quot;cast&quot;] {</span>
+<span class="d-ctx">   to { opacity: 1; }</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/* WRAPS, where the bottom strip&#x27;s copy of this ellipsised. The strip ran the</span>
+<span class="d-del">-   width of the screen and a truncated tail cost nothing; a 300px callout cuts</span>
+<span class="d-del">-   the sentence in half — &quot;I already cut across here, and s…&quot; — and that</span>
+<span class="d-del">-   sentence is the thing the visitor chose, held on screen so the flow reads as</span>
+<span class="d-del">-   finishing it rather than as following instructions. Two lines, then clamp:</span>
+<span class="d-del">-   long enough for every line in the phrasebook at this size, short enough that</span>
+<span class="d-del">-   the box cannot grow taller than the control it is pointing at. */</span>
+<span class="d-del">-.coach-callout-sentence {</span>
+<span class="d-del">-  display: -webkit-box;</span>
+<span class="d-del">-  -webkit-box-orient: vertical;</span>
+<span class="d-del">-  -webkit-line-clamp: 2;</span>
+<span class="d-del">-  line-clamp: 2;</span>
+<span class="d-del">-  overflow: hidden;</span>
+<span class="d-del">-  margin: 0 0 3px;</span>
+<span class="d-del">-  font-size: var(--font-size-2xs);</span>
+<span class="d-del">-  line-height: 1.35;</span>
+<span class="d-del">-  color: color-mix(in srgb, var(--ink) 55%, transparent);</span>
+<span class="d-add">+/* No × on a secondary mark — reclaim the padding it was reserving. */</span>
+<span class="d-add">+.coach-callout--nodismiss {</span>
+<span class="d-add">+  padding-right: var(--space-3);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> .coach-callout-ask {</span>
+<span class="d-ctx">   margin: 0;</span>
+<span class="d-ctx">   font-size: var(--font-size-xs);</span>
+<span class="d-del">-  line-height: 1.45;</span>
+<span class="d-add">+  line-height: 1.4;</span>
+<span class="d-add">+  /* Breaks between words, never inside one: a mid-word break in a 180px box at</span>
+<span class="d-add">+     390px is the difference between a label and a smear. */</span>
+<span class="d-add">+  overflow-wrap: break-word;</span>
+<span class="d-ctx">   color: var(--ink-strong);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -567,21 +588,44 @@ body[data-coach-focus=&quot;cast&quot;] [data-coach=&quot;cast&quot;] {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /* ── The tip ─────────────────────────────────────────────────────────────</span>
+<span class="d-ctx">    A rotated square with two of its borders showing, sitting half outside the</span>
+<span class="d-del">-   box so the seam falls inside it. `--coach-arrow-left` is the tip&#x27;s centre</span>
+<span class="d-del">-   measured from the box&#x27;s own left edge, set by calloutPlacement.ts — it is NOT</span>
+<span class="d-del">-   the box&#x27;s midpoint, and that is the whole point: when the box is clamped to a</span>
+<span class="d-del">-   viewport edge the box stops moving and the tip keeps sliding, so it stays</span>
+<span class="d-del">-   over the control at every width. */</span>
+<span class="d-add">+   box so the seam falls inside it. `--coach-arrow` is the tip&#x27;s centre measured</span>
+<span class="d-add">+   along the box&#x27;s LEADING EDGE — from the left for a vertical tip, from the top</span>
+<span class="d-add">+   for a horizontal one. It is NOT the box&#x27;s midpoint, and that is the whole</span>
+<span class="d-add">+   point: when the box is clamped to a viewport edge the box stops moving and</span>
+<span class="d-add">+   the tip keeps sliding, so it stays over the control at every width.</span>
+<span class="d-add">+</span>
+<span class="d-add">+   Four sides, named for where the BOX sits: `left` means the box is left of the</span>
+<span class="d-add">+   anchor and the tip is on the box&#x27;s right edge, pointing right at it. The two</span>
+<span class="d-add">+   horizontal ones are the shape this is meant to have; `above`/`below` are the</span>
+<span class="d-add">+   fallback for widths where no legible box fits beside the control. */</span>
+<span class="d-ctx"> .coach-callout-tip {</span>
+<span class="d-ctx">   position: absolute;</span>
+<span class="d-del">-  left: var(--coach-arrow-left, 50%);</span>
+<span class="d-ctx">   width: 10px;</span>
+<span class="d-ctx">   height: 10px;</span>
+<span class="d-ctx">   background: var(--paper);</span>
+<span class="d-ctx">   border: 1px solid var(--ink-strong);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/* Horizontal — the tip is on a vertical edge and slides down it. */</span>
+<span class="d-add">+.coach-callout--left .coach-callout-tip {</span>
+<span class="d-add">+  top: var(--coach-arrow, 50%);</span>
+<span class="d-add">+  right: -6px;</span>
+<span class="d-add">+  border-left: none;</span>
+<span class="d-add">+  border-bottom: none;</span>
+<span class="d-add">+  transform: translateY(-50%) rotate(45deg);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.coach-callout--right .coach-callout-tip {</span>
+<span class="d-add">+  top: var(--coach-arrow, 50%);</span>
+<span class="d-add">+  left: -6px;</span>
+<span class="d-add">+  border-right: none;</span>
+<span class="d-add">+  border-top: none;</span>
+<span class="d-add">+  transform: translateY(-50%) rotate(45deg);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* Vertical fallback — the tip is on a horizontal edge and slides along it. */</span>
+<span class="d-ctx"> .coach-callout--below .coach-callout-tip {</span>
+<span class="d-add">+  left: var(--coach-arrow, 50%);</span>
+<span class="d-ctx">   top: -6px;</span>
+<span class="d-ctx">   border-right: none;</span>
+<span class="d-ctx">   border-bottom: none;</span>
+<span class="d-hunk">@@ -589,6 +633,7 @@ body[data-coach-focus=&quot;cast&quot;] [data-coach=&quot;cast&quot;] {</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> .coach-callout--above .coach-callout-tip {</span>
+<span class="d-add">+  left: var(--coach-arrow, 50%);</span>
+<span class="d-ctx">   bottom: -6px;</span>
+<span class="d-ctx">   border-left: none;</span>
+<span class="d-ctx">   border-top: none;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/Onboarding/Onboarding.tsx</span>
+            <span class="stat"><span class="d-add">+107</span> / <span class="d-del">-22</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run flow</span>
+        <span class="ctx-sum">Derives the step, and now decides whether it speaks with one mark, two, or the bottom strip</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Onboarding.tsx</span>
+        <span class="ctx-sum">~390 → ~410 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">secondary = useCoachAnchor(votetype)</span><span class="ol-sum">NEW — the second mark&#x27;s anchor</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">secondaryBox ref</span><span class="ol-sum">NEW — so the first mark can keep off the second</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">standsDown</span><span class="ol-sum">NEW — the typing stand-down scoped to start/end</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">render · cast → scrim + two marks</span><span class="ol-sum">REWRITTEN</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ask() · cast</span><span class="ol-sum">shorter — the tip names the buttons, so the copy does not</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The `secondary` note says why the second mark is not decoration: the question names a vote type and nothing else on the screen said the answer was still open</li><li>`standsDown` names its own scope and why — start and end are the steps whose anchor turns into a search box</li><li>Each mark is handed the other&#x27;s ANCHOR as well as the other&#x27;s box</li><li>The cast ask drops “+ for yes, − for no”: a third line of copy doing the tip’s job, on a box beside a 36px control</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/Onboarding/Onboarding.tsx b/client-react/src/components/Onboarding/Onboarding.tsx</span>
+<span class="d-meta">index 68ef28c..e842632 100644</span>
+<span class="d-meta">--- a/client-react/src/components/Onboarding/Onboarding.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/Onboarding/Onboarding.tsx</span>
+<span class="d-hunk">@@ -1,4 +1,4 @@</span>
+<span class="d-del">-import { useCallback, useEffect, useMemo, useState } from &quot;react&quot;;</span>
+<span class="d-add">+import { useCallback, useEffect, useMemo, useRef, useState } from &quot;react&quot;;</span>
+<span class="d-ctx"> import { createPortal } from &quot;react-dom&quot;;</span>
+<span class="d-ctx"> import { useMap, useRoute } from &quot;../../context&quot;;</span>
+<span class="d-ctx"> import { pointTypeForLabel } from &quot;../../themes&quot;;</span>
+<span class="d-hunk">@@ -81,9 +81,6 @@ import &quot;./Onboarding.css&quot;;</span>
+<span class="d-ctx"> //     map. An arrow tip pointing at nothing is worse than the strip it replaced.</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/** How long the closing line stays up after the first vote lands. */</span>
+<span class="d-del">-const DONE_LINGER_MS = 7000;</span>
+<span class="d-del">-</span>
+<span class="d-ctx"> /**</span>
+<span class="d-ctx">  * The flow, remounted whenever somebody asks for it back.</span>
+<span class="d-ctx">  *</span>
+<span class="d-hunk">@@ -136,6 +133,8 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">   const [dismissed, setDismissed] = useState(false);</span>
+<span class="d-ctx">   const [endSkipped, setEndSkipped] = useState(false);</span>
+<span class="d-ctx">   const [finished, setFinished] = useState(false);</span>
+<span class="d-add">+  // The flow has reported. See the one-way-door effect for what it is for.</span>
+<span class="d-add">+  const [reachedDone, setReachedDone] = useState(false);</span>
+<span class="d-ctx">   // A hand-opened flow reopens the WALL even though a sentence (and possibly a</span>
+<span class="d-ctx">   // whole selection) is already in play, because choosing a different sentence</span>
+<span class="d-ctx">   // is the reason to ask for it. Cleared by the pick.</span>
+<span class="d-hunk">@@ -147,6 +146,11 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">   // later can move it.</span>
+<span class="d-ctx">   const [arrivedWithSelection] = useState(() =&gt; !!start.coords);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // The second mark&#x27;s own box, so the first can be told to keep off it. React</span>
+<span class="d-add">+  // lays the secondary out first (it is the earlier child), so by the time the</span>
+<span class="d-add">+  // primary measures, this ref holds a real rect.</span>
+<span class="d-add">+  const secondaryBox = useRef&lt;HTMLDivElement | null&gt;(null);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-ctx">     if (visitedBefore !== null || !(hasWall || pendingSticker)) return;</span>
+<span class="d-ctx">     let cancelled = false;</span>
+<span class="d-hunk">@@ -192,10 +196,26 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">   const target: CoachTarget | null =</span>
+<span class="d-ctx">     step === &quot;start&quot; ? &quot;start&quot; : step === &quot;end&quot; ? &quot;end&quot; : step === &quot;cast&quot; ? &quot;cast&quot; : null;</span>
+<span class="d-ctx">   const anchor = useCoachAnchor(active ? target : null);</span>
+<span class="d-del">-  // Anchored = there is a live control to hang the box off AND nobody is in the</span>
+<span class="d-del">-  // middle of typing an address into it. Either failure falls back to the strip</span>
+<span class="d-del">-  // (or, for typing, to silence) rather than to a tip pointing at nothing.</span>
+<span class="d-del">-  const anchored = !!anchor.box &amp;&amp; !anchor.typing;</span>
+<span class="d-add">+  // THE SECOND MARK. The cast step puts two boxes on screen at once: one on the</span>
+<span class="d-add">+  // −/+ pair asking the question, and one on the vote-type picker saying the</span>
+<span class="d-add">+  // answer is still yours to change. That second one is not decoration — the</span>
+<span class="d-add">+  // question names a vote type, and a first-timer who disagrees with it has no</span>
+<span class="d-add">+  // way of knowing the picker above is theirs to move. Pointing at it is how</span>
+<span class="d-add">+  // they find out, which is also why the picker is exempt from the greying</span>
+<span class="d-add">+  // below: inviting somebody to use a control you have just faded out is worse</span>
+<span class="d-add">+  // than not inviting them.</span>
+<span class="d-add">+  const secondary = useCoachAnchor(active &amp;&amp; step === &quot;cast&quot; ? &quot;votetype&quot; : null);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Anchored = there is a live control to hang the box off, and — before a point</span>
+<span class="d-add">+  // exists — nobody is mid-address-search in the field we would be pointing at.</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  // The typing stand-down is scoped to `start` and `end` ON PURPOSE. Those are</span>
+<span class="d-add">+  // the steps whose own anchor turns into a search box, so a callout hanging off</span>
+<span class="d-add">+  // it would be over the suggestion list. By `cast` the fields are not the</span>
+<span class="d-add">+  // subject any more, and the rule for this step is that NOTHING takes the marks</span>
+<span class="d-add">+  // down except the cast itself.</span>
+<span class="d-add">+  const standsDown = anchor.typing &amp;&amp; (step === &quot;start&quot; || step === &quot;end&quot;);</span>
+<span class="d-add">+  const anchored = !!anchor.box &amp;&amp; !standsDown;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const calculating = isCalculating || isCalculatingSplit;</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -261,15 +281,47 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">   }, [active, target, anchored]);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // A cast finishes the flow. Suppress — this and the dismissal are the only two</span>
+<span class="d-del">-  // writes — then let the closing line stand for a few seconds and leave.</span>
+<span class="d-add">+  // writes — and then the closing line STAYS.</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  // It used to be pulled off the screen by a seven-second timer. Nothing about a</span>
+<span class="d-add">+  // report needs a stopwatch, and the half of that line worth reading is the</span>
+<span class="d-add">+  // half that arrives second: the first vote somebody ever casts is exactly when</span>
+<span class="d-add">+  // they want to know it can be taken back, and seven seconds is not long enough</span>
+<span class="d-add">+  // to place a vote, look at what it did to the map, and then read.</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  // What replaces the timer is the fact the line reports. The step is DERIVED</span>
+<span class="d-add">+  // from `hasVoted` (onboarding/state.ts), so the closing line stands while — and</span>
+<span class="d-add">+  // only while — the vote it describes is standing. Press the same button again</span>
+<span class="d-add">+  // and `hasVoted` goes false on that press&#x27;s own tick; move the selection</span>
+<span class="d-add">+  // somewhere else and it goes false too. Either way the step leaves `done` and</span>
+<span class="d-add">+  // the door below shuts. There is no reachable state in which this line is on</span>
+<span class="d-add">+  // screen claiming a vote is on the map that isn&#x27;t.</span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-ctx">     if (!active || step !== &quot;done&quot;) return;</span>
+<span class="d-ctx">     dlog(&quot;onboard&quot;, &quot;first vote landed — flow complete&quot;);</span>
+<span class="d-ctx">     suppress();</span>
+<span class="d-del">-    const t = setTimeout(() =&gt; setFinished(true), DONE_LINGER_MS);</span>
+<span class="d-del">-    return () =&gt; clearTimeout(t);</span>
+<span class="d-ctx">   }, [active, step]);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  useEffect(() =&gt; {</span>
+<span class="d-add">+    if (active &amp;&amp; step === &quot;done&quot;) setReachedDone(true);</span>
+<span class="d-add">+  }, [active, step]);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // THE ONE-WAY DOOR: leaving `done` ends the flow, it never walks back to an</span>
+<span class="d-add">+  // instruction. Deriving the step is what makes this necessary as well as easy.</span>
+<span class="d-add">+  // Take the vote back, or hit Clear, and the same derivation that correctly</span>
+<span class="d-add">+  // retires the closing line would then hand back `cast` or `start` — so</span>
+<span class="d-add">+  // somebody who has already voted gets told to tap the map again, with the</span>
+<span class="d-add">+  // chrome greyed out around it and an arrow pointing at a control they have</span>
+<span class="d-add">+  // used. The timer used to hide that by having usually fired first. Ending</span>
+<span class="d-add">+  // instead is the honest version: they have voted, so the first run is over,</span>
+<span class="d-add">+  // whatever they do to the vote afterwards.</span>
+<span class="d-add">+  useEffect(() =&gt; {</span>
+<span class="d-add">+    if (reachedDone &amp;&amp; step !== &quot;done&quot;) {</span>
+<span class="d-add">+      dlog(&quot;onboard&quot;, &quot;closing line retired — the vote it reported is gone&quot;);</span>
+<span class="d-add">+      setFinished(true);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }, [reachedDone, step]);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   // ── Handlers ──────────────────────────────────────────────────────────────</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const handlePick = useCallback((tile: OpenerTile) =&gt; {</span>
+<span class="d-hunk">@@ -323,8 +375,8 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">     ) : null;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // Somebody is typing an address into the very field we would be pointing at.</span>
+<span class="d-del">-  // Say nothing at all until they are done — see `typing` in coachAnchor.ts.</span>
+<span class="d-del">-  if (target &amp;&amp; anchor.typing) return null;</span>
+<span class="d-add">+  // Say nothing at all until they are done — see `standsDown` above.</span>
+<span class="d-add">+  if (standsDown) return null;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   if (target &amp;&amp; anchor.box) {</span>
+<span class="d-ctx">     return (</span>
+<span class="d-hunk">@@ -335,17 +387,33 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">             the only move left is in the bar. The scrim sits one rung under the</span>
+<span class="d-ctx">             chrome, so it covers the map, its furniture and any open proposal</span>
+<span class="d-ctx">             card, while the bar stays above it and is greyed by the rules</span>
+<span class="d-del">-            instead — which is what leaves the +/− the single lit thing. */}</span>
+<span class="d-add">+            instead — which is what leaves the −/+ pair and the vote-type picker</span>
+<span class="d-add">+            the lit things. It is also why the picker is genuinely CLICKABLE and</span>
+<span class="d-add">+            not merely bright: the scrim is below the chrome, so it was never in</span>
+<span class="d-add">+            front of the control, and the menu it opens is higher still. */}</span>
+<span class="d-ctx">         {step === &quot;cast&quot; &amp;&amp; createPortal(</span>
+<span class="d-ctx">           &lt;div className=&quot;coach-scrim&quot; aria-hidden=&quot;true&quot; /&gt;,</span>
+<span class="d-ctx">           document.body</span>
+<span class="d-ctx">         )}</span>
+<span class="d-add">+        {/* The second mark, drawn first so the one carrying the question is the</span>
+<span class="d-add">+            later element and wins any overlap. Skipped when the picker is not on</span>
+<span class="d-add">+            screen at all — short landscape, or a bar too narrow to show it. */}</span>
+<span class="d-add">+        {step === &quot;cast&quot; &amp;&amp; secondary.box &amp;&amp; (</span>
+<span class="d-add">+          &lt;CoachCallout</span>
+<span class="d-add">+            anchor={secondary.box}</span>
+<span class="d-add">+            ask=&quot;Change your vote if you need to&quot;</span>
+<span class="d-add">+            boxRef={secondaryBox}</span>
+<span class="d-add">+            avoidBoxes={[anchor.box]}</span>
+<span class="d-add">+          /&gt;</span>
+<span class="d-add">+        )}</span>
+<span class="d-ctx">         &lt;CoachCallout</span>
+<span class="d-ctx">           anchor={anchor.box}</span>
+<span class="d-del">-          sentence={sentence}</span>
+<span class="d-ctx">           ask={line}</span>
+<span class="d-ctx">           actions={actions}</span>
+<span class="d-ctx">           onDismiss={handleDismiss}</span>
+<span class="d-add">+          avoidRef={step === &quot;cast&quot; ? secondaryBox : undefined}</span>
+<span class="d-add">+          avoidBoxes={step === &quot;cast&quot; &amp;&amp; secondary.box ? [secondary.box] : undefined}</span>
+<span class="d-add">+          prefer={step === &quot;cast&quot; ? &quot;right&quot; : &quot;left&quot;}</span>
+<span class="d-ctx">         /&gt;</span>
+<span class="d-ctx">       &lt;/&gt;</span>
+<span class="d-ctx">     );</span>
+<span class="d-hunk">@@ -407,17 +475,34 @@ function ask(</span>
+<span class="d-ctx">       // as — including when a label of unknown kind let the map&#x27;s default</span>
+<span class="d-ctx">       // resolve one.</span>
+<span class="d-ctx">       //</span>
+<span class="d-del">-      // The old line ended &quot;— or pick another above&quot;, pointing at the vote-type</span>
+<span class="d-del">-      // picker. That was written for a strip with nothing lit and nothing dimmed;</span>
+<span class="d-del">-      // the picker is now one of the greyed controls, so an instruction to use it</span>
+<span class="d-del">-      // contradicts the screen. The quoted label still says what will be recorded.</span>
+<span class="d-del">-      const question = facts.hasEnd</span>
+<span class="d-add">+      // `effectiveVoteType` is the RESOLVED vote type off the live selection, not</span>
+<span class="d-add">+      // the label of the tile that started the flow, and the difference is the</span>
+<span class="d-add">+      // whole reason the second mark can point at the picker. Change the type in</span>
+<span class="d-add">+      // that dropdown and this question re-renders naming the new one — the</span>
+<span class="d-add">+      // selection is the single source both read from, so there is no cached</span>
+<span class="d-add">+      // copy here to go stale. Telling somebody to change their vote and then</span>
+<span class="d-add">+      // showing them the old one would be worse than never offering.</span>
+<span class="d-add">+      //</span>
+<span class="d-add">+      // The line used to end &quot;— or pick another above&quot;, which was the same</span>
+<span class="d-add">+      // instruction with no way to see what it meant. The mark on the picker</span>
+<span class="d-add">+      // replaces it, so the tail is gone and the question stays a question.</span>
+<span class="d-add">+      // Short on purpose: this box is a LABEL on the −/+ pair, and its tip is</span>
+<span class="d-add">+      // touching them. Naming the buttons in the text as well (&quot;+ for yes, − for</span>
+<span class="d-add">+      // no&quot;) was a third line of copy doing the tip&#x27;s job, and a three-line box</span>
+<span class="d-add">+      // beside a 36px control stops reading as a label on it.</span>
+<span class="d-add">+      return facts.hasEnd</span>
+<span class="d-ctx">         ? `“${effectiveVoteType}”, all along this stretch?`</span>
+<span class="d-ctx">         : `“${effectiveVoteType}”, right here?`;</span>
+<span class="d-del">-      return `${question} + for yes, − for no.`;</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     case &quot;done&quot;:</span>
+<span class="d-del">-      return &quot;Cast. It&#x27;s on the map — and it&#x27;s yours to take back any time.&quot;;</span>
+<span class="d-add">+      // The second sentence is a PROMISE ABOUT A CONTROL, so it was checked</span>
+<span class="d-add">+      // against the control before it was written. Pressing +/− when every</span>
+<span class="d-add">+      // touched block already holds your vote in that direction plans</span>
+<span class="d-add">+      // `targetDir: 0` — an unvote — and the button already says so in its own</span>
+<span class="d-add">+      // title (&quot;Remove your vote for&quot;). See planBlockVote/voteButtonState in</span>
+<span class="d-add">+      // utils/castVote.ts and their tests. &quot;The button&quot; is unambiguous here</span>
+<span class="d-add">+      // because the coach was pointing at that exact pair one step ago.</span>
+<span class="d-add">+      return &quot;Cast! It&#x27;s on the map. Hit the button again if you need to take back your vote.&quot;;</span>
+<span class="d-ctx">     default:</span>
+<span class="d-ctx">       return &quot;&quot;;</span>
+<span class="d-ctx">   }</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/TopBar/TopBar.tsx</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · the top bar</span>
+        <span class="ctx-sum">The legend, the pickers and the cast pair</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">TopBar.tsx</span>
+        <span class="ctx-sum">~319 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">Start / End / cast-group</span><span class="ol-sum">unchanged — already tagged</span></li><li class="changed"><span class="ol-label">.vote-switcher-group</span><span class="ol-sum">+data-coach=&quot;votetype&quot;</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>One attribute. Six now in total, still no refs, no state and no imports for the coach</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/TopBar/TopBar.tsx b/client-react/src/components/TopBar/TopBar.tsx</span>
+<span class="d-meta">index 952929a..6c55ed9 100644</span>
+<span class="d-meta">--- a/client-react/src/components/TopBar/TopBar.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/TopBar/TopBar.tsx</span>
+<span class="d-hunk">@@ -257,7 +257,7 @@ export const TopBar = memo(function TopBar() {</span>
+<span class="d-ctx">               the cast-target picker (see VoteTypeSelector) — it says which</span>
+<span class="d-ctx">               proposal types are drawn and lets you toggle them — so it can no</span>
+<span class="d-ctx">               longer be gated on having a selection to vote on. */}</span>
+<span class="d-del">-          &lt;div className=&quot;vote-switcher-group&quot;&gt;</span>
+<span class="d-add">+          &lt;div className=&quot;vote-switcher-group&quot; data-coach=&quot;votetype&quot;&gt;</span>
+<span class="d-ctx">             &lt;span className=&quot;mode-prefix-label&quot;&gt;Vote:&lt;/span&gt;</span>
+<span class="d-ctx">             &lt;VoteTypeSelector /&gt;</span>
+<span class="d-ctx">           &lt;/div&gt;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/onboarding/calloutPlacement.test.ts</span>
+            <span class="stat"><span class="d-add">+217</span> / <span class="d-del">-82</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run coach (geometry, guarded)</span>
+        <span class="ctx-sum">The widths the coach has to hold up at, against real measured anchor rects</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">calloutPlacement.test.ts</span>
+        <span class="ctx-sum">~130 → ~230 LOC — 21 tests in six groups</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">WIDTHS</span><span class="ol-sum">1800 / 900 / 600 / 450 / 390 — the phone is new</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">describe(the shape is horizontal wherever it fits)</span><span class="ol-sum">NEW</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">describe(falling back under the control)</span><span class="ol-sum">NEW</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">describe(the box stays on screen)</span><span class="ol-sum">kept, re-expressed for both orientations</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">describe(the tip stays on the control)</span><span class="ol-sum">kept, now axis-aware</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">describe(two marks at once)</span><span class="ol-sum">NEW — opposite sides, per-side widths, keeping off the other control</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">describe(how wide the box may be)</span><span class="ol-sum">NEW — per-side room, the cap, the horizontal floor</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The two-mark group uses the REAL 1200px rects (picker 621–791, pair 804–876) rather than invented ones</li><li>“keeps off the OTHER mark’s control” asserts the naive placement DOES hit the picker first, so the test would fail if the avoidance were removed</li><li>“still points at its own control” runs after every escape, because a box that dodges into the wrong place has not been fixed</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/onboarding/calloutPlacement.test.ts b/client-react/src/onboarding/calloutPlacement.test.ts</span>
+<span class="d-meta">index a8449a7..5f27779 100644</span>
+<span class="d-meta">--- a/client-react/src/onboarding/calloutPlacement.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/onboarding/calloutPlacement.test.ts</span>
+<span class="d-hunk">@@ -1,63 +1,120 @@</span>
+<span class="d-ctx"> import { describe, it, expect } from &quot;vitest&quot;;</span>
+<span class="d-del">-import { calloutMaxWidth, placeCallout } from &quot;./calloutPlacement&quot;;</span>
+<span class="d-add">+import { calloutFit, placeCallout } from &quot;./calloutPlacement&quot;;</span>
+<span class="d-ctx"> import type { AnchorBox } from &quot;./coachAnchor&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/** A callout at its usual size: the ask on two lines. */</span>
+<span class="d-del">-const BOX = { width: 300, height: 84 };</span>
+<span class="d-del">-</span>
+<span class="d-del">-/** The four widths the coach was asked to hold up at, against a 1440 desktop. */</span>
+<span class="d-add">+/** The four widths the coach was asked to hold up at, against a 1800 desktop,</span>
+<span class="d-add">+ *  plus the phone the two-mark cast step has to survive. */</span>
+<span class="d-ctx"> const WIDTHS = [</span>
+<span class="d-del">-  { name: &quot;full&quot;, width: 1440 },</span>
+<span class="d-del">-  { name: &quot;half&quot;, width: 720 },</span>
+<span class="d-del">-  { name: &quot;a third&quot;, width: 480 },</span>
+<span class="d-del">-  { name: &quot;a quarter&quot;, width: 360 },</span>
+<span class="d-add">+  { name: &quot;full&quot;, width: 1800 },</span>
+<span class="d-add">+  { name: &quot;half&quot;, width: 900 },</span>
+<span class="d-add">+  { name: &quot;a third&quot;, width: 600 },</span>
+<span class="d-add">+  { name: &quot;a quarter&quot;, width: 450 },</span>
+<span class="d-add">+  { name: &quot;a phone&quot;, width: 390 },</span>
+<span class="d-ctx"> ];</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-const anchor = (left: number, width: number, top = 12, height = 34): AnchorBox =&gt;</span>
+<span class="d-add">+const VH = 900;</span>
+<span class="d-add">+</span>
+<span class="d-add">+const anchor = (left: number, width: number, top = 24, height = 34): AnchorBox =&gt;</span>
+<span class="d-ctx">   ({ left, width, top, height });</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/** Where the tip actually lands, in viewport coordinates. This is the number</span>
+<span class="d-del">- *  the whole module exists to get right — everything else is bookkeeping. */</span>
+<span class="d-del">-function tipX(a: AnchorBox, box = BOX, vpWidth = 1440): number {</span>
+<span class="d-del">-  const p = placeCallout(a, box, { width: vpWidth, height: 900 });</span>
+<span class="d-del">-  return p.left + p.arrowLeft;</span>
+<span class="d-add">+/** A box at the width the fit allows, two lines of the ask deep. */</span>
+<span class="d-add">+function boxFor(a: AnchorBox, vw: number, height = 46, prefer: &quot;left&quot; | &quot;right&quot; = &quot;left&quot;) {</span>
+<span class="d-add">+  return { width: calloutFit(a, { width: vw, height: VH }, prefer).maxWidth, height };</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-describe(&quot;the box stays on screen&quot;, () =&gt; {</span>
+<span class="d-del">-  it(&quot;centres under the anchor when there is room either side&quot;, () =&gt; {</span>
+<span class="d-del">-    const p = placeCallout(anchor(600, 200), BOX, { width: 1440, height: 900 });</span>
+<span class="d-del">-    expect(p.left).toBe(700 - BOX.width / 2);</span>
+<span class="d-del">-    expect(p.side).toBe(&quot;below&quot;);</span>
+<span class="d-del">-    expect(p.top).toBe(12 + 34 + 10);</span>
+<span class="d-add">+/** Where the tip actually lands, in viewport coordinates. For a horizontal side</span>
+<span class="d-add">+ *  that is a y; for a vertical one an x. This is the number the whole module</span>
+<span class="d-add">+ *  exists to get right — everything else is bookkeeping. */</span>
+<span class="d-add">+function tip(a: AnchorBox, vw: number, height = 46) {</span>
+<span class="d-add">+  const p = placeCallout(a, boxFor(a, vw, height), { width: vw, height: VH });</span>
+<span class="d-add">+  const horizontal = p.side === &quot;left&quot; || p.side === &quot;right&quot;;</span>
+<span class="d-add">+  return {</span>
+<span class="d-add">+    side: p.side,</span>
+<span class="d-add">+    horizontal,</span>
+<span class="d-add">+    at: horizontal ? p.top + p.arrow : p.left + p.arrow,</span>
+<span class="d-add">+    from: horizontal ? a.top : a.left,</span>
+<span class="d-add">+    to: horizontal ? a.top + a.height : a.left + a.width,</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;the shape is horizontal wherever it fits&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;sits to the LEFT of the control by default, tip on its right&quot;, () =&gt; {</span>
+<span class="d-add">+    // The cast pair, hard right on a desktop bar: 300px of box fits easily.</span>
+<span class="d-add">+    const p = placeCallout(anchor(1145, 72), { width: 300, height: 46 },</span>
+<span class="d-add">+      { width: 1800, height: VH });</span>
+<span class="d-add">+    expect(p.side).toBe(&quot;left&quot;);</span>
+<span class="d-add">+    expect(p.left + 300).toBe(1145 - 10);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  it(&quot;never runs off the right edge, however far right the anchor is&quot;, () =&gt; {</span>
+<span class="d-del">-    for (const { width } of WIDTHS) {</span>
+<span class="d-del">-      const max = calloutMaxWidth(width);</span>
+<span class="d-del">-      const box = { width: max, height: 84 };</span>
+<span class="d-del">-      // An anchor hard against the right edge — the cast pair&#x27;s real position.</span>
+<span class="d-del">-      const p = placeCallout(anchor(width - 90, 82), box, { width, height: 900 });</span>
+<span class="d-del">-      expect(p.left + box.width).toBeLessThanOrEqual(width - 8);</span>
+<span class="d-del">-      expect(p.left).toBeGreaterThanOrEqual(8);</span>
+<span class="d-del">-    }</span>
+<span class="d-add">+  it(&quot;goes to the right only when the left has no room&quot;, () =&gt; {</span>
+<span class="d-add">+    // A control hard against the left edge — nothing legible fits beside it.</span>
+<span class="d-add">+    const p = placeCallout(anchor(9, 60), { width: 300, height: 46 },</span>
+<span class="d-add">+      { width: 1800, height: VH });</span>
+<span class="d-add">+    expect(p.side).toBe(&quot;right&quot;);</span>
+<span class="d-add">+    expect(p.left).toBe(9 + 60 + 10);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  it(&quot;never runs off the left edge, however far left the anchor is&quot;, () =&gt; {</span>
+<span class="d-del">-    for (const { width } of WIDTHS) {</span>
+<span class="d-del">-      const max = calloutMaxWidth(width);</span>
+<span class="d-del">-      const box = { width: max, height: 84 };</span>
+<span class="d-del">-      const p = placeCallout(anchor(0, 60), box, { width, height: 900 });</span>
+<span class="d-del">-      expect(p.left).toBeGreaterThanOrEqual(8);</span>
+<span class="d-del">-      expect(p.left + box.width).toBeLessThanOrEqual(width - 8);</span>
+<span class="d-add">+  it(&quot;centres the box on the control vertically&quot;, () =&gt; {</span>
+<span class="d-add">+    const p = placeCallout(anchor(1145, 72, 100, 40), { width: 300, height: 46 },</span>
+<span class="d-add">+      { width: 1800, height: VH });</span>
+<span class="d-add">+    expect(p.top + 46 / 2).toBe(100 + 40 / 2);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;falling back under the control&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;goes vertical when neither side can hold a legible box&quot;, () =&gt; {</span>
+<span class="d-add">+    // 390px phone, the Start/End plate running nearly the full width: 9px of</span>
+<span class="d-add">+    // room on the left and ~30 on the right. A 30px-wide callout obeying the</span>
+<span class="d-add">+    // shape rule would be worse than a readable one underneath.</span>
+<span class="d-add">+    const a = anchor(9, 350);</span>
+<span class="d-add">+    const fit = calloutFit(a, { width: 390, height: VH });</span>
+<span class="d-add">+    expect(fit.side).toBeNull();</span>
+<span class="d-add">+    expect(placeCallout(a, { width: fit.maxWidth, height: 46 }, { width: 390, height: VH }).side)</span>
+<span class="d-add">+      .toBe(&quot;below&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;flips above when there is no room below and there is room above&quot;, () =&gt; {</span>
+<span class="d-add">+    const a = anchor(9, 350, 300, 34);</span>
+<span class="d-add">+    const p = placeCallout(a, { width: 374, height: 46 }, { width: 390, height: 380 });</span>
+<span class="d-add">+    expect(p.side).toBe(&quot;above&quot;);</span>
+<span class="d-add">+    expect(p.top).toBe(300 - 10 - 46);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;stays below when neither vertical side fits, rather than covering it&quot;, () =&gt; {</span>
+<span class="d-add">+    const p = placeCallout(anchor(9, 350, 4, 30), { width: 374, height: 46 },</span>
+<span class="d-add">+      { width: 390, height: 100 });</span>
+<span class="d-add">+    expect(p.side).toBe(&quot;below&quot;);</span>
+<span class="d-add">+    expect(p.top).toBeGreaterThanOrEqual(8);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;the box stays on screen&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;never leaves the viewport, at any width, wherever the control is&quot;, () =&gt; {</span>
+<span class="d-add">+    for (const { name, width } of WIDTHS) {</span>
+<span class="d-add">+      const anchors = [</span>
+<span class="d-add">+        anchor(0, 60),                          // hard left</span>
+<span class="d-add">+        anchor(9, Math.min(350, width - 60)),   // the legend plate</span>
+<span class="d-add">+        anchor(Math.round(width / 2) - 40, 80),</span>
+<span class="d-add">+        anchor(width - 90, 82),                 // the cast pair, hard right</span>
+<span class="d-add">+        anchor(width - 24, 24),                 // a 24px control in the corner</span>
+<span class="d-add">+      ];</span>
+<span class="d-add">+      for (const a of anchors) {</span>
+<span class="d-add">+        const box = boxFor(a, width);</span>
+<span class="d-add">+        const p = placeCallout(a, box, { width, height: VH });</span>
+<span class="d-add">+        expect(p.left, `${name} @ ${a.left}`).toBeGreaterThanOrEqual(8);</span>
+<span class="d-add">+        expect(p.left + box.width, `${name} @ ${a.left}`).toBeLessThanOrEqual(width - 8);</span>
+<span class="d-add">+        expect(p.top, `${name} @ ${a.left}`).toBeGreaterThanOrEqual(8);</span>
+<span class="d-add">+      }</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   it(&quot;stays on screen even when the box is wider than the viewport&quot;, () =&gt; {</span>
+<span class="d-del">-    // Not reachable through calloutMaxWidth, but a font-size change or a long</span>
+<span class="d-del">-    // unbreakable address could get there, and the clamp must not invert: an</span>
+<span class="d-add">+    // Not reachable through calloutFit, but a font-size change or a long</span>
+<span class="d-add">+    // unbreakable label could get there, and the clamp must not invert: an</span>
+<span class="d-ctx">     // unguarded Math.min(Math.max(…)) with high &lt; low throws the box off the</span>
+<span class="d-ctx">     // LEFT edge, where there is no scrollbar to reveal it.</span>
+<span class="d-del">-    const p = placeCallout(anchor(100, 60), { width: 500, height: 84 }, { width: 320, height: 900 });</span>
+<span class="d-add">+    const p = placeCallout(anchor(100, 60), { width: 500, height: 46 },</span>
+<span class="d-add">+      { width: 320, height: VH });</span>
+<span class="d-ctx">     expect(p.left).toBe(8);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-hunk">@@ -65,79 +122,157 @@ describe(&quot;the box stays on screen&quot;, () =&gt; {</span>
+<span class="d-ctx"> describe(&quot;the tip stays on the control&quot;, () =&gt; {</span>
+<span class="d-ctx">   it(&quot;points inside the anchor at every width, wherever the anchor sits&quot;, () =&gt; {</span>
+<span class="d-ctx">     for (const { name, width } of WIDTHS) {</span>
+<span class="d-del">-      const box = { width: calloutMaxWidth(width), height: 84 };</span>
+<span class="d-ctx">       const anchors = [</span>
+<span class="d-del">-        anchor(0, 60),                       // hard left</span>
+<span class="d-del">-        anchor(8, 220),                      // the legend plate, float chrome</span>
+<span class="d-add">+        anchor(0, 60),</span>
+<span class="d-add">+        anchor(9, Math.min(350, width - 60)),</span>
+<span class="d-ctx">         anchor(Math.round(width / 2) - 40, 80),</span>
+<span class="d-del">-        anchor(width - 90, 82),              // the cast pair, hard right</span>
+<span class="d-del">-        anchor(width - 24, 24),              // a 24px control in the corner</span>
+<span class="d-add">+        anchor(width - 90, 82),</span>
+<span class="d-add">+        anchor(width - 24, 24),</span>
+<span class="d-ctx">       ];</span>
+<span class="d-ctx">       for (const a of anchors) {</span>
+<span class="d-del">-        const x = tipX(a, box, width);</span>
+<span class="d-del">-        expect(x, `${name} @ anchor.left=${a.left}`).toBeGreaterThanOrEqual(a.left);</span>
+<span class="d-del">-        expect(x, `${name} @ anchor.left=${a.left}`).toBeLessThanOrEqual(a.left + a.width);</span>
+<span class="d-add">+        const t = tip(a, width);</span>
+<span class="d-add">+        expect(t.at, `${name} @ ${a.left} (${t.side})`).toBeGreaterThanOrEqual(t.from);</span>
+<span class="d-add">+        expect(t.at, `${name} @ ${a.left} (${t.side})`).toBeLessThanOrEqual(t.to);</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   it(&quot;keeps the tip off the box&#x27;s own corners&quot;, () =&gt; {</span>
+<span class="d-ctx">     for (const { width } of WIDTHS) {</span>
+<span class="d-del">-      const box = { width: calloutMaxWidth(width), height: 84 };</span>
+<span class="d-ctx">       for (const a of [anchor(0, 40), anchor(width - 40, 40)]) {</span>
+<span class="d-del">-        const p = placeCallout(a, box, { width, height: 900 });</span>
+<span class="d-del">-        expect(p.arrowLeft).toBeGreaterThanOrEqual(16);</span>
+<span class="d-del">-        expect(p.arrowLeft).toBeLessThanOrEqual(box.width - 16);</span>
+<span class="d-add">+        const box = boxFor(a, width);</span>
+<span class="d-add">+        const p = placeCallout(a, box, { width, height: VH });</span>
+<span class="d-add">+        const along = p.side === &quot;left&quot; || p.side === &quot;right&quot; ? box.height : box.width;</span>
+<span class="d-add">+        expect(p.arrow).toBeGreaterThanOrEqual(16);</span>
+<span class="d-add">+        expect(p.arrow).toBeLessThanOrEqual(Math.max(16, along - 16));</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   it(&quot;slides the tip rather than the box once the box is clamped&quot;, () =&gt; {</span>
+<span class="d-del">-    // The failure this guards: centring the arrow on the BOX. Two anchors that</span>
+<span class="d-del">-    // both clamp the box to the same right edge must still get different tips.</span>
+<span class="d-del">-    const box = { width: 300, height: 84 };</span>
+<span class="d-del">-    const vp = { width: 480, height: 900 };</span>
+<span class="d-del">-    const a = placeCallout(anchor(400, 60), box, vp);</span>
+<span class="d-del">-    const b = placeCallout(anchor(340, 60), box, vp);</span>
+<span class="d-del">-    expect(a.left).toBe(b.left);</span>
+<span class="d-del">-    expect(a.arrowLeft).not.toBe(b.arrowLeft);</span>
+<span class="d-del">-    expect(a.arrowLeft).toBeGreaterThan(b.arrowLeft);</span>
+<span class="d-add">+    // The failure this guards: centring the tip on the BOX. Two controls at</span>
+<span class="d-add">+    // different heights that both clamp the box to the same top edge must still</span>
+<span class="d-add">+    // get different tips.</span>
+<span class="d-add">+    const box = { width: 300, height: 200 };</span>
+<span class="d-add">+    const vp = { width: 1800, height: 300 };</span>
+<span class="d-add">+    const a = placeCallout(anchor(1145, 72, 10, 34), box, vp);</span>
+<span class="d-add">+    const b = placeCallout(anchor(1145, 72, 60, 34), box, vp);</span>
+<span class="d-add">+    expect(a.top).toBe(b.top);</span>
+<span class="d-add">+    expect(a.arrow).not.toBe(b.arrow);</span>
+<span class="d-add">+    expect(b.arrow).toBeGreaterThan(a.arrow);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-describe(&quot;which side the tip grows from&quot;, () =&gt; {</span>
+<span class="d-del">-  it(&quot;sits below the control by default — that is where the map is&quot;, () =&gt; {</span>
+<span class="d-del">-    expect(placeCallout(anchor(600, 200), BOX, { width: 1440, height: 900 }).side)</span>
+<span class="d-del">-      .toBe(&quot;below&quot;);</span>
+<span class="d-add">+describe(&quot;two marks at once&quot;, () =&gt; {</span>
+<span class="d-add">+  // The cast step: one box on the vote-type picker, one on the −/+ pair, from a</span>
+<span class="d-add">+  // real 1200px float bar. They are neighbours, so both taking the same side</span>
+<span class="d-add">+  // would overlap — and two overlapping callouts read as one broken one.</span>
+<span class="d-add">+  const picker = anchor(621, 170, 62, 37);</span>
+<span class="d-add">+  const cast = anchor(804, 72, 26, 36);</span>
+<span class="d-add">+  const VP = { width: 1200, height: VH };</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;puts them on opposite sides, so they cannot meet&quot;, () =&gt; {</span>
+<span class="d-add">+    const a = placeCallout(picker, boxFor(picker, VP.width), VP, undefined, &quot;left&quot;);</span>
+<span class="d-add">+    const b = placeCallout(cast, boxFor(cast, VP.width, 46, &quot;right&quot;), VP, undefined, &quot;right&quot;);</span>
+<span class="d-add">+    expect(a.side).toBe(&quot;left&quot;);</span>
+<span class="d-add">+    expect(b.side).toBe(&quot;right&quot;);</span>
+<span class="d-add">+    const aw = calloutFit(picker, VP, &quot;left&quot;).maxWidth;</span>
+<span class="d-add">+    // The picker&#x27;s box ends left of the picker; the pair&#x27;s starts right of it.</span>
+<span class="d-add">+    expect(a.left + aw).toBeLessThanOrEqual(b.left);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  it(&quot;flips above when there is no room below and there is room above&quot;, () =&gt; {</span>
+<span class="d-del">-    // Short landscape: a 380px-tall viewport with the control near the bottom.</span>
+<span class="d-del">-    const p = placeCallout(anchor(600, 200, 260, 34), BOX, { width: 1440, height: 380 });</span>
+<span class="d-del">-    expect(p.side).toBe(&quot;above&quot;);</span>
+<span class="d-del">-    expect(p.top).toBe(260 - 10 - BOX.height);</span>
+<span class="d-add">+  it(&quot;gives each box the width of the side it actually takes&quot;, () =&gt; {</span>
+<span class="d-add">+    // Flipping AFTER measuring would leave a box sized for the roomier side</span>
+<span class="d-add">+    // trying to fit in the narrower one. The pair has 306px to its right.</span>
+<span class="d-add">+    expect(calloutFit(cast, VP, &quot;right&quot;).maxWidth).toBe(306);</span>
+<span class="d-add">+    expect(calloutFit(picker, VP, &quot;left&quot;).maxWidth).toBe(340);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  it(&quot;stays below when neither side fits, rather than covering the control&quot;, () =&gt; {</span>
+<span class="d-del">-    const p = placeCallout(anchor(600, 200, 4, 30), BOX, { width: 1440, height: 100 });</span>
+<span class="d-del">-    expect(p.side).toBe(&quot;below&quot;);</span>
+<span class="d-del">-    expect(p.top).toBeGreaterThanOrEqual(8);</span>
+<span class="d-add">+  it(&quot;still points at its own control, on either side&quot;, () =&gt; {</span>
+<span class="d-add">+    for (const [a, side] of [[picker, &quot;left&quot;], [cast, &quot;right&quot;]] as const) {</span>
+<span class="d-add">+      const p = placeCallout(a, boxFor(a, VP.width, 46, side), VP, undefined, side);</span>
+<span class="d-add">+      const at = p.top + p.arrow;</span>
+<span class="d-add">+      expect(at).toBeGreaterThanOrEqual(a.top);</span>
+<span class="d-add">+      expect(at).toBeLessThanOrEqual(a.top + a.height);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;falls back to the far side when the preferred one has no room&quot;, () =&gt; {</span>
+<span class="d-add">+    // A control hard against the right edge cannot host a box to its right.</span>
+<span class="d-add">+    const hard = anchor(1100, 80, 26, 36);</span>
+<span class="d-add">+    expect(placeCallout(hard, { width: 200, height: 46 }, VP, undefined, &quot;right&quot;).side)</span>
+<span class="d-add">+      .toBe(&quot;left&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;takes the far side rather than overlap, when told what to avoid&quot;, () =&gt; {</span>
+<span class="d-add">+    const first = placeCallout(picker, { width: 200, height: 46 }, VP, undefined, &quot;left&quot;);</span>
+<span class="d-add">+    const avoid = { top: first.top, left: first.left, width: 200, height: 46 };</span>
+<span class="d-add">+    // Same anchor, same preferred side: without `avoid` it lands on the first.</span>
+<span class="d-add">+    const naive = placeCallout(anchor(621, 170, 62, 37), { width: 200, height: 46 }, VP, undefined, &quot;left&quot;);</span>
+<span class="d-add">+    expect(naive.left).toBe(first.left);</span>
+<span class="d-add">+    const avoided = placeCallout(anchor(621, 170, 62, 37), { width: 200, height: 46 }, VP, avoid, &quot;left&quot;);</span>
+<span class="d-add">+    expect(avoided.side).toBe(&quot;right&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps off the OTHER mark&#x27;s control, not just its box&quot;, () =&gt; {</span>
+<span class="d-add">+    // The 390px bar, measured: the picker runs nearly the full width on the row</span>
+<span class="d-add">+    // BELOW the −/+ pair. The pair&#x27;s box would take the space to its left, which</span>
+<span class="d-add">+    // is exactly where the picker is — covering the one control this step is</span>
+<span class="d-add">+    // telling the reader to go and use.</span>
+<span class="d-add">+    const phone = { width: 390, height: 844 };</span>
+<span class="d-add">+    const pickerAnchor = { left: 8, top: 152, width: 303, height: 31 };</span>
+<span class="d-add">+    const pairAnchor = { left: 320, top: 122, width: 61, height: 30 };</span>
+<span class="d-add">+    const box = { width: 302, height: 54 };</span>
+<span class="d-add">+</span>
+<span class="d-add">+    const naive = placeCallout(pairAnchor, box, phone, undefined, &quot;right&quot;);</span>
+<span class="d-add">+    const naiveHits = !(</span>
+<span class="d-add">+      naive.left + box.width &lt;= pickerAnchor.left ||</span>
+<span class="d-add">+      naive.left &gt;= pickerAnchor.left + pickerAnchor.width ||</span>
+<span class="d-add">+      naive.top + box.height &lt;= pickerAnchor.top ||</span>
+<span class="d-add">+      naive.top &gt;= pickerAnchor.top + pickerAnchor.height</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+    expect(naiveHits).toBe(true);</span>
+<span class="d-add">+</span>
+<span class="d-add">+    const p = placeCallout(pairAnchor, box, phone, [pickerAnchor], &quot;right&quot;);</span>
+<span class="d-add">+    const clear = (</span>
+<span class="d-add">+      p.left + box.width &lt;= pickerAnchor.left ||</span>
+<span class="d-add">+      p.left &gt;= pickerAnchor.left + pickerAnchor.width ||</span>
+<span class="d-add">+      p.top + box.height &lt;= pickerAnchor.top ||</span>
+<span class="d-add">+      p.top &gt;= pickerAnchor.top + pickerAnchor.height</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+    expect(clear).toBe(true);</span>
+<span class="d-add">+    // …and it is still pointing at its own control.</span>
+<span class="d-add">+    const at = p.side === &quot;left&quot; || p.side === &quot;right&quot; ? p.top + p.arrow : p.left + p.arrow;</span>
+<span class="d-add">+    const from = p.side === &quot;left&quot; || p.side === &quot;right&quot; ? pairAnchor.top : pairAnchor.left;</span>
+<span class="d-add">+    const to = from + (p.side === &quot;left&quot; || p.side === &quot;right&quot; ? pairAnchor.height : pairAnchor.width);</span>
+<span class="d-add">+    expect(at).toBeGreaterThanOrEqual(from);</span>
+<span class="d-add">+    expect(at).toBeLessThanOrEqual(to);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;leaves a box alone when there is nothing to avoid&quot;, () =&gt; {</span>
+<span class="d-add">+    const far = { top: 600, left: 20, width: 100, height: 40 };</span>
+<span class="d-add">+    expect(placeCallout(cast, { width: 200, height: 46 }, VP, far, &quot;right&quot;))</span>
+<span class="d-add">+      .toEqual(placeCallout(cast, { width: 200, height: 46 }, VP, undefined, &quot;right&quot;));</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> describe(&quot;how wide the box may be&quot;, () =&gt; {</span>
+<span class="d-del">-  it(&quot;shrinks with the viewport and never fills it edge to edge&quot;, () =&gt; {</span>
+<span class="d-del">-    for (const { width } of WIDTHS) {</span>
+<span class="d-del">-      expect(calloutMaxWidth(width)).toBeLessThanOrEqual(width - 16);</span>
+<span class="d-del">-    }</span>
+<span class="d-add">+  it(&quot;takes only the room its own side has&quot;, () =&gt; {</span>
+<span class="d-add">+    // 200px of clear space to the left → a 200px box, not a clipped 300px one.</span>
+<span class="d-add">+    const fit = calloutFit(anchor(218, 60), { width: 900, height: VH });</span>
+<span class="d-add">+    expect(fit.side).toBe(&quot;left&quot;);</span>
+<span class="d-add">+    expect(fit.maxWidth).toBe(200);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   it(&quot;stops at a comfortable reading width on a wide screen&quot;, () =&gt; {</span>
+<span class="d-del">-    expect(calloutMaxWidth(1440)).toBe(300);</span>
+<span class="d-del">-    expect(calloutMaxWidth(2560)).toBe(300);</span>
+<span class="d-add">+    expect(calloutFit(anchor(1145, 72), { width: 1800, height: VH }).maxWidth).toBe(340);</span>
+<span class="d-add">+    expect(calloutFit(anchor(1145, 72), { width: 2560, height: VH }).maxWidth).toBe(340);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  it(&quot;keeps a floor, so a very narrow window gets a box rather than a sliver&quot;, () =&gt; {</span>
+<span class="d-del">-    expect(calloutMaxWidth(120)).toBe(160);</span>
+<span class="d-add">+  it(&quot;refuses to go horizontal below a legible width&quot;, () =&gt; {</span>
+<span class="d-add">+    // 160px of room is under the floor: it falls back rather than shipping a</span>
+<span class="d-add">+    // sliver beside the control.</span>
+<span class="d-add">+    expect(calloutFit(anchor(178, 60), { width: 400, height: VH }).side).toBeNull();</span>
+<span class="d-add">+    expect(calloutFit(anchor(186, 60), { width: 400, height: VH }).side).toBe(&quot;left&quot;);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> });</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/onboarding/calloutPlacement.ts</span>
+            <span class="stat"><span class="d-add">+203</span> / <span class="d-del">-48</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run coach (geometry)</span>
+        <span class="ctx-sum">Pure functions deciding which side a mark takes, where its box goes and where its tip sits</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">calloutPlacement.ts</span>
+        <span class="ctx-sum">~120 → ~240 LOC — the shape header, the fit, the four candidate placements</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header · the shape is horizontal</span><span class="ol-sum">REWRITTEN — label vs caption, and when it goes back under</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CalloutSide / CalloutFit / AvoidRect</span><span class="ol-sum">left | right | above | below; AvoidRect is new</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">MIN_HORIZONTAL_WIDTH / PREFERRED_WIDTH</span><span class="ol-sum">NEW floor at 168; preferred 300 → 340</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">calloutFit(anchor, viewport, prefer)</span><span class="ol-sum">NEW — orientation and width from the anchor alone</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">hits()</span><span class="ol-sum">NEW — rect intersection against every blocker</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">placeHorizontal / placeVertical</span><span class="ol-sum">NEW — one per axis, both returning the same shape</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">placeCallout</span><span class="ol-sum">REWRITTEN — build candidates in order, take the first that clears</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The header states the shape rule and, in the same breath, when it is abandoned — 390px, where the Start/End plate leaves 9px on its left</li><li>calloutFit takes `prefer`, which is how the two marks take opposite sides WITHOUT any collision arithmetic, and why each gets the width of the side it will actually use</li><li>The candidate list is preferred → opposite → below → above; the note says why trying sides beats nudging, and that a nudge makes the tip stretch or lie</li><li>The last-resort return is explicit: if nothing clears, the preferred placement stands, because an overlap beats a box in the wrong place</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/onboarding/calloutPlacement.ts b/client-react/src/onboarding/calloutPlacement.ts</span>
+<span class="d-meta">index 0e19913..757dea6 100644</span>
+<span class="d-meta">--- a/client-react/src/onboarding/calloutPlacement.ts</span>
+<span class="d-meta">+++ b/client-react/src/onboarding/calloutPlacement.ts</span>
+<span class="d-hunk">@@ -3,31 +3,38 @@</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-ctx"> // Pure geometry, separated from the component for one reason: the thing that</span>
+<span class="d-ctx"> // goes wrong with an anchored callout is never &quot;does it render&quot;, it is &quot;does it</span>
+<span class="d-del">-// still point at the right control at 380px&quot; — and that is a question about</span>
+<span class="d-add">+// still point at the right control at 390px&quot; — and that is a question about</span>
+<span class="d-ctx"> // four numbers, which a test can ask far more thoroughly than a person dragging</span>
+<span class="d-ctx"> // a window edge can.</span>
+<span class="d-ctx"> //</span>
+<span class="d-add">+// THE SHAPE IS HORIZONTAL: a wide, short box with the pointer on a VERTICAL</span>
+<span class="d-add">+// edge, sitting beside what it describes — `[ bla bla bla ]▶`. A box under a</span>
+<span class="d-add">+// control is a caption; a box beside it with a tip touching it is a label, and</span>
+<span class="d-add">+// the whole point of moving off the bottom strip was to label rather than</span>
+<span class="d-add">+// caption. Left of the anchor is preferred, because that is the shape as drawn</span>
+<span class="d-add">+// and because every anchor in the bar has map to its left at the widths where</span>
+<span class="d-add">+// this fits at all.</span>
+<span class="d-add">+//</span>
+<span class="d-ctx"> // Two rules do all the work, and they pull against each other:</span>
+<span class="d-ctx"> //</span>
+<span class="d-ctx"> //   THE BOX STAYS ON SCREEN. It is clamped into the viewport with a margin. A</span>
+<span class="d-del">-//   callout that runs off the right edge is worse than one that is not centred,</span>
+<span class="d-del">-//   because half its sentence is gone.</span>
+<span class="d-add">+//   callout that runs off an edge is worse than one that is not centred,</span>
+<span class="d-add">+//   because part of its sentence is gone.</span>
+<span class="d-ctx"> //</span>
+<span class="d-del">-//   THE TIP STAYS ON THE CONTROL. So when the clamp moves the box, the arrow</span>
+<span class="d-del">-//   does NOT move with it — it slides along the box&#x27;s edge to stay over the</span>
+<span class="d-del">-//   anchor&#x27;s centre. This is the part a naive implementation gets wrong: it</span>
+<span class="d-del">-//   centres the arrow on the BOX, and then at narrow widths the arrow points</span>
+<span class="d-add">+//   THE TIP STAYS ON THE CONTROL. So when the clamp moves the box, the tip does</span>
+<span class="d-add">+//   NOT move with it — it slides along the box&#x27;s edge to stay over the anchor&#x27;s</span>
+<span class="d-add">+//   centre. This is the part a naive implementation gets wrong: it centres the</span>
+<span class="d-add">+//   tip on the BOX, and then the moment anything clamps, the tip points</span>
+<span class="d-ctx"> //   confidently at whatever happens to be next to the control.</span>
+<span class="d-ctx"> //</span>
+<span class="d-del">-// The arrow keeps a minimum inset from the box&#x27;s corners, because a tip growing</span>
+<span class="d-del">-// out of a corner reads as a rendering fault rather than as a pointer. When the</span>
+<span class="d-del">-// anchor is so far into a corner that even the inset cannot reach it, the arrow</span>
+<span class="d-del">-// stops at the inset and the box is as close as it can get — the honest failure,</span>
+<span class="d-del">-// and the only one available once the box is against the viewport edge.</span>
+<span class="d-del">-//</span>
+<span class="d-del">-// Vertically it is a simple flip: below the anchor by default, above it when</span>
+<span class="d-del">-// there is no room below AND there is room above. Below is the default because</span>
+<span class="d-del">-// every anchor the coach uses is in the top bar, so below is where the map is.</span>
+<span class="d-add">+// AND WHEN HORIZONTAL DOES NOT FIT, IT GOES BACK UNDER. Stated plainly because</span>
+<span class="d-add">+// it is a real case, not a theoretical one: at 390px the Start/End plate is</span>
+<span class="d-add">+// nearly the full width of the screen, so there is no room for a legible box on</span>
+<span class="d-add">+// either side of it. A 40px-wide callout obeying the shape rule is worse than a</span>
+<span class="d-add">+// readable one under the control, so below the horizontal floor the box flips</span>
+<span class="d-add">+// to a vertical tip. Which orientation is in play is decided from the ANCHOR</span>
+<span class="d-add">+// AND THE VIEWPORT ALONE — never from the box&#x27;s own size — so the caller can</span>
+<span class="d-add">+// ask for it before the box exists and apply it as a max-width.</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> import type { AnchorBox } from &quot;./coachAnchor&quot;;</span>
+<span class="d-hunk">@@ -42,15 +49,35 @@ export interface CalloutSize {</span>
+<span class="d-ctx">   height: number;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/** Which edge of the box the tip grows out of — named for where the box sits</span>
+<span class="d-add">+ *  relative to the anchor, so `left` means &quot;box on the left, tip on its right&quot;. */</span>
+<span class="d-add">+export type CalloutSide = &quot;left&quot; | &quot;right&quot; | &quot;above&quot; | &quot;below&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+export interface CalloutFit {</span>
+<span class="d-add">+  side: CalloutSide | null;</span>
+<span class="d-add">+  /** Null side = vertical, decided later because it needs the box&#x27;s height. */</span>
+<span class="d-add">+  maxWidth: number;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** A box already on screen that this one must not land on top of. */</span>
+<span class="d-add">+export interface AvoidRect {</span>
+<span class="d-add">+  top: number;</span>
+<span class="d-add">+  left: number;</span>
+<span class="d-add">+  width: number;</span>
+<span class="d-add">+  height: number;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> export interface CalloutPlacement {</span>
+<span class="d-ctx">   /** Viewport coordinates for `position: fixed`. */</span>
+<span class="d-ctx">   top: number;</span>
+<span class="d-ctx">   left: number;</span>
+<span class="d-del">-  /** Which side of the box the tip grows out of. */</span>
+<span class="d-del">-  side: &quot;above&quot; | &quot;below&quot;;</span>
+<span class="d-del">-  /** The tip&#x27;s centre, in pixels from the box&#x27;s own left edge. */</span>
+<span class="d-del">-  arrowLeft: number;</span>
+<span class="d-del">-  /** What the box is allowed to be, before it is measured. */</span>
+<span class="d-add">+  side: CalloutSide;</span>
+<span class="d-add">+  /**</span>
+<span class="d-add">+   * The tip&#x27;s centre, in pixels from the box&#x27;s own leading edge — from the LEFT</span>
+<span class="d-add">+   * edge for `above`/`below`, from the TOP edge for `left`/`right`. One number</span>
+<span class="d-add">+   * and one CSS custom property for all four sides.</span>
+<span class="d-add">+   */</span>
+<span class="d-add">+  arrow: number;</span>
+<span class="d-ctx">   maxWidth: number;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -60,8 +87,12 @@ const MARGIN = 8;</span>
+<span class="d-ctx"> const GAP = 10;</span>
+<span class="d-ctx"> /** How close the tip&#x27;s centre may get to a corner of the box. */</span>
+<span class="d-ctx"> const ARROW_INSET = 16;</span>
+<span class="d-del">-/** Wide enough for two lines of the ask at desktop type; narrower is fine. */</span>
+<span class="d-del">-const PREFERRED_WIDTH = 300;</span>
+<span class="d-add">+/** Wide enough for the ask on one or two lines at desktop type. */</span>
+<span class="d-add">+const PREFERRED_WIDTH = 340;</span>
+<span class="d-add">+/** Below this a side-by-side box stops being readable and we go back under. */</span>
+<span class="d-add">+const MIN_HORIZONTAL_WIDTH = 168;</span>
+<span class="d-add">+/** The vertical fallback may be narrower — it has the whole width to play with. */</span>
+<span class="d-add">+const MIN_VERTICAL_WIDTH = 160;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> function clamp(value: number, low: number, high: number): number {</span>
+<span class="d-ctx">   // Guard the inverted range: at a viewport narrower than the box, `high` lands</span>
+<span class="d-hunk">@@ -72,47 +103,171 @@ function clamp(value: number, low: number, high: number): number {</span>
+<span class="d-ctx">   return Math.min(Math.max(value, low), high);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/** The widest the box may be here. Read before the box exists, so it can be</span>
+<span class="d-del">- *  applied as a CSS max-width and measured afterwards. */</span>
+<span class="d-del">-export function calloutMaxWidth(viewportWidth: number): number {</span>
+<span class="d-del">-  return Math.min(PREFERRED_WIDTH, Math.max(160, viewportWidth - MARGIN * 2));</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * Orientation and width, from the anchor and the viewport only.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * Deliberately independent of the box&#x27;s own size, because the caller needs this</span>
+<span class="d-add">+ * BEFORE the box has one: the width it is allowed decides how the ask wraps,</span>
+<span class="d-add">+ * which decides the height, which decides where a vertical box can go. Asking</span>
+<span class="d-add">+ * the other way round is the circular version.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function calloutFit(</span>
+<span class="d-add">+  anchor: AnchorBox,</span>
+<span class="d-add">+  viewport: Viewport,</span>
+<span class="d-add">+  prefer: &quot;left&quot; | &quot;right&quot; = &quot;left&quot;</span>
+<span class="d-add">+): CalloutFit {</span>
+<span class="d-add">+  const room = {</span>
+<span class="d-add">+    left: anchor.left - GAP - MARGIN,</span>
+<span class="d-add">+    right: viewport.width - (anchor.left + anchor.width) - GAP - MARGIN,</span>
+<span class="d-add">+  };</span>
+<span class="d-add">+  const other = prefer === &quot;left&quot; ? &quot;right&quot; : &quot;left&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // `prefer` is how the cast step keeps its two marks apart WITHOUT any</span>
+<span class="d-add">+  // collision arithmetic: the one on the vote-type picker takes the left, the</span>
+<span class="d-add">+  // one on the −/+ pair takes the right, and since the picker is left of the</span>
+<span class="d-add">+  // pair in every layout the bar has, the two boxes cannot meet. Choosing the</span>
+<span class="d-add">+  // side up front also means the width is chosen for the side that will</span>
+<span class="d-add">+  // actually be used — flipping afterwards would leave a box sized for the</span>
+<span class="d-add">+  // roomier side trying to fit in the narrower one.</span>
+<span class="d-add">+  if (room[prefer] &gt;= MIN_HORIZONTAL_WIDTH) {</span>
+<span class="d-add">+    return { side: prefer, maxWidth: Math.min(PREFERRED_WIDTH, room[prefer]) };</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  if (room[other] &gt;= MIN_HORIZONTAL_WIDTH) {</span>
+<span class="d-add">+    return { side: other, maxWidth: Math.min(PREFERRED_WIDTH, room[other]) };</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  return {</span>
+<span class="d-add">+    side: null,</span>
+<span class="d-add">+    maxWidth: Math.min(</span>
+<span class="d-add">+      PREFERRED_WIDTH,</span>
+<span class="d-add">+      Math.max(MIN_VERTICAL_WIDTH, viewport.width - MARGIN * 2)</span>
+<span class="d-add">+    ),</span>
+<span class="d-add">+  };</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-export function placeCallout(</span>
+<span class="d-add">+function hits(p: CalloutPlacement, size: CalloutSize, avoid: AvoidRect[]): boolean {</span>
+<span class="d-add">+  return avoid.some((a) =&gt; !(</span>
+<span class="d-add">+    p.left + size.width &lt;= a.left ||</span>
+<span class="d-add">+    p.left &gt;= a.left + a.width ||</span>
+<span class="d-add">+    p.top + size.height &lt;= a.top ||</span>
+<span class="d-add">+    p.top &gt;= a.top + a.height</span>
+<span class="d-add">+  ));</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+function placeHorizontal(</span>
+<span class="d-ctx">   anchor: AnchorBox,</span>
+<span class="d-ctx">   size: CalloutSize,</span>
+<span class="d-del">-  viewport: Viewport</span>
+<span class="d-add">+  viewport: Viewport,</span>
+<span class="d-add">+  side: &quot;left&quot; | &quot;right&quot;,</span>
+<span class="d-add">+  maxWidth: number</span>
+<span class="d-ctx"> ): CalloutPlacement {</span>
+<span class="d-del">-  const maxWidth = calloutMaxWidth(viewport.width);</span>
+<span class="d-del">-</span>
+<span class="d-del">-  const below = anchor.top + anchor.height + GAP;</span>
+<span class="d-del">-  const above = anchor.top - GAP - size.height;</span>
+<span class="d-del">-  const fitsBelow = below + size.height &lt;= viewport.height - MARGIN;</span>
+<span class="d-del">-  const fitsAbove = above &gt;= MARGIN;</span>
+<span class="d-del">-  // Below unless it does not fit and above does. When NEITHER fits — a control</span>
+<span class="d-del">-  // taller than the viewport minus the box, which short landscape can produce —</span>
+<span class="d-del">-  // stay below and let the clamp deal with it, because below is where the map</span>
+<span class="d-del">-  // is and an overlapping callout above the bar covers the control itself.</span>
+<span class="d-del">-  const side: &quot;above&quot; | &quot;below&quot; = !fitsBelow &amp;&amp; fitsAbove ? &quot;above&quot; : &quot;below&quot;;</span>
+<span class="d-del">-</span>
+<span class="d-add">+  const left = clamp(</span>
+<span class="d-add">+    side === &quot;left&quot;</span>
+<span class="d-add">+      ? anchor.left - GAP - size.width</span>
+<span class="d-add">+      : anchor.left + anchor.width + GAP,</span>
+<span class="d-add">+    MARGIN,</span>
+<span class="d-add">+    viewport.width - size.width - MARGIN</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+  const centreY = anchor.top + anchor.height / 2;</span>
+<span class="d-ctx">   const top = clamp(</span>
+<span class="d-del">-    side === &quot;below&quot; ? below : above,</span>
+<span class="d-add">+    centreY - size.height / 2,</span>
+<span class="d-ctx">     MARGIN,</span>
+<span class="d-ctx">     Math.max(MARGIN, viewport.height - size.height - MARGIN)</span>
+<span class="d-ctx">   );</span>
+<span class="d-add">+  const arrow = clamp(</span>
+<span class="d-add">+    centreY - top,</span>
+<span class="d-add">+    ARROW_INSET,</span>
+<span class="d-add">+    Math.max(ARROW_INSET, size.height - ARROW_INSET)</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+  return { top, left, side, arrow, maxWidth };</span>
+<span class="d-add">+}</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  const anchorCentre = anchor.left + anchor.width / 2;</span>
+<span class="d-add">+function placeVertical(</span>
+<span class="d-add">+  anchor: AnchorBox,</span>
+<span class="d-add">+  size: CalloutSize,</span>
+<span class="d-add">+  viewport: Viewport,</span>
+<span class="d-add">+  side: &quot;above&quot; | &quot;below&quot;,</span>
+<span class="d-add">+  maxWidth: number</span>
+<span class="d-add">+): CalloutPlacement {</span>
+<span class="d-add">+  const top = clamp(</span>
+<span class="d-add">+    side === &quot;below&quot; ? anchor.top + anchor.height + GAP : anchor.top - GAP - size.height,</span>
+<span class="d-add">+    MARGIN,</span>
+<span class="d-add">+    Math.max(MARGIN, viewport.height - size.height - MARGIN)</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+  const centreX = anchor.left + anchor.width / 2;</span>
+<span class="d-ctx">   const left = clamp(</span>
+<span class="d-del">-    anchorCentre - size.width / 2,</span>
+<span class="d-add">+    centreX - size.width / 2,</span>
+<span class="d-ctx">     MARGIN,</span>
+<span class="d-ctx">     viewport.width - size.width - MARGIN</span>
+<span class="d-ctx">   );</span>
+<span class="d-del">-</span>
+<span class="d-del">-  const arrowLeft = clamp(</span>
+<span class="d-del">-    anchorCentre - left,</span>
+<span class="d-add">+  const arrow = clamp(</span>
+<span class="d-add">+    centreX - left,</span>
+<span class="d-ctx">     ARROW_INSET,</span>
+<span class="d-ctx">     Math.max(ARROW_INSET, size.width - ARROW_INSET)</span>
+<span class="d-ctx">   );</span>
+<span class="d-add">+  return { top, left, side, arrow, maxWidth };</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/**</span>
+<span class="d-add">+ * `avoid` is what keeps the cast step&#x27;s TWO marks off each other — and, just as</span>
+<span class="d-add">+ * importantly, off the controls the other mark is pointing at.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * The vote-type picker and the −/+ pair are neighbours in the bar: adjacent</span>
+<span class="d-add">+ * columns on a desktop, stacked rows on a phone. Two boxes both taking their</span>
+<span class="d-add">+ * preferred side overlap, and two overlapping callouts read as one broken one.</span>
+<span class="d-add">+ * Worse, at 390px the box on the −/+ pair lands squarely on the PICKER, which</span>
+<span class="d-add">+ * is the one control this step is actively inviting the reader to use. A</span>
+<span class="d-add">+ * callout that covers the thing it just told you to go and press is the same</span>
+<span class="d-add">+ * failure as greying it out, only harder to notice.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ * So the sides are tried in order — preferred, its opposite, below, above — and</span>
+<span class="d-add">+ * the first one that clears every avoided rect wins. Trying sides rather than</span>
+<span class="d-add">+ * NUDGING is deliberate: a nudge moves the box off its own control and the tip</span>
+<span class="d-add">+ * has to stretch or lie, whereas every side in that list is still a box</span>
+<span class="d-add">+ * pointing straight at it. If nothing clears, the preferred placement stands —</span>
+<span class="d-add">+ * an overlap is better than a box in the wrong place entirely, and saying so</span>
+<span class="d-add">+ * here is better than a silent fifth fallback.</span>
+<span class="d-add">+ */</span>
+<span class="d-add">+export function placeCallout(</span>
+<span class="d-add">+  anchor: AnchorBox,</span>
+<span class="d-add">+  size: CalloutSize,</span>
+<span class="d-add">+  viewport: Viewport,</span>
+<span class="d-add">+  avoid?: AvoidRect | AvoidRect[],</span>
+<span class="d-add">+  prefer: &quot;left&quot; | &quot;right&quot; = &quot;left&quot;</span>
+<span class="d-add">+): CalloutPlacement {</span>
+<span class="d-add">+  const fit = calloutFit(anchor, viewport, prefer);</span>
+<span class="d-add">+  const maxWidth = fit.maxWidth;</span>
+<span class="d-add">+  const blockers = !avoid ? [] : Array.isArray(avoid) ? avoid : [avoid];</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const candidates: CalloutPlacement[] = [];</span>
+<span class="d-add">+  if (fit.side === &quot;left&quot; || fit.side === &quot;right&quot;) {</span>
+<span class="d-add">+    const other = fit.side === &quot;left&quot; ? &quot;right&quot; : &quot;left&quot;;</span>
+<span class="d-add">+    candidates.push(placeHorizontal(anchor, size, viewport, fit.side, maxWidth));</span>
+<span class="d-add">+    const roomOther =</span>
+<span class="d-add">+      other === &quot;left&quot;</span>
+<span class="d-add">+        ? anchor.left - GAP - MARGIN</span>
+<span class="d-add">+        : viewport.width - (anchor.left + anchor.width) - GAP - MARGIN;</span>
+<span class="d-add">+    if (roomOther &gt;= size.width) {</span>
+<span class="d-add">+      candidates.push(placeHorizontal(anchor, size, viewport, other, maxWidth));</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  const below = anchor.top + anchor.height + GAP;</span>
+<span class="d-add">+  const above = anchor.top - GAP - size.height;</span>
+<span class="d-add">+  if (below + size.height &lt;= viewport.height - MARGIN) {</span>
+<span class="d-add">+    candidates.push(placeVertical(anchor, size, viewport, &quot;below&quot;, maxWidth));</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  if (above &gt;= MARGIN) {</span>
+<span class="d-add">+    candidates.push(placeVertical(anchor, size, viewport, &quot;above&quot;, maxWidth));</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  if (candidates.length) {</span>
+<span class="d-add">+    const clear = candidates.find((c) =&gt; !hits(c, size, blockers));</span>
+<span class="d-add">+    if (clear) return clear;</span>
+<span class="d-add">+    if (!blockers.length) return candidates[0];</span>
+<span class="d-add">+    return candidates[0];</span>
+<span class="d-add">+  }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  return { top, left, side, arrowLeft, maxWidth };</span>
+<span class="d-add">+  // Nothing fitted anywhere — a control taller than the viewport minus the box,</span>
+<span class="d-add">+  // which short landscape can produce. Below, clamped, and let the reader see</span>
+<span class="d-add">+  // something rather than nothing.</span>
+<span class="d-add">+  return placeVertical(anchor, size, viewport, &quot;below&quot;, maxWidth);</span>
+<span class="d-ctx"> }</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/onboarding/coachAnchor.ts</span>
+            <span class="stat"><span class="d-add">+6</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run coach (anchoring)</span>
+        <span class="ctx-sum">Finds the control a mark is about and tracks its live rect</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">coachAnchor.ts</span>
+        <span class="ctx-sum">~175 LOC</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">CoachTarget</span><span class="ol-sum">+ votetype</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">liveRect / same / useCoachAnchor</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>`votetype` is called out as the odd one: never a STEP, only the second mark the cast step puts up</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/onboarding/coachAnchor.ts b/client-react/src/onboarding/coachAnchor.ts</span>
+<span class="d-meta">index 26dcd30..47e426b 100644</span>
+<span class="d-meta">--- a/client-react/src/onboarding/coachAnchor.ts</span>
+<span class="d-meta">+++ b/client-react/src/onboarding/coachAnchor.ts</span>
+<span class="d-hunk">@@ -42,8 +42,12 @@</span>
+<span class="d-ctx"> import { useEffect, useState } from &quot;react&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** Which piece of chrome the coach is pointing at. Matches `data-coach` in</span>
+<span class="d-del">- *  TopBar.tsx — the only coupling between this flow and the bar. */</span>
+<span class="d-del">-export type CoachTarget = &quot;start&quot; | &quot;end&quot; | &quot;cast&quot;;</span>
+<span class="d-add">+ *  TopBar.tsx — the only coupling between this flow and the bar.</span>
+<span class="d-add">+ *</span>
+<span class="d-add">+ *  `votetype` is the odd one out: it is never a STEP, it is the second mark the</span>
+<span class="d-add">+ *  cast step puts up beside the first, on the control the question&#x27;s answer can</span>
+<span class="d-add">+ *  be changed with. */</span>
+<span class="d-add">+export type CoachTarget = &quot;start&quot; | &quot;end&quot; | &quot;cast&quot; | &quot;votetype&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> export interface AnchorBox {</span>
+<span class="d-ctx">   top: number;</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
