@@ -41,13 +41,15 @@
 
 import { useEffect, useState } from "react";
 
+import type { CoachMark } from "./state";
+
 /** Which piece of chrome the coach is pointing at. Matches `data-coach` in
  *  TopBar.tsx — the only coupling between this flow and the bar.
  *
- *  `votetype` is the odd one out: it is never a STEP, it is the second mark the
- *  cast step puts up beside the first, on the control the question's answer can
- *  be changed with. */
-export type CoachTarget = "start" | "end" | "cast" | "votetype";
+ *  The same four names the LOCK works in, and deliberately one list rather than
+ *  two that agree: a mark, the control it hangs off and the thing the step
+ *  leaves live are one fact seen from three sides (state.ts). */
+export type CoachTarget = CoachMark;
 
 export interface AnchorBox {
   top: number;

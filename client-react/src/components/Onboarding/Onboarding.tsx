@@ -9,8 +9,8 @@ import { CoachCallout } from "./CoachCallout";
 import { OpenerWall } from "./OpenerWall";
 import { buildTiles, type OpenerTile } from "../../onboarding/tiles";
 import {
-  endIsOptional, onboardingStep, requiresEnd, shouldOnboard, stepUsesTheMap,
-  type OnboardingFacts,
+  endIsOptional, liveDuring, marksDuring, onboardingStep, requiresEnd, shouldOnboard,
+  stepUsesTheMap, type CoachMark, type OnboardingFacts,
 } from "../../onboarding/state";
 import { hasVisitedBefore, isSuppressed, suppress } from "../../onboarding/firstRun";
 import { setOnboardingActive, useOnboardingRequests } from "../../onboarding/active";
@@ -138,6 +138,13 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   // whole selection) is already in play, because choosing a different sentence
   // is the reason to ask for it. Cleared by the pick.
   const [forcedWall, setForcedWall] = useState(openedByHand);
+  // Marks the visitor has taken down one at a time. NOT a lock flag and not a
+  // step: it is the list of × presses, and everything about what is on screen
+  // and what is clickable is derived from it (see `showing` below). A dismissal
+  // is a decision, so a mark closed here stays closed for the visit — walk back
+  // to `start` and forward to `cast` again and the one you closed does not
+  // return.
+  const [closedMarks, setClosedMarks] = useState<readonly CoachMark[]>([]);
 
   // A link that already carries a selection (a shared proposal, or a sticker that
   // knows where it is) has made the choice the wall exists to make. A lazy
@@ -203,7 +210,10 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   // they find out, which is also why the picker is exempt from the greying
   // below: inviting somebody to use a control you have just faded out is worse
   // than not inviting them.
-  const secondary = useCoachAnchor(active && step === "cast" ? "votetype" : null);
+  const stepMarks = marksDuring(step);
+  const secondary = useCoachAnchor(
+    active && stepMarks.includes("votetype") ? "votetype" : null
+  );
 
   // Anchored = there is a live control to hang the box off, and — before a point
   // exists — nobody is mid-address-search in the field we would be pointing at.
@@ -215,6 +225,39 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   // down except the cast itself.
   const standsDown = anchor.typing && (step === "start" || step === "end");
   const anchored = !!anchor.box && !standsDown;
+
+  // ── WHAT IS SHOWING, and therefore what is locked ─────────────────────────
+  // The two questions are one question. A mark shows when the step has one, it
+  // has a control to hang off, and nobody has closed it; the lock is on while
+  // that list is non-empty and off the moment it empties — by two × presses, by
+  // a cast (which moves the step to `done`, whose list is empty), or by the
+  // anchor going away under it.
+  //
+  // Nothing here is stored. `closedMarks` records × presses and the rest is
+  // recomputed every render, which is the whole reason to write it this way:
+  // this codebase produced three stale-visual-state bugs in a week, every one of
+  // them a flag with a path out that did not clear it. There is no path out of
+  // this to miss.
+  const showPrimary = !!target && anchored && !closedMarks.includes(target);
+  // The second mark rides on the first being ANCHORED — not on it still being
+  // open. Closing the question leaves this one standing (that is the point of
+  // two × buttons), but a step with nothing to point at falls back to the bottom
+  // strip as a whole, and one lone mark hanging off the picker beside a strip
+  // carrying the question would be the flow speaking from two places at once.
+  const showSecondary =
+    stepMarks.includes("votetype") &&
+    anchored &&
+    !!secondary.box &&
+    !closedMarks.includes("votetype");
+  const showing: CoachMark[] = [];
+  if (showSecondary) showing.push("votetype");
+  if (showPrimary && target) showing.push(target);
+
+  // What this step leaves live, spelled as an attribute the stylesheet reads
+  // (`data-coach-live="map cast votetype"`). The set is the STEP's — closing one
+  // mark takes its box off the screen, it does not switch its control off.
+  const liveAttr = liveDuring(step).join(" ");
+  const locksTheMap = !stepUsesTheMap(step);
 
   const calculating = isCalculating || isCalculatingSplit;
 
@@ -260,24 +303,29 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   // the endpoint recording on the cast instead of on the open, which is a
   // different change to a different layer.
 
-  // Grey the chrome down to the one thing this step is about.
+  // THE LOCK. Everything the step did not name goes dark AND dead; the names it
+  // did go out as one attribute and the stylesheet does the rest
+  // (`body[data-coach-live="map cast votetype"] …`). That is the whole coupling:
+  // this flow never touches another component's DOM, and the bar never learns a
+  // coach exists beyond the `data-coach` attributes naming its own controls.
   //
-  // A body attribute rather than a class on each control, and the greying rules
-  // live in Onboarding.css keyed off it (`body[data-coach-focus="start"] …`).
-  // That is the whole coupling: this flow never touches another component's DOM,
-  // and the bar never learns that a coach exists beyond the three `data-coach`
-  // attributes naming its own controls.
+  // Two things it cannot be, both learned the hard way:
   //
-  // It cannot be done with opacity on a CONTAINER, which is the obvious version
-  // and the wrong one: opacity makes a group, and nothing inside a faded group
-  // can be brought back to full — so fading `.topbar` and un-fading the Start
-  // field inside it is not expressible. The rules therefore fade the bar's
-  // controls INDIVIDUALLY, each one excluded by `:not([data-coach="…"])`.
+  //   · NOT opacity on a CONTAINER. Opacity makes a group and nothing inside a
+  //     faded group can be brought back to full, so "fade the bar, keep the
+  //     Start field lit" is not expressible that way. The rules fade the bar's
+  //     controls individually.
+  //   · NOT fading alone. A faded control that still takes clicks is a lie in
+  //     one direction and a lit control behind a scrim is a lie in the other,
+  //     and this feature has made the second mistake before. So the same
+  //     attribute drives `pointer-events` — the bar is inert and the named
+  //     controls take the pointer back — and the map's half of it is a scrim
+  //     that is NOT RENDERED rather than restyled (see the render below).
   useEffect(() => {
-    if (!active || !target || !anchored) return;
-    document.body.setAttribute("data-coach-focus", target);
-    return () => document.body.removeAttribute("data-coach-focus");
-  }, [active, target, anchored]);
+    if (!active || showing.length === 0) return;
+    document.body.setAttribute("data-coach-live", liveAttr);
+    return () => document.body.removeAttribute("data-coach-live");
+  }, [active, showing.length, liveAttr]);
 
   // A cast finishes the flow. Suppress — this and the dismissal are the only two
   // writes — and then the closing line STAYS.
@@ -342,6 +390,31 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
     setDismissed(true);
   }, []);
 
+  /**
+   * The × on ONE mark.
+   *
+   * It takes that mark down and leaves the other standing, which is what makes
+   * the cast step's two boxes two separate things rather than one with two
+   * closers: shut the question and the reminder that the vote type is yours to
+   * change is still there, and vice versa. The lock stays on through the first
+   * × for exactly that reason — it is derived from what is showing, and
+   * something still is.
+   *
+   * CLOSING THE LAST MARK IS THE DISMISSAL. One mark is what every other step
+   * has, so "× the only box on screen" has to keep meaning what it always meant:
+   * the visitor is done being asked, mark it and stop offering. It is also the
+   * only way the flow can end by ×, so the suppressant is written exactly where
+   * it was written before.
+   */
+  const closeMark = (mark: CoachMark) => {
+    if (showing.length <= 1) {
+      handleDismiss();
+      return;
+    }
+    dlog("onboard", `mark dismissed: ${mark}`);
+    setClosedMarks((prev) => (prev.includes(mark) ? prev : [...prev, mark]));
+  };
+
   if (!active) return null;
 
   if (step === "wall") {
@@ -395,48 +468,59 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   // Say nothing at all until they are done — see `standsDown` above.
   if (standsDown) return null;
 
-  if (target && anchor.box) {
+  if (showing.length > 0) {
     return (
       <>
-        {/* NOT RENDERED unless the step has nothing to ask of the map — see
-            `stepUsesTheMap`, which owns that rule and is tested. Not rendered
-            rather than restyled, and that distinction is the whole point: a
-            scrim with its colour taken out is an invisible sheet still eating
-            every click, which is worse than a visible grey because the map then
-            looks available and is not.
+        {/* THE MAP'S HALF OF THE LOCK, and it is NOT RENDERED rather than
+            restyled when the step names the map (`liveDuring`, which owns that
+            rule and is tested). The distinction is the whole point: a scrim with
+            its colour taken out is an invisible sheet still eating every click,
+            which is worse than a visible grey because the map then looks
+            available and is not.
 
             Where it IS rendered it sits one rung under the chrome, so it covers
             the map, its furniture and any open proposal card while the bar stays
-            above it and is greyed by the rules instead — which is what leaves
-            the −/+ pair and the vote-type picker the lit things, and why the
-            picker is genuinely clickable rather than merely bright. */}
-        {!stepUsesTheMap(step) && createPortal(
+            above it and is locked by the rules instead. Today no step that shows
+            a mark asks for it — the cast step wants the map for route changes
+            and the other two want taps on it — so this is the rule's teeth
+            rather than a thing you will see. */}
+        {locksTheMap && createPortal(
           <div className="coach-scrim" aria-hidden="true" />,
           document.body
         )}
         {/* The second mark, drawn first so the one carrying the question is the
             later element and wins any overlap. Skipped when the picker is not on
-            screen at all — short landscape, or a bar too narrow to show it. */}
-        {step === "cast" && secondary.box && (
+            screen at all — short landscape, or a bar too narrow to show it — and
+            once its own × has been pressed. */}
+        {showSecondary && secondary.box && (
           <CoachCallout
             anchor={secondary.box}
             ask="Change your vote if you need to"
             boxRef={secondaryBox}
-            avoidBoxes={[anchor.box]}
+            onDismiss={() => closeMark("votetype")}
+            dismissLabel="Dismiss this tip"
+            avoidBoxes={anchor.box ? [anchor.box] : undefined}
           />
         )}
-        <CoachCallout
-          anchor={anchor.box}
-          ask={line}
-          actions={actions}
-          onDismiss={handleDismiss}
-          avoidRef={step === "cast" ? secondaryBox : undefined}
-          avoidBoxes={step === "cast" && secondary.box ? [secondary.box] : undefined}
-          prefer={step === "cast" ? "right" : "left"}
-        />
+        {showPrimary && target && anchor.box && (
+          <CoachCallout
+            anchor={anchor.box}
+            ask={line}
+            actions={actions}
+            onDismiss={() => closeMark(target)}
+            avoidRef={showSecondary ? secondaryBox : undefined}
+            avoidBoxes={showSecondary && secondary.box ? [secondary.box] : undefined}
+            prefer={step === "cast" ? "right" : "left"}
+          />
+        )}
       </>
     );
   }
+
+  // A mark this step still has, closed by hand. The strip below is the same mark
+  // in the coach's other voice, so putting it up here would be handing back the
+  // box somebody just shut.
+  if (target && closedMarks.includes(target)) return null;
 
   // No control to point at — a point-only map (no legend at all), short
   // landscape (the legend is display:none), or a cast that is not yet possible

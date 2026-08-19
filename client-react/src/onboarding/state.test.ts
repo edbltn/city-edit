@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  endIsOptional, onboardingStep, requiresEnd, shouldOnboard, stepUsesTheMap,
-  type OnboardingFacts,
+  endIsOptional, liveDuring, marksDuring, onboardingStep, requiresEnd, shouldOnboard,
+  stepUsesTheMap, type OnboardingFacts,
 } from "./state";
 
 const BASE: OnboardingFacts = {
@@ -116,26 +116,64 @@ describe("who sees the flow", () => {
   });
 });
 
-describe("what the coach may grey out", () => {
+describe("what each step leaves live", () => {
   // The rule, stated once: anything the step is asking the person to USE stays
-  // bright and live. These are the two steps whose instruction is "tap the map",
-  // so the map cannot be the thing that looks switched off.
-  it("leaves the map live on the steps that ask for a tap on it", () => {
+  // bright and live, and everything else is inert — not merely faded.
+  it("keeps the map on the steps that ask for a tap on it", () => {
+    expect(liveDuring("start")).toContain("map");
+    expect(liveDuring("end")).toContain("map");
     expect(stepUsesTheMap("start")).toBe(true);
     expect(stepUsesTheMap("end")).toBe(true);
   });
 
-  it("takes the map away only once nothing is left to do on it", () => {
-    // By `cast` both points are placed and the whole subject is in the bar.
-    expect(stepUsesTheMap("cast")).toBe(false);
+  it("keeps the map at the cast step too — the route may still be wrong", () => {
+    // Both points are placed, so the map has nothing left to ASK for; it is kept
+    // because somebody who wants the corridor down the other side of the street
+    // is doing the right thing at exactly the right moment. This is the one
+    // entry that is an exception to "the step's subject is in the bar".
+    expect(stepUsesTheMap("cast")).toBe(true);
   });
 
-  it("does not grey anything on the steps that have no callout", () => {
-    // `wall` covers the screen itself and `done` is a report — neither renders a
-    // callout, so neither reaches the scrim at all. Asserted anyway, because the
-    // scrim's condition is the negation of this function and a `true` here would
-    // silently be the difference between "no scrim" and "scrim over everything".
+  it("lights the step's own control, and nothing else in the bar", () => {
+    expect(liveDuring("start")).toEqual(["map", "start"]);
+    expect(liveDuring("end")).toEqual(["map", "end"]);
+  });
+
+  it("lights the picker as well as the −/+ pair at the cast step", () => {
+    // The second mark points at the picker and says the vote is still yours to
+    // change; inviting somebody to use a control that is locked is worse than
+    // not inviting them.
+    expect(liveDuring("cast")).toEqual(["map", "cast", "votetype"]);
+  });
+
+  it("locks nothing on the steps that put up no mark", () => {
+    // `wall` covers the screen itself and `done` is a report. Neither shows a
+    // mark, and the lock is a function of the marks that are showing, so these
+    // lists are never read — asserted anyway, because a stray "map" here would
+    // be the difference between no scrim and a scrim over everything.
+    expect(marksDuring("wall")).toEqual([]);
+    expect(marksDuring("done")).toEqual([]);
     expect(stepUsesTheMap("wall")).toBe(false);
     expect(stepUsesTheMap("done")).toBe(false);
+  });
+});
+
+describe("the marks a step puts up", () => {
+  it("is one per step, except the cast step, which is two", () => {
+    expect(marksDuring("start")).toEqual(["start"]);
+    expect(marksDuring("end")).toEqual(["end"]);
+    expect(marksDuring("cast")).toEqual(["cast", "votetype"]);
+  });
+
+  it("names only controls the same step leaves live", () => {
+    // A mark on a locked control would be an arrow pointing at something that
+    // does not respond. The two lists are written separately, so this is the
+    // invariant that keeps them honest.
+    for (const step of ["wall", "start", "end", "cast", "done"] as const) {
+      const live = liveDuring(step);
+      for (const mark of marksDuring(step)) {
+        expect(live).toContain(mark);
+      }
+    }
   });
 });

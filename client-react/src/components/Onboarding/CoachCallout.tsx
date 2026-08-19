@@ -44,10 +44,14 @@ interface Props {
   /** A decision the coach owns rather than the chrome — today, exactly one:
    *  declining an end point the flow was only guessing might exist. */
   actions?: ReactNode;
-  /** Omitted on a SECONDARY mark. The cast step puts two boxes on screen at
-   *  once and two × buttons read as two separate things to deal with; one
-   *  closing control closes the flow, which is what it always did. */
-  onDismiss?: () => void;
+  /** Close THIS mark. Every mark has one — the cast step's two boxes are two
+   *  separate things to deal with, and a reader who has taken the point of one
+   *  of them should be able to put it away without losing the other. The caller
+   *  owns what that means (Onboarding.tsx): the box goes, the rest stand, and
+   *  the last one to go ends the flow. */
+  onDismiss: () => void;
+  /** What the × closes, for a reader who cannot see which box it is in. */
+  dismissLabel?: string;
   /** Hand this box its own element, so a later box can be told to avoid it. */
   boxRef?: RefObject<HTMLDivElement | null>;
   /** A box already on screen that this one must not land on top of. Read live
@@ -64,7 +68,8 @@ interface Props {
 }
 
 export function CoachCallout({
-  anchor, ask, actions, onDismiss, boxRef, avoidRef, avoidBoxes, prefer = "left",
+  anchor, ask, actions, onDismiss, dismissLabel = "Close getting started",
+  boxRef, avoidRef, avoidBoxes, prefer = "left",
 }: Props) {
   const own = useRef<HTMLDivElement>(null);
   const ref = boxRef ?? own;
@@ -130,8 +135,7 @@ export function CoachCallout({
       ref={ref}
       className={
         `coach-callout` +
-        (placement ? ` coach-callout--${placement.side}` : " coach-callout--measuring") +
-        (onDismiss ? "" : " coach-callout--nodismiss")
+        (placement ? ` coach-callout--${placement.side}` : " coach-callout--measuring")
       }
       style={{
         top: placement ? `${placement.top}px` : 0,
@@ -147,16 +151,14 @@ export function CoachCallout({
     >
       <p className="coach-callout-ask">{ask}</p>
       {actions && <div className="coach-callout-actions">{actions}</div>}
-      {onDismiss && (
-        <button
-          type="button"
-          className="coach-callout-close"
-          onClick={onDismiss}
-          aria-label="Close getting started"
-        >
-          ×
-        </button>
-      )}
+      <button
+        type="button"
+        className="coach-callout-close"
+        onClick={onDismiss}
+        aria-label={dismissLabel}
+      >
+        ×
+      </button>
       <span className="coach-callout-tip" aria-hidden="true" />
     </div>,
     document.body

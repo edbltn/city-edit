@@ -75,33 +75,102 @@ export function onboardingStep(facts: OnboardingFacts): OnboardingStep {
   return "cast";
 }
 
+// ── What each step leaves LIVE ─────────────────────────────────────────────
+
 /**
- * Is the MAP part of what this step is asking for?
+ * A callout the coach can have on screen. These are exactly the `data-coach`
+ * attributes TopBar puts on its own controls, because a mark is always ON one.
  *
- * The coach greys down everything that is not the step's subject, and this is
- * the rule that decides whether the map is included. It exists as a function
- * with a test rather than as a condition inline in the render because the same
- * mistake has now been made twice in different places — once on the vote-type
- * picker, once nearly on the map — and both times the shape was the same:
- *
- *   ANYTHING THE CURRENT STEP IS ASKING THE PERSON TO USE STAYS BRIGHT AND
- *   LIVE. Greying is for what is genuinely not part of this step. If that means
- *   almost nothing is greyed at some step, that is the correct outcome.
- *
- * Dimming the exact control you are pointing at reads as "this is disabled" at
- * the moment it needs to read as "use this" — and the failure has a nastier
- * second half, because the greying over the map is a full-screen scrim. Take
- * only the colour out of a scrim and you are left with an invisible sheet still
- * swallowing every click, which is strictly worse than a visible grey: the map
- * now LOOKS available and is not. So the scrim is not restyled per step, it is
- * NOT RENDERED unless this returns false.
- *
- * `start` and `end` both ask for a tap on the map, so both keep it. `cast` is
- * the only step whose whole subject is in the bar: the points are placed and
- * the only move left is the −/+ pair.
+ * `votetype` is the odd one out: it is never a STEP, it is the second mark the
+ * cast step puts up beside the first.
  */
+export type CoachMark = "start" | "end" | "cast" | "votetype";
+
+/** Something the lock may leave live: a control by its `data-coach` name, or
+ *  the map and everything drawn on it. */
+export type CoachLive = "map" | CoachMark;
+
+/**
+ * The marks a step puts on screen — and so, because the lock is derived from
+ * what is showing rather than announced by a flag, the list the lock is a
+ * function of.
+ *
+ * `cast` is the only step with two, and they are dismissed INDEPENDENTLY: one ×
+ * takes its own mark down and leaves the other standing. That is why "am I
+ * locked" cannot be a boolean any step sets — it is "is anything still
+ * showing", recomputed from the marks on every render. Three stale-visual-state
+ * bugs in one week (a frozen hover, a stranded proposal highlight, a sticky
+ * Start/End highlight) were all the same shape: a flag that got set and had a
+ * path out that did not clear it. A derived lock has no such path.
+ */
+export function marksDuring(step: OnboardingStep): readonly CoachMark[] {
+  switch (step) {
+    case "start":
+      return ["start"];
+    case "end":
+      return ["end"];
+    case "cast":
+      return ["cast", "votetype"];
+    // The wall covers the screen itself and `done` is a report, not an ask.
+    default:
+      return [];
+  }
+}
+
+/**
+ * WHAT THIS STEP LEAVES LIVE. Everything else is inert while its marks are up —
+ * not merely faded: faded-but-clickable and lit-but-dead are both lies, and the
+ * second is the worse one.
+ *
+ * The rule this encodes has now been re-derived three times, twice as a bug:
+ *
+ *   ANYTHING THE CURRENT STEP ASKS THE PERSON TO USE STAYS BRIGHT AND LIVE.
+ *   Locking is for what is genuinely not part of this step. If that leaves a
+ *   step with almost nothing locked, that is the correct outcome.
+ *
+ * So it is A LIST PER STEP rather than a pile of special cases: each step says
+ * what it is asking for and the lock is the complement, which means adding a
+ * step is adding a line here rather than finding every place that exempts
+ * something. Two of the four entries are not obvious:
+ *
+ *   · `start` and `end` keep the map because their instruction IS a tap on it.
+ *   · `cast` keeps the map TOO, and that is the interesting one. Both points are
+ *     placed, so the map has nothing left to ask for — but somebody looking at
+ *     the corridor the app drew and wanting it down the other side of the
+ *     street is doing the right thing at exactly the right moment. The step
+ *     asks "is this what you meant?", and changing the answer is part of the
+ *     question. It keeps the vote-type picker for the same reason: the second
+ *     mark points at it and says the vote is still theirs to change.
+ *
+ * Dimming the control you are pointing at reads as "this is disabled" at the
+ * moment it needs to read as "use this" — and the failure has a nastier second
+ * half, because locking the map is a full-screen scrim. Take only the COLOUR
+ * out of a scrim and you are left with an invisible sheet still swallowing
+ * every click, which is strictly worse than a visible grey: the map then LOOKS
+ * available and is not. So the scrim is never restyled per step, it is NOT
+ * RENDERED unless this list omits the map.
+ *
+ * `wall` and `done` lock nothing, and need no entry to say so: neither puts a
+ * mark on screen (`marksDuring`), and the lock is a function of the marks that
+ * are showing, so their empty list is never read.
+ */
+export function liveDuring(step: OnboardingStep): readonly CoachLive[] {
+  switch (step) {
+    case "start":
+      return ["map", "start"];
+    case "end":
+      return ["map", "end"];
+    case "cast":
+      return ["map", "cast", "votetype"];
+    default:
+      return [];
+  }
+}
+
+/** Whether the scrim is rendered at all — the map half of `liveDuring`, named
+ *  because that is the half with teeth. */
 export function stepUsesTheMap(step: OnboardingStep): boolean {
-  return step === "start" || step === "end";
+  return liveDuring(step).includes("map");
 }
 
 // ── Who sees this at all ───────────────────────────────────────────────────

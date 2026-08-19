@@ -353,23 +353,34 @@
 }
 
 /* ==========================================================================
-   The coach — a callout on the control, and everything else greyed
+   The coach — a callout on the control, and everything else locked
    ==========================================================================
-   Three pieces, and the order they paint in is the whole design:
+   Four pieces, and the order they paint in is the whole design:
 
-     .coach-scrim     covers the map at the cast step, one rung UNDER the chrome
-     [greying rules]  fade every control in the bar except the one in question
+     .coach-scrim     covers the map when the step does not name it, one rung
+                      UNDER the chrome
+     [fade rules]     grey every control in the bar the step did not name
+     [inert rules]    and take the pointer off them, so faded means unusable
      .coach-callout   the box with the tip, portalled to <body>
 
-   Why the greying is per-control rather than one overlay: opacity on an
-   ancestor creates a group, and nothing inside a faded group can be brought
-   back to full — so "fade the topbar, keep the Start field lit" is not
-   expressible that way. Each control is faded on its own and the one carrying
-   the step's `data-coach` value is excluded by `:not()`. That also means this
-   file names controls owned by TopBar, which is a real coupling and is why the
+   ONE ATTRIBUTE DRIVES ALL OF IT: `data-coach-live` on <body> is the step's
+   live set as a word list — `map cast votetype` — written by the flow while a
+   mark is showing and removed when the last one goes (onboarding/state.ts owns
+   the lists, Onboarding.tsx writes the attribute). So every rule below is
+   "unless this step named you", spelled `~=`, and adding a step adds no rule
+   here at all.
+
+   Why the fading is per-control rather than one overlay: opacity on an ancestor
+   creates a group, and nothing inside a faded group can be brought back to full
+   — so "fade the topbar, keep the Start field lit" is not expressible that way.
+   Each control is faded on its own. That also means this file names controls
+   owned by TopBar, which is a real coupling and is why the `data-coach`
    attributes exist rather than a pile of :nth-child selectors.
    ========================================================================== */
 
+/* The map's half of the lock. Rendered only when the step's live set omits the
+   map — a scrim whose colour has been taken out is an invisible sheet still
+   swallowing clicks, which is worse than a visible grey. */
 .coach-scrim {
   position: fixed;
   inset: 0;
@@ -381,8 +392,7 @@
   z-index: calc(var(--z-chrome) - 1);
   background: color-mix(in srgb, var(--paper) 62%, transparent);
   /* The map is the only thing under here with colour of its own, and greying it
-     is the point: by the cast step the points are placed and the map has nothing
-     left to say. */
+     is the point wherever a step genuinely has nothing left to ask of it. */
   backdrop-filter: grayscale(1) saturate(0.2);
   -webkit-backdrop-filter: grayscale(1) saturate(0.2);
   animation: coach-scrim-in 220ms ease both;
@@ -393,11 +403,10 @@
   to { opacity: 1; }
 }
 
-/* ── Greying the bar ─────────────────────────────────────────────────────
-   One list of controls, three copies of the rule — one per step — each
-   excluding its own target. Written out rather than generated because the
-   exclusion is the only difference and a reader can see it. */
-body[data-coach-focus] :is(
+/* ── Fading the bar ──────────────────────────────────────────────────────
+   Everything the bar can show, faded as a set; the step's own controls are lit
+   again by the rule after it. */
+body[data-coach-live] :is(
   .logo-container,
   .logo-mobile-banner,
   .legend-pair-tools > *,
@@ -412,32 +421,75 @@ body[data-coach-focus] :is(
   transition: opacity 200ms ease, filter 200ms ease;
 }
 
-/* Lit: full colour, so the control in question reads as live rather than as one
-   more thing behind glass. Not `pointer-events` — nothing in the bar is ever
-   disabled by the coach. Somebody who wants to move a point they have already
-   placed is doing something reasonable, and a first run that traps them teaches
-   that the app is a wizard. Only the map is actually taken away, and only once
-   there is nothing left to do on it.
-
-   THE CAST STEP LIGHTS TWO THINGS. The −/+ pair, because that is the question;
-   and the vote-type picker, because the second coach mark is pointing at it and
-   saying "change your vote if you need to". Fading a control while inviting
-   somebody to use it is worse than not inviting them — and being merely bright
-   would be worse still, so the invitation is checked all the way through: the
-   scrim is BELOW the chrome (`--z-chrome − 1`), so it was never in front of the
-   picker; nothing here sets pointer-events; and the menu the picker opens is
-   `--z-dropdown`, higher again. The control is lit, unblocked, and open for
-   business. */
-body[data-coach-focus="start"] [data-coach="start"],
-body[data-coach-focus="end"] [data-coach="end"],
-body[data-coach-focus="cast"] [data-coach="cast"],
-body[data-coach-focus="cast"] [data-coach="votetype"] {
+/* Lit: full colour, so a control the step named reads as live rather than as
+   one more thing behind glass. THE CAST STEP LIGHTS TWO: the −/+ pair, because
+   that is the question, and the vote-type picker, because the second mark is
+   pointing at it and saying "change your vote if you need to". */
+body[data-coach-live~="start"] [data-coach="start"],
+body[data-coach-live~="end"] [data-coach="end"],
+body[data-coach-live~="cast"] [data-coach="cast"],
+body[data-coach-live~="votetype"] [data-coach="votetype"] {
   filter: none;
   opacity: 1;
 }
 
+/* ── And INERT, which is the half fading cannot do ───────────────────────
+   Faded-but-clickable and lit-but-dead are both lies, and the second is the
+   worse one — it looks available and is not. So the pointer follows the light:
+   the bar goes dead as a whole and the step's own controls take it back.
+
+   EVERY DESCENDANT, not just the plates. `pointer-events` is not inherited the
+   way a colour is — each element's own computed value decides — and the float
+   chrome hands it back explicitly: `.topbar[data-chrome="float"]` is `none` so
+   the map shows through the band, and each plate inside it is `auto`. A rule on
+   `.topbar` alone would leave every one of those plates live, so the lock has
+   to name every descendant AND outrank them. Hence `[data-chrome]` — the same
+   element those rules key on, one attribute heavier than their three classes;
+   the unlock adds the plate's own `data-coach` on top and outranks the lock in
+   turn. Three tiers, each one selector step above the last.
+
+   Keyboard focus is untouched on purpose: a tab ring moving through a bar
+   nobody can click is odd, but a first-timer on a keyboard being unable to
+   reach the control the coach is pointing at would be worse, and this lock is
+   about where the pointer may go. */
+body[data-coach-live] .topbar[data-chrome] * {
+  pointer-events: none;
+}
+
+/* …but DEAD, not transparent. `pointer-events: none` alone makes a control a
+   hole: the float band is laid OVER the map, so a click on a locked Clear would
+   pass through it and land on the map as a fresh start point — a locked control
+   doing something destructive is not what locked means. So each PLATE takes the
+   pointer back while its contents stay dead: the click lands on the plate, the
+   plate has no handler, nothing happens.
+
+   The wordmark is the exception and stays a hole, because it is the one plate
+   whose handler is on the plate ITSELF — swallowing there would mean navigating
+   off the map from a control the coach has just locked. A stray map click is
+   the smaller of those two. */
+body[data-coach-live] .topbar[data-chrome] :is(
+  .legend-pair,
+  .mode-switcher-group,
+  .vote-switcher-group,
+  .nav-group,
+  .actions-group
+) {
+  pointer-events: auto;
+}
+
+body[data-coach-live~="start"] .topbar[data-chrome] [data-coach="start"],
+body[data-coach-live~="start"] .topbar[data-chrome] [data-coach="start"] *,
+body[data-coach-live~="end"] .topbar[data-chrome] [data-coach="end"],
+body[data-coach-live~="end"] .topbar[data-chrome] [data-coach="end"] *,
+body[data-coach-live~="cast"] .topbar[data-chrome] [data-coach="cast"],
+body[data-coach-live~="cast"] .topbar[data-chrome] [data-coach="cast"] *,
+body[data-coach-live~="votetype"] .topbar[data-chrome] [data-coach="votetype"],
+body[data-coach-live~="votetype"] .topbar[data-chrome] [data-coach="votetype"] * {
+  pointer-events: auto;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  body[data-coach-focus] :is(
+  body[data-coach-live] :is(
     .logo-container,
     .logo-mobile-banner,
     .legend-pair-tools > *,
@@ -519,11 +571,6 @@ body[data-coach-focus="cast"] [data-coach="votetype"] {
 @keyframes coach-callout-in {
   from { opacity: 0; }
   to { opacity: 1; }
-}
-
-/* No × on a secondary mark — reclaim the padding it was reserving. */
-.coach-callout--nodismiss {
-  padding-right: var(--space-3);
 }
 
 .coach-callout-ask {
