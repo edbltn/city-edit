@@ -169,7 +169,7 @@ export const CURATED: Record<string, string> = {
   "Install a Little Free Library": "This community needs better access to books…",
   "Start a seed library": "Let's install a seed bank here…",
   "Activate the plaza furniture": "Nothing in this plaza invites me to stay…",
-  "Repaint this call box or utility box": "This curb needs a fresh paint job…",
+  "Repaint this call box or utility box": "This call box needs a fresh paint job…",
   "Cut back the overgrowth along here": "I duck the whole way along this stretch…",
   "Water the street trees along here": "These street trees are dying of thirst…",
   "Weed and mulch this median": "This median has disappeared under weeds…",
