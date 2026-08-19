@@ -1,0 +1,1698 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The coach points at the control — 2026-08-19</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>The coach points at the control</h1>
+    <div class="dateline">2026-08-19 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#why">A strip at the bottom of the screen cannot point</a>
+<a href="#grey">Greying everything else — and what the map counts as</a>
+<a href="#anchor">Measured, never guessed — and &quot;absent&quot; is an answer</a>
+<a href="#place">The box is clamped; the tip is not</a>
+<a href="#typing">Standing down while somebody types an address</a>
+<a href="#bugs">Two bugs, both about something not running</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">The first-run coach was one strip at the bottom of the map, which meant every step had to DESCRIBE its control rather than indicate it — and two of the three controls it described live in a bar at the top of the screen a first-timer has not looked at yet. Each step is now a callout with an arrow tip, hung off the real control, with the rest of the chrome greyed out behind it: Start, then End, then the &minus;/+ pair, at which point the map greys out too and the cast pair is the only colour on the screen. The closing line keeps the strip — it is a report, not an instruction. Where the box goes is measured rather than assumed, because the chrome has two modes and three grids and the anchor is sometimes absent entirely; the box is clamped to the viewport and the TIP then slides to stay on the control, which is the half a naive version gets wrong. Verified at four widths, and two bugs fell out of the verifying.</p>
+
+  
+    <section class="card" id="why">
+      <div class="tag">THE MOVE</div>
+      <h2>A strip at the bottom of the screen cannot point</h2>
+      <h3>Symptom</h3>
+      <p>Every step of the first run was one strip at the bottom of the map: &quot;Tap the map where that stretch starts.&quot; Two of the three controls those sentences were about live in a bar at the TOP of the screen, which a first-timer has not looked at yet.</p>
+      <h3>Root cause</h3>
+      <ul><li>The strip was a deliberate choice and the reasoning was sound as far as it went: the app has exactly ONE place it speaks from (<code>MapNotice</code>) and a first-run coach is not special enough to earn a second. That was right about the strip and wrong about the coach</li>
+<li>Having no way to indicate a control, each step had to DESCRIBE one — and a description is the weakest possible pointer, because the reader has to find the thing before they can act on it. The instruction and its subject were as far apart as the screen allows</li>
+<li>It also forced the strip to carry COPIES of the app's controls (its own address search, its own +/&minus; pair), since a thing that cannot point has to bring the controls to the reader instead</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Each step is a CALLOUT WITH AN ARROW TIP, hung off the real control, and the rest of the chrome greys out behind it so exactly one thing on the screen is lit</li>
+<li><strong>start</strong> → the Start field, <strong>end</strong> → the End field, <strong>cast</strong> → the &minus;/+ pair. <strong>done</strong> keeps the strip and is unchanged: the closing line is a report rather than an instruction, and it has no control to point at</li>
+<li>The coach's own control copies are gone. Pointing at the real ones means what somebody learns in the first run is the app they will actually use</li>
+<li>One decision the chrome cannot make survives in the box — &quot;It's one spot&quot;, declining an end point the flow was only GUESSING might exist because the label's kind is unknown</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/Onboarding/Onboarding.tsx</li>
+<li>client-react/src/components/Onboarding/CoachCallout.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="grey">
+      <div class="tag">FOCUS</div>
+      <h2>Greying everything else — and what the map counts as</h2>
+      <h3>Symptom</h3>
+      <p>&quot;One lit thing&quot; is easy to say and has two traps in it: the obvious CSS for it does not work, and the map is not always part of &quot;everything else&quot;.</p>
+      <h3>Root cause</h3>
+      <ul><li>OPACITY ON A CONTAINER MAKES A GROUP. Fading <code>.topbar</code> and un-fading the Start field inside it is not expressible — nothing inside a faded group can be brought back to full. So the greying cannot be one rule on one ancestor</li>
+<li>The floating chrome gives every plate a <code>backdrop-filter</code>, which makes each its own stacking context. Nothing rendered inside the Start plate can be drawn over anything outside it, whatever z-index it is given</li>
+<li>The ladder has <strong>no rung between <code>--z-map-card-hover</code> (500) and <code>--z-chrome</code> (600)</strong>, and <code>zScale.test.ts</code> requires 100 between named rungs, so a scrim that covers the map but not the bar cannot have a name of its own</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The bar's controls are faded INDIVIDUALLY, each excluded from its own step by <code>:not([data-coach=…])</code>. One body attribute (<code>data-coach-focus</code>) is the entire coupling; the rules live in this flow's own stylesheet</li>
+<li><strong>The map is greyed at the cast step and NOT before it.</strong> Placing a point is a map gesture, so greying the map during <code>start</code> or <code>end</code> would grey out the very thing being asked for. By <code>cast</code> the points are placed and the only move left is in the bar</li>
+<li>The scrim is <code>calc(var(--z-chrome) - 1)</code> — a VARIANT of the rung it hangs off, which is the convention globals.css documents for exactly this. It covers the map, its furniture, the bottom strips and any open proposal card; the bar stays above it and is greyed by the rules instead, which is what leaves the &minus;/+ the single lit thing</li>
+<li>Nothing is disabled. Somebody moving a point they already placed, or changing the vote type before casting, is doing something reasonable — a first run that traps them teaches that the app is a wizard. Only the MAP is actually taken away, and only once there is nothing left to do on it</li>
+<li>The callout is portalled to <code>&lt;body&gt;</code> at <code>--z-transient</code>, the ladder's own name for a tooltip anchored to a control</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/Onboarding/Onboarding.css</li></ul>
+    </section>
+    
+
+    <section class="card" id="anchor">
+      <div class="tag">GEOMETRY</div>
+      <h2>Measured, never guessed — and &quot;absent&quot; is an answer</h2>
+      <h3>Symptom</h3>
+      <p>There is no width at which a hard-coded position for the Start field would be right, and there are several at which the field does not exist at all.</p>
+      <h3>Root cause</h3>
+      <ul><li>The chrome has TWO MODES. <code>data-chrome=&quot;float&quot;</code> (the default) is a 6-column grid of floating plates; <code>banner</code> is a stacked bar in normal flow. Start and End are in completely different places in each, and the mode is chosen per device rather than per breakpoint</li>
+<li>Inside float there are three grids — &gt;1080px, 580–1080px and &lt;580px — and the Start/End plate changes grid area in each</li>
+<li>THE ANCHOR CAN BE ABSENT, three different ways: <code>.topbar-legend</code> is <code>display:none</code> in short landscape, the legend is never rendered at all on a point-only map, and the cast plate is <code>display:none</code> before a selection exists and <code>visibility:hidden</code> (<code>hidden-reserve</code>) while a cast is impossible</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>coachAnchor.ts</code> asks the DOM and watches it: window resize, a <code>ResizeObserver</code> on the element, a <code>MutationObserver</code> over the whole bar (attributes included — that is how the fields switch into their typing state) and <code>document.fonts.ready</code>. The same observer set <code>useLogoAnchor</code> settled on, for the same reasons</li>
+<li>Both renderings of a field carry <code>data-coach</code>: the resting <code>&lt;button&gt;</code> and the typing <code>&lt;div&gt;</code> are different ELEMENTS in one slot, so the anchor is replaced rather than moved every time somebody opens a search</li>
+<li>&quot;Absent&quot; is a first-class answer and falls back to the bottom strip. An arrow tip pointing at nothing is worse than the strip it replaced</li>
+<li>TopBar gains five <code>data-coach</code> attributes and <strong>nothing else</strong> — no refs, no state, no imports. Moving a control is free; the callout is measured wherever it lands</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/onboarding/coachAnchor.ts</li>
+<li>client-react/src/components/TopBar/TopBar.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="place">
+      <div class="tag">PLACEMENT</div>
+      <h2>The box is clamped; the tip is not</h2>
+      <h3>Symptom</h3>
+      <p>Two rules pull against each other, and the second is the one a naive anchored callout gets wrong.</p>
+      <h3>Root cause</h3>
+      <ul><li>THE BOX MUST STAY ON SCREEN — a callout running off the right edge has lost half its sentence, which is worse than being off-centre</li>
+<li>THE TIP MUST STAY ON THE CONTROL. Centre the arrow on the BOX and the moment a clamp moves the box the arrow points confidently at whatever happens to be beside the control. At 450px, where the cast pair sits 8px from the right edge, that is every time</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The box is clamped into the viewport with an 8px margin; the arrow then SLIDES along the box's edge to stay over the anchor's centre, keeping a 16px inset from the box's own corners so a tip never grows out of one</li>
+<li>Vertically it is a flip: below by default — every anchor is in the top bar, so below is where the map is — above when there is no room below AND there is room above; below when neither fits, because a box above a control that does not fit covers the control</li>
+<li>The clamp guards its own inverted range: at a viewport narrower than the box, an unguarded <code>Math.min(Math.max(…))</code> throws the box off the LEFT edge, where no scrollbar will ever reveal it</li>
+<li>The entrance animation is a FADE with no transform. A transform is included in the rect the next measurement reads, so a sliding entrance feeds its own offset back into the placement — and a stalled animation parks the box at the offset for good. Caught in the act: the tip measured 3px high of its control until the transform came out</li>
+<li>Split from the component and unit-tested, because the failure mode is never &quot;does it render&quot;, it is &quot;does it still point at the right thing at 380px&quot;</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/onboarding/calloutPlacement.ts</li>
+<li>client-react/src/onboarding/calloutPlacement.test.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="typing">
+      <div class="tag">RESTRAINT</div>
+      <h2>Standing down while somebody types an address</h2>
+      <h3>Symptom</h3>
+      <p>Clicking the Start field opens an address search INSIDE that same plate — and the callout is hanging off that plate, over where the suggestion list opens.</p>
+      <h3>Root cause</h3>
+      <ul><li>Setting a start point by address is one intention with four steps in it: click the field, type a street, wait for the geocoder, arrow down and press Enter. Nothing should interrupt it, and least of all the thing that asked for it</li>
+<li>The suggestion list is <code>--z-autocomplete</code>; a callout hanging off the same plate is in its way whatever the rung</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The coach shows NOTHING for the whole of it — not the callout, not the strip, and the greying comes off too, so the bar the visitor is now using is fully lit. It comes back on the other side, by which time the point has landed and the step has already moved on</li>
+<li>Detected from the DOM (<code>.legend-tool.typing</code>) rather than from TopBar's own state: it rides the observer already watching the bar, needs no prop drilled through a component another workstream is editing, and keys on the class the float chrome's own stacking rules key on — so it cannot quietly stop meaning this</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/onboarding/coachAnchor.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="bugs">
+      <div class="tag">FOUND WHILE VERIFYING</div>
+      <h2>Two bugs, both about something not running</h2>
+      <h3>Symptom</h3>
+      <p>The coach sat over the suggestion list it was supposed to stand aside for; and abandoning an address search silently took the whole coach with it.</p>
+      <h3>Root cause</h3>
+      <ul><li>The anchor tracker coalesced its measurements on <code>requestAnimationFrame</code>. rAF DOES NOT RUN in a hidden or fully occluded window — Chrome stops the frame clock — so the mutation that says &quot;the field just became a search box&quot; fired, scheduled a callback, and the callback never ran</li>
+<li>The callout listened for Escape on the window. So does the address search it points at. One Escape did both</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Coalesce on a timeout. There is nothing to align to a frame here — this reads layout and sets state, and the render that follows is React's to schedule</li>
+<li>The callout does not close on Escape at all. The × is its dismissal; Escape belongs to the WALL, which is a modal dialog and owes the reader an escape hatch. A label on a control does not</li>
+<li>Worth naming as a pair: both are things that silently did not happen, in the two seconds when the visitor was doing exactly what they had been asked to do</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/onboarding/coachAnchor.ts</li>
+<li>client-react/src/components/Onboarding/CoachCallout.tsx</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li><code>npx vitest run</code> — <strong>675 passed, 1 skipped, 41 files</strong>, including 13 new placement tests. <code>npx tsc -b</code> clean. <code>zScale.test.ts</code> passes, which is what says the scrim's <code>calc(var(--z-chrome) - 1)</code> is a legal variant rather than a raw number.</li>
+<li>The placement tests assert the tip lands INSIDE the anchor at 1800 / 900 / 600 / 450 for five anchor positions each — hard left, the legend plate, centre, the cast pair hard right, and a 24px control in the corner.</li>
+<li>The real chrome was then measured at those four widths, so the anchors the tests were written against are the ones the app actually produces: at 450px the Start plate is 249px wide at x=9 and the cast pair is 61px wide at x=268; at 1800px they are 355px at x=173 and 72px at x=1145.</li>
+<li>Live, at all four widths and for both the <code>start</code> and <code>cast</code> steps: the box is fully on screen, the gap to the anchor is exactly 10px, the tip is inside the anchor, and the box never covers its own anchor.</li>
+<li>The whole flow walked live: wall → pick → callout on Start (map lit, chrome greyed) → point → callout on End → point → cast step (scrim over the map, &minus;/+ the only colour on screen) → <strong>+</strong> → the closing line on the bottom strip, greying and scrim gone.</li>
+<li>Standing down verified both ways: opening the Start field's search removes the callout AND the greying; Escape closes the search and the coach comes back, with the suppressant still unwritten.</li>
+<li>The measurements had to finish stalled transitions by hand (<code>getAnimations().forEach(a =&gt; a.finish())</code>) — the verifying window was occluded, which froze them at their start values and is the same fact that produced the rAF bug above.</li>
+<li>The one vote cast to reach the <code>done</code> step was deleted from the local DB afterwards and all three Redis layers rebuilt through <code>rebuild_redis_for_map</code>; the revision moved 206 → 207, forward as it must.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Reset the first-run state and open <code>http://localhost:3000/m/nyc-tactical</code>. Pick a route-kind slip and check the callout's tip lands on the Start field with the rest of the bar greyed and the map still in colour.</li>
+<li>Place a start point: the callout should move to the End field by itself. Place an end point: the map should grey out and the &minus;/+ pair should be the only colour left on the screen.</li>
+<li>Click the Start field to open its address search — the coach should vanish completely, greying included. Press Escape: the search closes and the coach comes back. It must NOT be dismissed.</li>
+<li>Press <strong>+</strong> and confirm the closing line arrives at the bottom of the map, as it always did, with the scrim and the greying gone.</li>
+<li>Drag the window between roughly a quarter, a third, a half and full width at each step. The box should follow, stay on screen, and keep its tip on the control.</li>
+<li>Open a point-only map (any e-bikes map) — there is no Start/End legend there at all, so the coach should fall back to the bottom strip rather than pointing at nothing.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/components/Onboarding/CoachCallout.tsx</span>
+            <span class="stat"><span class="d-add">+121</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run coach (the box)</span>
+        <span class="ctx-sum">The portalled callout: measures itself, places itself from calloutPlacement, draws the tip</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">CoachCallout.tsx (new)</span>
+        <span class="ctx-sum">~120 LOC — the portal-and-measure header, reposition, the render</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header · why a portal, why measured, why no Escape</span><span class="ol-sum">NEW</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Props</span><span class="ol-sum">NEW — anchor, sentence, ask, actions, onDismiss</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">reposition()</span><span class="ol-sum">NEW — measure self, place, bail if unchanged</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">useLayoutEffect + ResizeObserver on self</span><span class="ol-sum">NEW — the ask re-wraps at every width</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">render · sentence / ask / actions / close / tip</span><span class="ol-sum">NEW</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The portal is not habit: every plate in the float chrome has a backdrop-filter and is its own stacking context, so a callout inside the Start plate could not be drawn over anything outside it</li><li>Rendered invisible until measured — it has to be in the document to have a size, and must not be seen at (0,0) while it gets one</li><li>The no-Escape note, stated against the wall&#x27;s opposite choice: a modal owes the reader an escape hatch, a label on a control does not — and here Escape belonged to the search</li><li>`--coach-arrow-left` is passed as a custom property so the tip is one rule for both sides</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/Onboarding/CoachCallout.tsx b/client-react/src/components/Onboarding/CoachCallout.tsx</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..7b6a4a2</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/components/Onboarding/CoachCallout.tsx</span>
+<span class="d-hunk">@@ -0,0 +1,121 @@</span>
+<span class="d-add">+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from &quot;react&quot;;</span>
+<span class="d-add">+import { createPortal } from &quot;react-dom&quot;;</span>
+<span class="d-add">+import { calloutMaxWidth, placeCallout, type CalloutPlacement } from &quot;../../onboarding/calloutPlacement&quot;;</span>
+<span class="d-add">+import type { AnchorBox } from &quot;../../onboarding/coachAnchor&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// The callout — a box with a tip on it, hung off a real control</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// Portalled to &lt;body&gt; and `position: fixed`, and both halves of that are</span>
+<span class="d-add">+// load-bearing rather than habit. Every plate in the floating chrome carries a</span>
+<span class="d-add">+// `backdrop-filter`, which makes it its own stacking context — so a callout</span>
+<span class="d-add">+// rendered INSIDE the Start plate could not be drawn over anything outside that</span>
+<span class="d-add">+// plate no matter what z-index it was given. The proposal cards learned this</span>
+<span class="d-add">+// first and portal for the same reason.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// It is measured before it is placed. The box&#x27;s height depends on how the ask</span>
+<span class="d-add">+// wraps, which depends on the width it was allowed, which depends on the</span>
+<span class="d-add">+// viewport — so the size cannot be known until it has been rendered once.</span>
+<span class="d-add">+// `useLayoutEffect` reads it and positions it in the same frame the browser</span>
+<span class="d-add">+// paints, so nothing is ever seen at the wrong coordinates. Until the first</span>
+<span class="d-add">+// measurement lands the box is rendered invisible rather than not rendered at</span>
+<span class="d-add">+// all: it has to be in the document to have a size.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// It does NOT close on Escape, and that is the opposite of the wall above it.</span>
+<span class="d-add">+// The wall is a modal dialog and owes the reader an escape hatch; this is a</span>
+<span class="d-add">+// label on a control, and the control it labels opens an address search whose</span>
+<span class="d-add">+// OWN escape key closes the search. Listening on the window meant one Escape</span>
+<span class="d-add">+// did both — abandoning a search took the coach with it, silently, at the exact</span>
+<span class="d-add">+// moment somebody was doing the thing it had asked for. The × is the dismissal.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// It is NOT `pointer-events: none`. The nav rail&#x27;s hover labels are, and the</span>
+<span class="d-add">+// z-index ladder&#x27;s note about transient things assumes it — but this one is</span>
+<span class="d-add">+// dismissible, and a coach a first-timer cannot close is the worst version of</span>
+<span class="d-add">+// this feature. What it does instead is stay small and never cover its own</span>
+<span class="d-add">+// anchor: the tip&#x27;s gap is real space, so the control it points at is always</span>
+<span class="d-add">+// clickable, which is the whole ask.</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+</span>
+<span class="d-add">+interface Props {</span>
+<span class="d-add">+  anchor: AnchorBox;</span>
+<span class="d-add">+  /** The sentence they chose, kept on screen the whole way through. */</span>
+<span class="d-add">+  sentence: string | null;</span>
+<span class="d-add">+  /** What to do right now. */</span>
+<span class="d-add">+  ask: string;</span>
+<span class="d-add">+  /** A decision the coach owns rather than the chrome — today, exactly one:</span>
+<span class="d-add">+   *  declining an end point the flow was only guessing might exist. */</span>
+<span class="d-add">+  actions?: ReactNode;</span>
+<span class="d-add">+  onDismiss: () =&gt; void;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+export function CoachCallout({ anchor, sentence, ask, actions, onDismiss }: Props) {</span>
+<span class="d-add">+  const ref = useRef&lt;HTMLDivElement&gt;(null);</span>
+<span class="d-add">+  const [placement, setPlacement] = useState&lt;CalloutPlacement | null&gt;(null);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const reposition = useCallback(() =&gt; {</span>
+<span class="d-add">+    const el = ref.current;</span>
+<span class="d-add">+    if (!el) return;</span>
+<span class="d-add">+    const next = placeCallout(</span>
+<span class="d-add">+      anchor,</span>
+<span class="d-add">+      { width: el.offsetWidth, height: el.offsetHeight },</span>
+<span class="d-add">+      { width: window.innerWidth, height: window.innerHeight }</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+    setPlacement((prev) =&gt;</span>
+<span class="d-add">+      prev &amp;&amp;</span>
+<span class="d-add">+      prev.top === next.top &amp;&amp;</span>
+<span class="d-add">+      prev.left === next.left &amp;&amp;</span>
+<span class="d-add">+      prev.side === next.side &amp;&amp;</span>
+<span class="d-add">+      prev.arrowLeft === next.arrowLeft &amp;&amp;</span>
+<span class="d-add">+      prev.maxWidth === next.maxWidth</span>
+<span class="d-add">+        ? prev</span>
+<span class="d-add">+        : next</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+  }, [anchor]);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Re-run whenever the anchor moves (the hook hands us a new box) and whenever</span>
+<span class="d-add">+  // our own content changes size — the ask is a different length at each step,</span>
+<span class="d-add">+  // and it re-wraps at every width.</span>
+<span class="d-add">+  useLayoutEffect(() =&gt; {</span>
+<span class="d-add">+    reposition();</span>
+<span class="d-add">+    const el = ref.current;</span>
+<span class="d-add">+    if (!el || typeof ResizeObserver === &quot;undefined&quot;) return;</span>
+<span class="d-add">+    const ro = new ResizeObserver(reposition);</span>
+<span class="d-add">+    ro.observe(el);</span>
+<span class="d-add">+    return () =&gt; ro.disconnect();</span>
+<span class="d-add">+  }, [reposition, sentence, ask, actions]);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const maxWidth = placement?.maxWidth ?? calloutMaxWidth(</span>
+<span class="d-add">+    typeof window === &quot;undefined&quot; ? 1024 : window.innerWidth</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+</span>
+<span class="d-add">+  return createPortal(</span>
+<span class="d-add">+    &lt;div</span>
+<span class="d-add">+      ref={ref}</span>
+<span class="d-add">+      className={`coach-callout${placement ? ` coach-callout--${placement.side}` : &quot; coach-callout--measuring&quot;}`}</span>
+<span class="d-add">+      style={{</span>
+<span class="d-add">+        top: placement ? `${placement.top}px` : 0,</span>
+<span class="d-add">+        left: placement ? `${placement.left}px` : 0,</span>
+<span class="d-add">+        maxWidth: `${maxWidth}px`,</span>
+<span class="d-add">+        // The tip&#x27;s offset along the box&#x27;s edge. Set as a custom property so the</span>
+<span class="d-add">+        // arrow is one CSS rule for both sides rather than two inline styles.</span>
+<span class="d-add">+        [&quot;--coach-arrow-left&quot; as string]: `${placement?.arrowLeft ?? 0}px`,</span>
+<span class="d-add">+      }}</span>
+<span class="d-add">+      role=&quot;status&quot;</span>
+<span class="d-add">+      aria-live=&quot;polite&quot;</span>
+<span class="d-add">+    &gt;</span>
+<span class="d-add">+      {sentence &amp;&amp; &lt;p className=&quot;coach-callout-sentence&quot;&gt;{sentence}&lt;/p&gt;}</span>
+<span class="d-add">+      &lt;p className=&quot;coach-callout-ask&quot;&gt;{ask}&lt;/p&gt;</span>
+<span class="d-add">+      {actions &amp;&amp; &lt;div className=&quot;coach-callout-actions&quot;&gt;{actions}&lt;/div&gt;}</span>
+<span class="d-add">+      &lt;button</span>
+<span class="d-add">+        type=&quot;button&quot;</span>
+<span class="d-add">+        className=&quot;coach-callout-close&quot;</span>
+<span class="d-add">+        onClick={onDismiss}</span>
+<span class="d-add">+        aria-label=&quot;Close getting started&quot;</span>
+<span class="d-add">+      &gt;</span>
+<span class="d-add">+        ×</span>
+<span class="d-add">+      &lt;/button&gt;</span>
+<span class="d-add">+      &lt;span className=&quot;coach-callout-tip&quot; aria-hidden=&quot;true&quot; /&gt;</span>
+<span class="d-add">+    &lt;/div&gt;,</span>
+<span class="d-add">+    document.body</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/Onboarding/Onboarding.css</span>
+            <span class="stat"><span class="d-add">+232</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run styling</span>
+        <span class="ctx-sum">The wall&#x27;s tag flow, the old strip&#x27;s two-line voice, and now the scrim, the greying and the callout</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Onboarding.css</span>
+        <span class="ctx-sum">364 → ~560 LOC — wall, coach strip, coach callout</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">the wall · scrim, masthead, pill flow</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">.onboard-coach · the strip&#x27;s voice</span><span class="ol-sum">kept — still the fallback and the closing line</span></li><li class="dim"><span class="ol-label">.onboard-cast / .onboard-search</span><span class="ol-sum">now unused by the flow, left with the strip&#x27;s other parts</span></li><li class="changed"><span class="ol-label">.coach-scrim</span><span class="ol-sum">NEW — calc(var(--z-chrome) - 1), grayscale backdrop-filter</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">greying rules</span><span class="ol-sum">NEW — one control list, one :not() per step</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">.coach-callout + tip</span><span class="ol-sum">NEW — surface, type, the rotated-square tip</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">@media prefers-reduced-motion</span><span class="ol-sum">extended to the new pieces</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The scrim&#x27;s rung is spelled as a VARIANT of --z-chrome, with the note that the ladder has no room for a name between 500 and 600 and zScale.test.ts enforces it</li><li>The greying block opens with why it is per-control: opacity on an ancestor creates a group</li><li>The lit rule says what it deliberately does NOT do — pointer-events — and why: only the map is actually taken away</li><li>The sentence WRAPS here where the strip&#x27;s copy ellipsised: a 300px box cut the visitor&#x27;s own chosen sentence in half</li><li>The entrance keyframe is opacity-only, with the note that a transform would feed its own offset back into the measurement</li><li>The tip is a rotated square positioned from --coach-arrow-left, NOT from the box&#x27;s midpoint</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/Onboarding/Onboarding.css b/client-react/src/components/Onboarding/Onboarding.css</span>
+<span class="d-meta">index 638df3c..f54d2ba 100644</span>
+<span class="d-meta">--- a/client-react/src/components/Onboarding/Onboarding.css</span>
+<span class="d-meta">+++ b/client-react/src/components/Onboarding/Onboarding.css</span>
+<span class="d-hunk">@@ -362,3 +362,235 @@</span>
+<span class="d-ctx">     transition: none;</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> }</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* ==========================================================================</span>
+<span class="d-add">+   The coach — a callout on the control, and everything else greyed</span>
+<span class="d-add">+   ==========================================================================</span>
+<span class="d-add">+   Three pieces, and the order they paint in is the whole design:</span>
+<span class="d-add">+</span>
+<span class="d-add">+     .coach-scrim     covers the map at the cast step, one rung UNDER the chrome</span>
+<span class="d-add">+     [greying rules]  fade every control in the bar except the one in question</span>
+<span class="d-add">+     .coach-callout   the box with the tip, portalled to &lt;body&gt;</span>
+<span class="d-add">+</span>
+<span class="d-add">+   Why the greying is per-control rather than one overlay: opacity on an</span>
+<span class="d-add">+   ancestor creates a group, and nothing inside a faded group can be brought</span>
+<span class="d-add">+   back to full — so &quot;fade the topbar, keep the Start field lit&quot; is not</span>
+<span class="d-add">+   expressible that way. Each control is faded on its own and the one carrying</span>
+<span class="d-add">+   the step&#x27;s `data-coach` value is excluded by `:not()`. That also means this</span>
+<span class="d-add">+   file names controls owned by TopBar, which is a real coupling and is why the</span>
+<span class="d-add">+   attributes exist rather than a pile of :nth-child selectors.</span>
+<span class="d-add">+   ========================================================================== */</span>
+<span class="d-add">+</span>
+<span class="d-add">+.coach-scrim {</span>
+<span class="d-add">+  position: fixed;</span>
+<span class="d-add">+  inset: 0;</span>
+<span class="d-add">+  /* One below the chrome: over the map, its furniture, the bottom strips and any</span>
+<span class="d-add">+     open proposal card (100–500), under the bar (600). A named rung would have</span>
+<span class="d-add">+     to sit between two that are exactly 100 apart, which the ladder has no room</span>
+<span class="d-add">+     for and zScale.test.ts enforces — so this is a VARIANT of the rung it hangs</span>
+<span class="d-add">+     off, spelled the way globals.css documents variants. */</span>
+<span class="d-add">+  z-index: calc(var(--z-chrome) - 1);</span>
+<span class="d-add">+  background: color-mix(in srgb, var(--paper) 62%, transparent);</span>
+<span class="d-add">+  /* The map is the only thing under here with colour of its own, and greying it</span>
+<span class="d-add">+     is the point: by the cast step the points are placed and the map has nothing</span>
+<span class="d-add">+     left to say. */</span>
+<span class="d-add">+  backdrop-filter: grayscale(1) saturate(0.2);</span>
+<span class="d-add">+  -webkit-backdrop-filter: grayscale(1) saturate(0.2);</span>
+<span class="d-add">+  animation: coach-scrim-in 220ms ease both;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+@keyframes coach-scrim-in {</span>
+<span class="d-add">+  from { opacity: 0; }</span>
+<span class="d-add">+  to { opacity: 1; }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* ── Greying the bar ─────────────────────────────────────────────────────</span>
+<span class="d-add">+   One list of controls, three copies of the rule — one per step — each</span>
+<span class="d-add">+   excluding its own target. Written out rather than generated because the</span>
+<span class="d-add">+   exclusion is the only difference and a reader can see it. */</span>
+<span class="d-add">+body[data-coach-focus] :is(</span>
+<span class="d-add">+  .logo-container,</span>
+<span class="d-add">+  .logo-mobile-banner,</span>
+<span class="d-add">+  .legend-pair-tools &gt; *,</span>
+<span class="d-add">+  .legend-pair-key,</span>
+<span class="d-add">+  .mode-switcher-group,</span>
+<span class="d-add">+  .vote-switcher-group,</span>
+<span class="d-add">+  .nav-rail,</span>
+<span class="d-add">+  .actions-group &gt; *</span>
+<span class="d-add">+) {</span>
+<span class="d-add">+  filter: grayscale(1);</span>
+<span class="d-add">+  opacity: 0.34;</span>
+<span class="d-add">+  transition: opacity 200ms ease, filter 200ms ease;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* Lit: full colour, and lifted clear of the scrim&#x27;s fade so the cast pair reads</span>
+<span class="d-add">+   as the live control rather than as one more thing behind glass. Not</span>
+<span class="d-add">+   `pointer-events` — nothing in the bar is ever disabled by the coach. Somebody</span>
+<span class="d-add">+   who wants to move a point they have already placed, or change the vote type</span>
+<span class="d-add">+   before casting, is doing something reasonable, and a first run that traps</span>
+<span class="d-add">+   them teaches the app is a wizard. Only the map is actually taken away, and</span>
+<span class="d-add">+   only once there is nothing left to do on it. */</span>
+<span class="d-add">+body[data-coach-focus=&quot;start&quot;] [data-coach=&quot;start&quot;],</span>
+<span class="d-add">+body[data-coach-focus=&quot;end&quot;] [data-coach=&quot;end&quot;],</span>
+<span class="d-add">+body[data-coach-focus=&quot;cast&quot;] [data-coach=&quot;cast&quot;] {</span>
+<span class="d-add">+  filter: none;</span>
+<span class="d-add">+  opacity: 1;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+@media (prefers-reduced-motion: reduce) {</span>
+<span class="d-add">+  body[data-coach-focus] :is(</span>
+<span class="d-add">+    .logo-container,</span>
+<span class="d-add">+    .logo-mobile-banner,</span>
+<span class="d-add">+    .legend-pair-tools &gt; *,</span>
+<span class="d-add">+    .legend-pair-key,</span>
+<span class="d-add">+    .mode-switcher-group,</span>
+<span class="d-add">+    .vote-switcher-group,</span>
+<span class="d-add">+    .nav-rail,</span>
+<span class="d-add">+    .actions-group &gt; *</span>
+<span class="d-add">+  ) {</span>
+<span class="d-add">+    transition: none;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  .coach-scrim,</span>
+<span class="d-add">+  .coach-callout {</span>
+<span class="d-add">+    animation: none;</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* ── The callout ─────────────────────────────────────────────────────────</span>
+<span class="d-add">+   Position and max-width come from calloutPlacement.ts as inline styles; this</span>
+<span class="d-add">+   owns the surface, the type and the tip. Square, hairline, paper — the same</span>
+<span class="d-add">+   object as every other plate in the app, just small and pointed. */</span>
+<span class="d-add">+.coach-callout {</span>
+<span class="d-add">+  position: fixed;</span>
+<span class="d-add">+  /* Tooltips and hover labels: the ladder&#x27;s own name for this. It clears the</span>
+<span class="d-add">+     bar, every dropdown opened from it, and the autocomplete — all of which a</span>
+<span class="d-add">+     callout anchored to the Start field can be standing next to. */</span>
+<span class="d-add">+  z-index: var(--z-transient);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  box-sizing: border-box;</span>
+<span class="d-add">+  padding: var(--space-3) 26px var(--space-3) var(--space-3);</span>
+<span class="d-add">+  border: 1px solid var(--ink-strong);</span>
+<span class="d-add">+  border-radius: 0;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  font-family: var(--font-main);</span>
+<span class="d-add">+  color: var(--ink-strong);</span>
+<span class="d-add">+  /* Opaque, unlike the bar&#x27;s plates. A translucent box over a greyed map reads</span>
+<span class="d-add">+     as another piece of chrome; this one has to read as being said TO you. */</span>
+<span class="d-add">+  background: var(--paper);</span>
+<span class="d-add">+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);</span>
+<span class="d-add">+  animation: coach-callout-in 200ms ease both;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* Rendered before it has been measured: it must be in the document to have a</span>
+<span class="d-add">+   size, and it must not be seen at (0,0) while it gets one. */</span>
+<span class="d-add">+.coach-callout--measuring {</span>
+<span class="d-add">+  opacity: 0;</span>
+<span class="d-add">+  pointer-events: none;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* Opacity only, deliberately: NO transform. The box is positioned from a</span>
+<span class="d-add">+   measured rect, and a transform is included in the rect the next measurement</span>
+<span class="d-add">+   reads — so an entrance that slides would feed its own offset back into the</span>
+<span class="d-add">+   placement, and a frame where the animation is stalled (an occluded window</span>
+<span class="d-add">+   throttles them to a stop) would leave the box parked at the offset with the</span>
+<span class="d-add">+   tip 3px off its control. A fade cannot lie about where something is. */</span>
+<span class="d-add">+@keyframes coach-callout-in {</span>
+<span class="d-add">+  from { opacity: 0; }</span>
+<span class="d-add">+  to { opacity: 1; }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* WRAPS, where the bottom strip&#x27;s copy of this ellipsised. The strip ran the</span>
+<span class="d-add">+   width of the screen and a truncated tail cost nothing; a 300px callout cuts</span>
+<span class="d-add">+   the sentence in half — &quot;I already cut across here, and s…&quot; — and that</span>
+<span class="d-add">+   sentence is the thing the visitor chose, held on screen so the flow reads as</span>
+<span class="d-add">+   finishing it rather than as following instructions. Two lines, then clamp:</span>
+<span class="d-add">+   long enough for every line in the phrasebook at this size, short enough that</span>
+<span class="d-add">+   the box cannot grow taller than the control it is pointing at. */</span>
+<span class="d-add">+.coach-callout-sentence {</span>
+<span class="d-add">+  display: -webkit-box;</span>
+<span class="d-add">+  -webkit-box-orient: vertical;</span>
+<span class="d-add">+  -webkit-line-clamp: 2;</span>
+<span class="d-add">+  line-clamp: 2;</span>
+<span class="d-add">+  overflow: hidden;</span>
+<span class="d-add">+  margin: 0 0 3px;</span>
+<span class="d-add">+  font-size: var(--font-size-2xs);</span>
+<span class="d-add">+  line-height: 1.35;</span>
+<span class="d-add">+  color: color-mix(in srgb, var(--ink) 55%, transparent);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.coach-callout-ask {</span>
+<span class="d-add">+  margin: 0;</span>
+<span class="d-add">+  font-size: var(--font-size-xs);</span>
+<span class="d-add">+  line-height: 1.45;</span>
+<span class="d-add">+  color: var(--ink-strong);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.coach-callout-actions {</span>
+<span class="d-add">+  display: flex;</span>
+<span class="d-add">+  justify-content: flex-end;</span>
+<span class="d-add">+  margin-top: var(--space-2);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.coach-callout-btn {</span>
+<span class="d-add">+  padding: 4px var(--space-2);</span>
+<span class="d-add">+  border: 1px solid var(--hairline-strong, var(--hairline));</span>
+<span class="d-add">+  border-radius: 0;</span>
+<span class="d-add">+  background: transparent;</span>
+<span class="d-add">+  font: inherit;</span>
+<span class="d-add">+  font-size: var(--font-size-2xs);</span>
+<span class="d-add">+  color: var(--ink-strong);</span>
+<span class="d-add">+  cursor: pointer;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.coach-callout-btn:hover {</span>
+<span class="d-add">+  border-color: var(--ink-strong);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.coach-callout-close {</span>
+<span class="d-add">+  position: absolute;</span>
+<span class="d-add">+  top: 2px;</span>
+<span class="d-add">+  right: 4px;</span>
+<span class="d-add">+  padding: 2px 5px;</span>
+<span class="d-add">+  border: none;</span>
+<span class="d-add">+  background: transparent;</span>
+<span class="d-add">+  font: inherit;</span>
+<span class="d-add">+  font-size: var(--font-size-xs);</span>
+<span class="d-add">+  line-height: 1;</span>
+<span class="d-add">+  color: color-mix(in srgb, var(--ink) 55%, transparent);</span>
+<span class="d-add">+  cursor: pointer;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.coach-callout-close:hover {</span>
+<span class="d-add">+  color: var(--ink-strong);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/* ── The tip ─────────────────────────────────────────────────────────────</span>
+<span class="d-add">+   A rotated square with two of its borders showing, sitting half outside the</span>
+<span class="d-add">+   box so the seam falls inside it. `--coach-arrow-left` is the tip&#x27;s centre</span>
+<span class="d-add">+   measured from the box&#x27;s own left edge, set by calloutPlacement.ts — it is NOT</span>
+<span class="d-add">+   the box&#x27;s midpoint, and that is the whole point: when the box is clamped to a</span>
+<span class="d-add">+   viewport edge the box stops moving and the tip keeps sliding, so it stays</span>
+<span class="d-add">+   over the control at every width. */</span>
+<span class="d-add">+.coach-callout-tip {</span>
+<span class="d-add">+  position: absolute;</span>
+<span class="d-add">+  left: var(--coach-arrow-left, 50%);</span>
+<span class="d-add">+  width: 10px;</span>
+<span class="d-add">+  height: 10px;</span>
+<span class="d-add">+  background: var(--paper);</span>
+<span class="d-add">+  border: 1px solid var(--ink-strong);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.coach-callout--below .coach-callout-tip {</span>
+<span class="d-add">+  top: -6px;</span>
+<span class="d-add">+  border-right: none;</span>
+<span class="d-add">+  border-bottom: none;</span>
+<span class="d-add">+  transform: translateX(-50%) rotate(45deg);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+.coach-callout--above .coach-callout-tip {</span>
+<span class="d-add">+  bottom: -6px;</span>
+<span class="d-add">+  border-left: none;</span>
+<span class="d-add">+  border-top: none;</span>
+<span class="d-add">+  transform: translateX(-50%) rotate(45deg);</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/Onboarding/Onboarding.tsx</span>
+            <span class="stat"><span class="d-add">+130</span> / <span class="d-del">-95</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run flow</span>
+        <span class="ctx-sum">Derives the step from the canonical Selection, opens the wall, and now decides whether the step speaks from a callout or from the strip</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Onboarding.tsx</span>
+        <span class="ctx-sum">386 → ~390 LOC — the flow, its effects, the render branch, ask()</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">header · two ways in / a decision not a sighting</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">header · where the coach speaks from</span><span class="ol-sum">REWRITTEN — why the strip moved, and the three things it used to do</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">useRoute destructuring</span><span class="ol-sum">castVote / setStartPoint / setEndPoint / routeData drop out with the control copies</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">the derived step</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">target + useCoachAnchor + `anchored`</span><span class="ol-sum">NEW — which control this step is about</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">effect · publish active / arm the end tool</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">effect · grey the chrome (data-coach-focus)</span><span class="ol-sum">NEW — and why it cannot be opacity on a container</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">effect · suppress on done</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">handlePick / handleDismiss</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">handleAddress</span><span class="ol-sum">DELETED with the embedded search</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">render · wall</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">render · typing → nothing</span><span class="ol-sum">NEW</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">render · anchored → scrim + callout</span><span class="ol-sum">NEW</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">render · fallback → the strip</span><span class="ol-sum">REWRITTEN — now the not-anchored and done case only</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">ask()</span><span class="ol-sum">the start lines gain “This fills in”; cast gains “+ for yes, − for no” and loses “pick another above”</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The header records why the strip was right and what it was wrong about, and lists the three things the move costs: the control copies, the stand-down while typing, and the fallback</li><li>`target` is null for `wall` and `done` — one covers the screen, the other is a report</li><li>The greying effect carries the opacity-makes-a-group explanation, because the obvious implementation is the one that does not work</li><li>The scrim renders only at `cast`, with the reason stated in place: placing a point is a map gesture</li><li>ask() drops “— or pick another above”: that line pointed at the vote-type picker, which is now one of the greyed controls, so the instruction contradicted the screen</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/Onboarding/Onboarding.tsx b/client-react/src/components/Onboarding/Onboarding.tsx</span>
+<span class="d-meta">index be95112..68ef28c 100644</span>
+<span class="d-meta">--- a/client-react/src/components/Onboarding/Onboarding.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/Onboarding/Onboarding.tsx</span>
+<span class="d-hunk">@@ -1,11 +1,11 @@</span>
+<span class="d-ctx"> import { useCallback, useEffect, useMemo, useState } from &quot;react&quot;;</span>
+<span class="d-add">+import { createPortal } from &quot;react-dom&quot;;</span>
+<span class="d-ctx"> import { useMap, useRoute } from &quot;../../context&quot;;</span>
+<span class="d-ctx"> import { pointTypeForLabel } from &quot;../../themes&quot;;</span>
+<span class="d-del">-import { fitPoints } from &quot;../../utils/mapViewState&quot;;</span>
+<span class="d-ctx"> import { dlog } from &quot;../../utils/debugLog&quot;;</span>
+<span class="d-ctx"> import { hasPendingSticker } from &quot;../../sticker&quot;;</span>
+<span class="d-del">-import { AddressSearch } from &quot;../AddressSearch&quot;;</span>
+<span class="d-ctx"> import { MapNotice } from &quot;../MapNotice&quot;;</span>
+<span class="d-add">+import { CoachCallout } from &quot;./CoachCallout&quot;;</span>
+<span class="d-ctx"> import { OpenerWall } from &quot;./OpenerWall&quot;;</span>
+<span class="d-ctx"> import { openerFor } from &quot;../../onboarding/phrasebook&quot;;</span>
+<span class="d-ctx"> import { buildTiles, type OpenerTile } from &quot;../../onboarding/tiles&quot;;</span>
+<span class="d-hunk">@@ -15,7 +15,7 @@ import {</span>
+<span class="d-ctx"> } from &quot;../../onboarding/state&quot;;</span>
+<span class="d-ctx"> import { hasVisitedBefore, isSuppressed, suppress } from &quot;../../onboarding/firstRun&quot;;</span>
+<span class="d-ctx"> import { setOnboardingActive, useOnboardingRequests } from &quot;../../onboarding/active&quot;;</span>
+<span class="d-del">-import type { LatLng } from &quot;../../types&quot;;</span>
+<span class="d-add">+import { useCoachAnchor, type CoachTarget } from &quot;../../onboarding/coachAnchor&quot;;</span>
+<span class="d-ctx"> import &quot;./Onboarding.css&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-hunk">@@ -48,11 +48,37 @@ import &quot;./Onboarding.css&quot;;</span>
+<span class="d-ctx"> // The only bit of state that belongs to the flow is &quot;the optional end was</span>
+<span class="d-ctx"> // declined&quot;, and it holds no fact the selection also holds.</span>
+<span class="d-ctx"> //</span>
+<span class="d-del">-// The strip is a MapNotice: the app has exactly one place it speaks from, and a</span>
+<span class="d-del">-// first-run coach is not special enough to earn a second. That also inherits the</span>
+<span class="d-del">-// rule the notice was built for — the strip is transparent to the pointer and</span>
+<span class="d-del">-// sits UNDER the map&#x27;s cards, so a coach can never be why a proposal underneath</span>
+<span class="d-del">-// it won&#x27;t take a tap.</span>
+<span class="d-add">+// WHERE THE COACH SPEAKS FROM, and why it moved. It used to be a MapNotice — the</span>
+<span class="d-add">+// one bottom strip the app says everything from — on the reasoning that a</span>
+<span class="d-add">+// first-run coach is not special enough to earn a second place to speak. That</span>
+<span class="d-add">+// was right about the strip and wrong about the coach. A strip at the BOTTOM of</span>
+<span class="d-add">+// the screen cannot point, so every step had to DESCRIBE its control instead of</span>
+<span class="d-add">+// indicating it (&quot;Tap the map where that stretch starts&quot;), and two of the three</span>
+<span class="d-add">+// controls it was describing are in a bar at the TOP of the screen that a</span>
+<span class="d-add">+// first-timer has not looked at yet. The instruction and the thing it was about</span>
+<span class="d-add">+// were as far apart as the screen allows.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// So the steps are now CALLOUTS ANCHORED TO THE REAL CONTROL, with an arrow tip</span>
+<span class="d-add">+// on them, and the rest of the chrome greys out behind them so there is exactly</span>
+<span class="d-add">+// one lit thing on the screen at a time (coachAnchor.ts finds the control,</span>
+<span class="d-add">+// calloutPlacement.ts decides where the box goes, Onboarding.css does the</span>
+<span class="d-add">+// greying). One thing kept the strip, and deliberately: the CLOSING LINE. It is</span>
+<span class="d-add">+// not an instruction, it has no control to point at, and it is the one moment</span>
+<span class="d-add">+// the flow is reporting rather than asking.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// Three consequences worth stating, because each is a thing the strip used to do:</span>
+<span class="d-add">+//</span>
+<span class="d-add">+//   · THE COACH NO LONGER CARRIES ITS OWN CONTROLS. It had an address search and</span>
+<span class="d-add">+//     its own +/− pair, because a strip that cannot point has to bring the</span>
+<span class="d-add">+//     controls to the reader. Pointing at the real ones is strictly better —</span>
+<span class="d-add">+//     what somebody learns in the first run is then the app they will use — so</span>
+<span class="d-add">+//     the copies are gone.</span>
+<span class="d-add">+//   · IT STANDS DOWN WHILE SOMEBODY IS TYPING AN ADDRESS. Clicking the Start</span>
+<span class="d-add">+//     field opens a search inside that same plate; a callout hanging off the</span>
+<span class="d-add">+//     plate would be over the suggestion list. See `typing` in coachAnchor.ts.</span>
+<span class="d-add">+//   · IT FALLS BACK TO THE STRIP WHEN THERE IS NOTHING TO POINT AT. The legend</span>
+<span class="d-add">+//     is `display:none` in short landscape and absent entirely on a point-only</span>
+<span class="d-add">+//     map. An arrow tip pointing at nothing is worse than the strip it replaced.</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** How long the closing line stays up after the first vote lands. */</span>
+<span class="d-hunk">@@ -75,9 +101,8 @@ export function Onboarding() {</span>
+<span class="d-ctx"> function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">   const map = useMap();</span>
+<span class="d-ctx">   const {</span>
+<span class="d-del">-    start, end, routeData, splitDesirePaths, pointType, isCalculating,</span>
+<span class="d-del">-    isCalculatingSplit, hasVoted, requestedVoteType, voteType,</span>
+<span class="d-del">-    setVoteType, setStartPoint, setEndPoint, setActiveTool, castVote,</span>
+<span class="d-add">+    start, end, isCalculating, isCalculatingSplit, hasVoted,</span>
+<span class="d-add">+    requestedVoteType, voteType, setVoteType, setActiveTool,</span>
+<span class="d-ctx">   } = useRoute();</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // A scan of a still-unbound sticker. Read once: the code is spent by the first</span>
+<span class="d-hunk">@@ -110,10 +135,6 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx">   const [dismissed, setDismissed] = useState(false);</span>
+<span class="d-ctx">   const [endSkipped, setEndSkipped] = useState(false);</span>
+<span class="d-del">-  // Which step&#x27;s address field is open, rather than a bare boolean: the field</span>
+<span class="d-del">-  // closes by itself when the flow moves under it, with no effect to keep in</span>
+<span class="d-del">-  // step with the step.</span>
+<span class="d-del">-  const [searchingFor, setSearchingFor] = useState&lt;&quot;start&quot; | &quot;end&quot; | null&gt;(null);</span>
+<span class="d-ctx">   const [finished, setFinished] = useState(false);</span>
+<span class="d-ctx">   // A hand-opened flow reopens the WALL even though a sentence (and possibly a</span>
+<span class="d-ctx">   // whole selection) is already in play, because choosing a different sentence</span>
+<span class="d-hunk">@@ -166,11 +187,16 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">   };</span>
+<span class="d-ctx">   const step = onboardingStep(facts);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // The cast control&#x27;s own condition, spelled the same way the topbar spells it:</span>
+<span class="d-del">-  // a routed path, a split path, or a single point in point mode.</span>
+<span class="d-del">-  const canCast =</span>
+<span class="d-del">-    !!routeData || splitDesirePaths.length &gt; 0 ||</span>
+<span class="d-del">-    (pointType === &quot;point&quot; &amp;&amp; !!start.coords);</span>
+<span class="d-add">+  // Which control this step is about. `wall` covers the screen and `done` is a</span>
+<span class="d-add">+  // report rather than an instruction, so neither of them points at anything.</span>
+<span class="d-add">+  const target: CoachTarget | null =</span>
+<span class="d-add">+    step === &quot;start&quot; ? &quot;start&quot; : step === &quot;end&quot; ? &quot;end&quot; : step === &quot;cast&quot; ? &quot;cast&quot; : null;</span>
+<span class="d-add">+  const anchor = useCoachAnchor(active ? target : null);</span>
+<span class="d-add">+  // Anchored = there is a live control to hang the box off AND nobody is in the</span>
+<span class="d-add">+  // middle of typing an address into it. Either failure falls back to the strip</span>
+<span class="d-add">+  // (or, for typing, to silence) rather than to a tip pointing at nothing.</span>
+<span class="d-add">+  const anchored = !!anchor.box &amp;&amp; !anchor.typing;</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   const calculating = isCalculating || isCalculatingSplit;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // ── Effects that DRIVE the model (never shadow it) ────────────────────────</span>
+<span class="d-hunk">@@ -215,6 +241,25 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">   // the endpoint recording on the cast instead of on the open, which is a</span>
+<span class="d-ctx">   // different change to a different layer.</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // Grey the chrome down to the one thing this step is about.</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  // A body attribute rather than a class on each control, and the greying rules</span>
+<span class="d-add">+  // live in Onboarding.css keyed off it (`body[data-coach-focus=&quot;start&quot;] …`).</span>
+<span class="d-add">+  // That is the whole coupling: this flow never touches another component&#x27;s DOM,</span>
+<span class="d-add">+  // and the bar never learns that a coach exists beyond the three `data-coach`</span>
+<span class="d-add">+  // attributes naming its own controls.</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  // It cannot be done with opacity on a CONTAINER, which is the obvious version</span>
+<span class="d-add">+  // and the wrong one: opacity makes a group, and nothing inside a faded group</span>
+<span class="d-add">+  // can be brought back to full — so fading `.topbar` and un-fading the Start</span>
+<span class="d-add">+  // field inside it is not expressible. The rules therefore fade the bar&#x27;s</span>
+<span class="d-add">+  // controls INDIVIDUALLY, each one excluded by `:not([data-coach=&quot;…&quot;])`.</span>
+<span class="d-add">+  useEffect(() =&gt; {</span>
+<span class="d-add">+    if (!active || !target || !anchored) return;</span>
+<span class="d-add">+    document.body.setAttribute(&quot;data-coach-focus&quot;, target);</span>
+<span class="d-add">+    return () =&gt; document.body.removeAttribute(&quot;data-coach-focus&quot;);</span>
+<span class="d-add">+  }, [active, target, anchored]);</span>
+<span class="d-add">+</span>
+<span class="d-ctx">   // A cast finishes the flow. Suppress — this and the dismissal are the only two</span>
+<span class="d-ctx">   // writes — then let the closing line stand for a few seconds and leave.</span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-hunk">@@ -246,18 +291,6 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">     setDismissed(true);</span>
+<span class="d-ctx">   }, []);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  function handleAddress(coords: LatLng, address: string) {</span>
+<span class="d-del">-    if (step === &quot;end&quot;) {</span>
+<span class="d-del">-      setEndPoint(coords, address);</span>
+<span class="d-del">-      setActiveTool(&quot;start&quot;);</span>
+<span class="d-del">-      fitPoints([start.coords, coords]);</span>
+<span class="d-del">-    } else {</span>
+<span class="d-del">-      setStartPoint(coords, address);</span>
+<span class="d-del">-      fitPoints([coords, end.coords]);</span>
+<span class="d-del">-    }</span>
+<span class="d-del">-    setSearchingFor(null);</span>
+<span class="d-del">-  }</span>
+<span class="d-del">-</span>
+<span class="d-ctx">   if (!active) return null;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   if (step === &quot;wall&quot;) {</span>
+<span class="d-hunk">@@ -276,68 +309,62 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">   // `vt=`. One lookup, so a sticker scan and a wall pick read identically.</span>
+<span class="d-ctx">   const sentence = pickedLabel ? openerFor(pickedLabel) : null;</span>
+<span class="d-ctx">   const optionalEnd = endIsOptional(facts);</span>
+<span class="d-add">+  const line = ask(step, facts, voteType, calculating);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // The one decision the chrome cannot make for us: an end point the flow was</span>
+<span class="d-add">+  // only GUESSING might exist, on a label whose kind is unknown. Everything else</span>
+<span class="d-add">+  // the coach used to carry — an address search, its own +/− pair — is now the</span>
+<span class="d-add">+  // real control with an arrow pointing at it.</span>
+<span class="d-add">+  const actions =</span>
+<span class="d-add">+    step === &quot;end&quot; &amp;&amp; optionalEnd ? (</span>
+<span class="d-add">+      &lt;button type=&quot;button&quot; className=&quot;coach-callout-btn&quot; onClick={() =&gt; setEndSkipped(true)}&gt;</span>
+<span class="d-add">+        It&#x27;s one spot</span>
+<span class="d-add">+      &lt;/button&gt;</span>
+<span class="d-add">+    ) : null;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // Somebody is typing an address into the very field we would be pointing at.</span>
+<span class="d-add">+  // Say nothing at all until they are done — see `typing` in coachAnchor.ts.</span>
+<span class="d-add">+  if (target &amp;&amp; anchor.typing) return null;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  if (target &amp;&amp; anchor.box) {</span>
+<span class="d-add">+    return (</span>
+<span class="d-add">+      &lt;&gt;</span>
+<span class="d-add">+        {/* Only the cast step takes the map away. Placing a point IS a map</span>
+<span class="d-add">+            gesture, so greying the map out during `start` or `end` would grey</span>
+<span class="d-add">+            out the thing being asked for; by `cast` the points are placed and</span>
+<span class="d-add">+            the only move left is in the bar. The scrim sits one rung under the</span>
+<span class="d-add">+            chrome, so it covers the map, its furniture and any open proposal</span>
+<span class="d-add">+            card, while the bar stays above it and is greyed by the rules</span>
+<span class="d-add">+            instead — which is what leaves the +/− the single lit thing. */}</span>
+<span class="d-add">+        {step === &quot;cast&quot; &amp;&amp; createPortal(</span>
+<span class="d-add">+          &lt;div className=&quot;coach-scrim&quot; aria-hidden=&quot;true&quot; /&gt;,</span>
+<span class="d-add">+          document.body</span>
+<span class="d-add">+        )}</span>
+<span class="d-add">+        &lt;CoachCallout</span>
+<span class="d-add">+          anchor={anchor.box}</span>
+<span class="d-add">+          sentence={sentence}</span>
+<span class="d-add">+          ask={line}</span>
+<span class="d-add">+          actions={actions}</span>
+<span class="d-add">+          onDismiss={handleDismiss}</span>
+<span class="d-add">+        /&gt;</span>
+<span class="d-add">+      &lt;/&gt;</span>
+<span class="d-add">+    );</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // No control to point at — a point-only map (no legend at all), short</span>
+<span class="d-add">+  // landscape (the legend is display:none), or a cast that is not yet possible</span>
+<span class="d-add">+  // so its plate is still reserved-but-hidden. And the closing line, which is a</span>
+<span class="d-add">+  // report rather than an instruction and never had a control. The strip is</span>
+<span class="d-add">+  // still the right answer for all of them.</span>
+<span class="d-ctx">   return (</span>
+<span class="d-ctx">     &lt;MapNotice tone=&quot;notice&quot; anchor aria-label=&quot;Getting started&quot;&gt;</span>
+<span class="d-ctx">       &lt;div className=&quot;onboard-coach map-notice-body&quot;&gt;</span>
+<span class="d-ctx">         &lt;div className=&quot;onboard-lines&quot;&gt;</span>
+<span class="d-ctx">           {sentence &amp;&amp; &lt;p className=&quot;onboard-sentence&quot;&gt;{sentence}&lt;/p&gt;}</span>
+<span class="d-del">-          &lt;p className=&quot;onboard-ask&quot;&gt;{ask(step, facts, voteType, calculating)}&lt;/p&gt;</span>
+<span class="d-add">+          &lt;p className=&quot;onboard-ask&quot;&gt;{line}&lt;/p&gt;</span>
+<span class="d-ctx">         &lt;/div&gt;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-        {searchingFor === step ? (</span>
+<span class="d-del">-          &lt;div className=&quot;onboard-search&quot;&gt;</span>
+<span class="d-del">-            &lt;AddressSearch</span>
+<span class="d-del">-              onSelect={handleAddress}</span>
+<span class="d-del">-              onClose={() =&gt; setSearchingFor(null)}</span>
+<span class="d-del">-              placeholder={step === &quot;end&quot; ? &quot;Search the other end…&quot; : &quot;Search an address…&quot;}</span>
+<span class="d-del">-              accentColor={step === &quot;end&quot; ? &quot;var(--color-end)&quot; : &quot;var(--color-start)&quot;}</span>
+<span class="d-del">-            /&gt;</span>
+<span class="d-del">-          &lt;/div&gt;</span>
+<span class="d-del">-        ) : (</span>
+<span class="d-del">-          &lt;div className=&quot;onboard-actions map-notice-actions&quot;&gt;</span>
+<span class="d-del">-            {(step === &quot;start&quot; || step === &quot;end&quot;) &amp;&amp; (</span>
+<span class="d-del">-              &lt;button</span>
+<span class="d-del">-                type=&quot;button&quot;</span>
+<span class="d-del">-                className=&quot;map-notice-btn&quot;</span>
+<span class="d-del">-                onClick={() =&gt; setSearchingFor(step === &quot;end&quot; ? &quot;end&quot; : &quot;start&quot;)}</span>
+<span class="d-del">-              &gt;</span>
+<span class="d-del">-                Search instead</span>
+<span class="d-del">-              &lt;/button&gt;</span>
+<span class="d-del">-            )}</span>
+<span class="d-del">-            {step === &quot;end&quot; &amp;&amp; optionalEnd &amp;&amp; (</span>
+<span class="d-del">-              &lt;button</span>
+<span class="d-del">-                type=&quot;button&quot;</span>
+<span class="d-del">-                className=&quot;map-notice-btn&quot;</span>
+<span class="d-del">-                onClick={() =&gt; setEndSkipped(true)}</span>
+<span class="d-del">-              &gt;</span>
+<span class="d-del">-                It&#x27;s one spot</span>
+<span class="d-del">-              &lt;/button&gt;</span>
+<span class="d-del">-            )}</span>
+<span class="d-del">-            {step === &quot;cast&quot; &amp;&amp; (</span>
+<span class="d-del">-              &lt;&gt;</span>
+<span class="d-del">-                &lt;button</span>
+<span class="d-del">-                  type=&quot;button&quot;</span>
+<span class="d-del">-                  className=&quot;map-notice-btn onboard-cast onboard-cast-down&quot;</span>
+<span class="d-del">-                  onClick={() =&gt; castVote(-1)}</span>
+<span class="d-del">-                  disabled={!canCast}</span>
+<span class="d-del">-                  title={`Vote against ${voteType} here`}</span>
+<span class="d-del">-                &gt;</span>
+<span class="d-del">-                  − Not here</span>
+<span class="d-del">-                &lt;/button&gt;</span>
+<span class="d-del">-                &lt;button</span>
+<span class="d-del">-                  type=&quot;button&quot;</span>
+<span class="d-del">-                  className=&quot;map-notice-btn map-notice-btn-primary onboard-cast onboard-cast-up&quot;</span>
+<span class="d-del">-                  onClick={() =&gt; castVote(1)}</span>
+<span class="d-del">-                  disabled={!canCast}</span>
+<span class="d-del">-                  title={`Vote for ${voteType} here`}</span>
+<span class="d-del">-                &gt;</span>
+<span class="d-del">-                  + Yes, here</span>
+<span class="d-del">-                &lt;/button&gt;</span>
+<span class="d-del">-              &lt;/&gt;</span>
+<span class="d-del">-            )}</span>
+<span class="d-del">-          &lt;/div&gt;</span>
+<span class="d-del">-        )}</span>
+<span class="d-add">+        {actions &amp;&amp; &lt;div className=&quot;onboard-actions map-notice-actions&quot;&gt;{actions}&lt;/div&gt;}</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         &lt;button</span>
+<span class="d-ctx">           type=&quot;button&quot;</span>
+<span class="d-hunk">@@ -360,10 +387,14 @@ function ask(</span>
+<span class="d-ctx">   calculating: boolean</span>
+<span class="d-ctx"> ): string {</span>
+<span class="d-ctx">   switch (step) {</span>
+<span class="d-add">+    // The box now hangs off the field these fill in, so each line says what the</span>
+<span class="d-add">+    // gesture is and lets the arrow say where the result lands. &quot;This field</span>
+<span class="d-add">+    // fills in&quot; is the half a first-timer cannot guess: the map and the bar</span>
+<span class="d-add">+    // look like separate things until one visibly answers the other.</span>
+<span class="d-ctx">     case &quot;start&quot;:</span>
+<span class="d-del">-      if (facts.isStationNetwork) return &quot;Tap the station on the map.&quot;;</span>
+<span class="d-del">-      if (requiresEnd(facts)) return &quot;Tap the map where that stretch starts.&quot;;</span>
+<span class="d-del">-      return &quot;Tap the map on the spot you mean.&quot;;</span>
+<span class="d-add">+      if (facts.isStationNetwork) return &quot;Tap the station on the map. This fills in.&quot;;</span>
+<span class="d-add">+      if (requiresEnd(facts)) return &quot;Tap the map where that stretch starts. This fills in.&quot;;</span>
+<span class="d-add">+      return &quot;Tap the map on the spot you mean. This fills in.&quot;;</span>
+<span class="d-ctx">     case &quot;end&quot;:</span>
+<span class="d-ctx">       if (requiresEnd(facts)) return &quot;Now tap the far end of it.&quot;;</span>
+<span class="d-ctx">       return &quot;Tap the far end too, if it&#x27;s a stretch rather than a spot.&quot;;</span>
+<span class="d-hunk">@@ -374,12 +405,16 @@ function ask(</span>
+<span class="d-ctx">       // makes every one of them read as a verb phrase in the middle of a</span>
+<span class="d-ctx">       // question. Quoted, it also shows exactly what the vote will be recorded</span>
+<span class="d-ctx">       // as — including when a label of unknown kind let the map&#x27;s default</span>
+<span class="d-del">-      // resolve one. Say so, and say where to change it: this is the only place</span>
+<span class="d-del">-      // the app tells a newcomer that the Proposal picker is theirs to move.</span>
+<span class="d-del">-      const tail = facts.pointType === null ? &quot; — or pick another above.&quot; : &quot;&quot;;</span>
+<span class="d-del">-      return facts.hasEnd</span>
+<span class="d-del">-        ? `“${effectiveVoteType}”, all along this stretch?${tail}`</span>
+<span class="d-del">-        : `“${effectiveVoteType}”, right here?${tail}`;</span>
+<span class="d-add">+      // resolve one.</span>
+<span class="d-add">+      //</span>
+<span class="d-add">+      // The old line ended &quot;— or pick another above&quot;, pointing at the vote-type</span>
+<span class="d-add">+      // picker. That was written for a strip with nothing lit and nothing dimmed;</span>
+<span class="d-add">+      // the picker is now one of the greyed controls, so an instruction to use it</span>
+<span class="d-add">+      // contradicts the screen. The quoted label still says what will be recorded.</span>
+<span class="d-add">+      const question = facts.hasEnd</span>
+<span class="d-add">+        ? `“${effectiveVoteType}”, all along this stretch?`</span>
+<span class="d-add">+        : `“${effectiveVoteType}”, right here?`;</span>
+<span class="d-add">+      return `${question} + for yes, − for no.`;</span>
+<span class="d-ctx">     }</span>
+<span class="d-ctx">     case &quot;done&quot;:</span>
+<span class="d-ctx">       return &quot;Cast. It&#x27;s on the map — and it&#x27;s yours to take back any time.&quot;;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/TopBar/TopBar.tsx</span>
+            <span class="stat"><span class="d-add">+12</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · the top bar</span>
+        <span class="ctx-sum">The Start/End legend, the mode and vote pickers, and the cast pair — in two chrome modes</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">TopBar.tsx</span>
+        <span class="ctx-sum">311 → ~319 LOC — handlers, the legend, the actions row</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">handlers / class builders</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">comment · what data-coach is for</span><span class="ol-sum">NEW — a note where an editor will see it</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Start field · typing &lt;div&gt; and resting &lt;button&gt;</span><span class="ol-sum">+data-coach=&quot;start&quot; on both</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">End field · typing &lt;div&gt; and resting &lt;button&gt;</span><span class="ol-sum">+data-coach=&quot;end&quot; on both</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">legend-pair-key / mode / vote groups</span><span class="ol-sum">unchanged — greyed by the coach&#x27;s own rules</span></li><li class="changed"><span class="ol-label">.cast-group</span><span class="ol-sum">+data-coach=&quot;cast&quot;</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">HowItWorksModal</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Five attributes and a comment. No refs, no state, no imports — the coach queries and measures, so this file keeps nothing for it</li><li>BOTH renderings of each field are tagged: the slot holds a &lt;button&gt; at rest and a &lt;div&gt; while typing, and they are different elements</li><li>The comment says what breaks if an attribute is deleted (that step falls back to the bottom strip) and what does not (moving the control)</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/TopBar/TopBar.tsx b/client-react/src/components/TopBar/TopBar.tsx</span>
+<span class="d-meta">index 6b38ac5..952929a 100644</span>
+<span class="d-meta">--- a/client-react/src/components/TopBar/TopBar.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/TopBar/TopBar.tsx</span>
+<span class="d-hunk">@@ -137,6 +137,13 @@ export const TopBar = memo(function TopBar() {</span>
+<span class="d-ctx">         &lt;/svg&gt;</span>
+<span class="d-ctx">       &lt;/div&gt;</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+      {/* `data-coach` marks the three controls the first-run coach hangs its</span>
+<span class="d-add">+          callout off (onboarding/coachAnchor.ts). They are hooks for a reader,</span>
+<span class="d-add">+          not for layout: nothing here styles them, and the coach queries them</span>
+<span class="d-add">+          rather than holding a ref, so this file keeps no state for it. Moving</span>
+<span class="d-add">+          a control is fine — the callout is measured from wherever it lands.</span>
+<span class="d-add">+          Deleting an attribute is not: that step silently falls back to the</span>
+<span class="d-add">+          bottom strip. */}</span>
+<span class="d-ctx">       &lt;div className=&quot;topbar-content&quot;&gt;</span>
+<span class="d-ctx">         {/* Point-only maps vote on a single clicked location — no start/end</span>
+<span class="d-ctx">             route legend at all (covers desktop and mobile). */}</span>
+<span class="d-hunk">@@ -150,7 +157,7 @@ export const TopBar = memo(function TopBar() {</span>
+<span class="d-ctx">                 collapse to `display: contents`, so that layout is untouched. */}</span>
+<span class="d-ctx">             &lt;div className=&quot;legend-pair legend-pair-tools&quot;&gt;</span>
+<span class="d-ctx">               {typingField === &quot;start&quot; ? (</span>
+<span class="d-del">-                &lt;div className={`${startToolClass.join(&quot; &quot;)} typing`}&gt;</span>
+<span class="d-add">+                &lt;div className={`${startToolClass.join(&quot; &quot;)} typing`} data-coach=&quot;start&quot;&gt;</span>
+<span class="d-ctx">                   &lt;span className=&quot;legend-icon-slot&quot;&gt;</span>
+<span class="d-ctx">                     &lt;span className=&quot;legend-char-start&quot;&gt;◆&lt;/span&gt;</span>
+<span class="d-ctx">                   &lt;/span&gt;</span>
+<span class="d-hunk">@@ -166,6 +173,7 @@ export const TopBar = memo(function TopBar() {</span>
+<span class="d-ctx">                 &lt;button</span>
+<span class="d-ctx">                   type=&quot;button&quot;</span>
+<span class="d-ctx">                   className={startToolClass.join(&quot; &quot;)}</span>
+<span class="d-add">+                  data-coach=&quot;start&quot;</span>
+<span class="d-ctx">                   onClick={handleStartClick}</span>
+<span class="d-ctx">                   aria-pressed={activeTool === &quot;start&quot;}</span>
+<span class="d-ctx">                 &gt;</span>
+<span class="d-hunk">@@ -180,7 +188,7 @@ export const TopBar = memo(function TopBar() {</span>
+<span class="d-ctx">               )}</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">               {typingField === &quot;end&quot; ? (</span>
+<span class="d-del">-                &lt;div className={`${endToolClass.join(&quot; &quot;)} typing`}&gt;</span>
+<span class="d-add">+                &lt;div className={`${endToolClass.join(&quot; &quot;)} typing`} data-coach=&quot;end&quot;&gt;</span>
+<span class="d-ctx">                   &lt;span className=&quot;legend-icon-slot&quot;&gt;</span>
+<span class="d-ctx">                     &lt;span className=&quot;legend-char-end&quot;&gt;◆&lt;/span&gt;</span>
+<span class="d-ctx">                   &lt;/span&gt;</span>
+<span class="d-hunk">@@ -196,6 +204,7 @@ export const TopBar = memo(function TopBar() {</span>
+<span class="d-ctx">                 &lt;button</span>
+<span class="d-ctx">                   type=&quot;button&quot;</span>
+<span class="d-ctx">                   className={endToolClass.join(&quot; &quot;)}</span>
+<span class="d-add">+                  data-coach=&quot;end&quot;</span>
+<span class="d-ctx">                   onClick={handleEndClick}</span>
+<span class="d-ctx">                   aria-pressed={activeTool === &quot;end&quot;}</span>
+<span class="d-ctx">                 &gt;</span>
+<span class="d-hunk">@@ -265,6 +274,7 @@ export const TopBar = memo(function TopBar() {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">             &lt;div</span>
+<span class="d-ctx">               className={`cast-group ${canVote &amp;&amp; !isLoading ? &quot;&quot; : &quot;hidden-reserve&quot;}`}</span>
+<span class="d-add">+              data-coach=&quot;cast&quot;</span>
+<span class="d-ctx">               role=&quot;group&quot;</span>
+<span class="d-ctx">               aria-label=&quot;Cast a vote for or against&quot;</span>
+<span class="d-ctx">             &gt;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/onboarding/calloutPlacement.test.ts</span>
+            <span class="stat"><span class="d-add">+143</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run coach (geometry, guarded)</span>
+        <span class="ctx-sum">The four widths the coach was asked to hold up at, against five anchor positions each</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">calloutPlacement.test.ts (new)</span>
+        <span class="ctx-sum">~130 LOC — 13 tests in four groups</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">WIDTHS / anchor() / tipX()</span><span class="ol-sum">NEW — 1800, 900, 600, 450</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">describe(the box stays on screen)</span><span class="ol-sum">NEW — both edges, and a box wider than the viewport</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">describe(the tip stays on the control)</span><span class="ol-sum">NEW — the property that matters</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">describe(which side the tip grows from)</span><span class="ol-sum">NEW — below, the flip, and neither-fits</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">describe(how wide the box may be)</span><span class="ol-sum">NEW — shrinks, caps at 300, floors at 160</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>“points inside the anchor at every width” is 20 assertions: four widths × five anchor positions, including a 24px control in the corner</li><li>“slides the tip rather than the box once the box is clamped” is the direct regression test for arrow-centred-on-box: two anchors that clamp to the SAME edge must still get different tips</li><li>The four widths are the ones asked for — full, a half, a third and a quarter of an 1800px screen</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/onboarding/calloutPlacement.test.ts b/client-react/src/onboarding/calloutPlacement.test.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..a8449a7</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/onboarding/calloutPlacement.test.ts</span>
+<span class="d-hunk">@@ -0,0 +1,143 @@</span>
+<span class="d-add">+import { describe, it, expect } from &quot;vitest&quot;;</span>
+<span class="d-add">+import { calloutMaxWidth, placeCallout } from &quot;./calloutPlacement&quot;;</span>
+<span class="d-add">+import type { AnchorBox } from &quot;./coachAnchor&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** A callout at its usual size: the ask on two lines. */</span>
+<span class="d-add">+const BOX = { width: 300, height: 84 };</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** The four widths the coach was asked to hold up at, against a 1440 desktop. */</span>
+<span class="d-add">+const WIDTHS = [</span>
+<span class="d-add">+  { name: &quot;full&quot;, width: 1440 },</span>
+<span class="d-add">+  { name: &quot;half&quot;, width: 720 },</span>
+<span class="d-add">+  { name: &quot;a third&quot;, width: 480 },</span>
+<span class="d-add">+  { name: &quot;a quarter&quot;, width: 360 },</span>
+<span class="d-add">+];</span>
+<span class="d-add">+</span>
+<span class="d-add">+const anchor = (left: number, width: number, top = 12, height = 34): AnchorBox =&gt;</span>
+<span class="d-add">+  ({ left, width, top, height });</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Where the tip actually lands, in viewport coordinates. This is the number</span>
+<span class="d-add">+ *  the whole module exists to get right — everything else is bookkeeping. */</span>
+<span class="d-add">+function tipX(a: AnchorBox, box = BOX, vpWidth = 1440): number {</span>
+<span class="d-add">+  const p = placeCallout(a, box, { width: vpWidth, height: 900 });</span>
+<span class="d-add">+  return p.left + p.arrowLeft;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;the box stays on screen&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;centres under the anchor when there is room either side&quot;, () =&gt; {</span>
+<span class="d-add">+    const p = placeCallout(anchor(600, 200), BOX, { width: 1440, height: 900 });</span>
+<span class="d-add">+    expect(p.left).toBe(700 - BOX.width / 2);</span>
+<span class="d-add">+    expect(p.side).toBe(&quot;below&quot;);</span>
+<span class="d-add">+    expect(p.top).toBe(12 + 34 + 10);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;never runs off the right edge, however far right the anchor is&quot;, () =&gt; {</span>
+<span class="d-add">+    for (const { width } of WIDTHS) {</span>
+<span class="d-add">+      const max = calloutMaxWidth(width);</span>
+<span class="d-add">+      const box = { width: max, height: 84 };</span>
+<span class="d-add">+      // An anchor hard against the right edge — the cast pair&#x27;s real position.</span>
+<span class="d-add">+      const p = placeCallout(anchor(width - 90, 82), box, { width, height: 900 });</span>
+<span class="d-add">+      expect(p.left + box.width).toBeLessThanOrEqual(width - 8);</span>
+<span class="d-add">+      expect(p.left).toBeGreaterThanOrEqual(8);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;never runs off the left edge, however far left the anchor is&quot;, () =&gt; {</span>
+<span class="d-add">+    for (const { width } of WIDTHS) {</span>
+<span class="d-add">+      const max = calloutMaxWidth(width);</span>
+<span class="d-add">+      const box = { width: max, height: 84 };</span>
+<span class="d-add">+      const p = placeCallout(anchor(0, 60), box, { width, height: 900 });</span>
+<span class="d-add">+      expect(p.left).toBeGreaterThanOrEqual(8);</span>
+<span class="d-add">+      expect(p.left + box.width).toBeLessThanOrEqual(width - 8);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;stays on screen even when the box is wider than the viewport&quot;, () =&gt; {</span>
+<span class="d-add">+    // Not reachable through calloutMaxWidth, but a font-size change or a long</span>
+<span class="d-add">+    // unbreakable address could get there, and the clamp must not invert: an</span>
+<span class="d-add">+    // unguarded Math.min(Math.max(…)) with high &lt; low throws the box off the</span>
+<span class="d-add">+    // LEFT edge, where there is no scrollbar to reveal it.</span>
+<span class="d-add">+    const p = placeCallout(anchor(100, 60), { width: 500, height: 84 }, { width: 320, height: 900 });</span>
+<span class="d-add">+    expect(p.left).toBe(8);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;the tip stays on the control&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;points inside the anchor at every width, wherever the anchor sits&quot;, () =&gt; {</span>
+<span class="d-add">+    for (const { name, width } of WIDTHS) {</span>
+<span class="d-add">+      const box = { width: calloutMaxWidth(width), height: 84 };</span>
+<span class="d-add">+      const anchors = [</span>
+<span class="d-add">+        anchor(0, 60),                       // hard left</span>
+<span class="d-add">+        anchor(8, 220),                      // the legend plate, float chrome</span>
+<span class="d-add">+        anchor(Math.round(width / 2) - 40, 80),</span>
+<span class="d-add">+        anchor(width - 90, 82),              // the cast pair, hard right</span>
+<span class="d-add">+        anchor(width - 24, 24),              // a 24px control in the corner</span>
+<span class="d-add">+      ];</span>
+<span class="d-add">+      for (const a of anchors) {</span>
+<span class="d-add">+        const x = tipX(a, box, width);</span>
+<span class="d-add">+        expect(x, `${name} @ anchor.left=${a.left}`).toBeGreaterThanOrEqual(a.left);</span>
+<span class="d-add">+        expect(x, `${name} @ anchor.left=${a.left}`).toBeLessThanOrEqual(a.left + a.width);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps the tip off the box&#x27;s own corners&quot;, () =&gt; {</span>
+<span class="d-add">+    for (const { width } of WIDTHS) {</span>
+<span class="d-add">+      const box = { width: calloutMaxWidth(width), height: 84 };</span>
+<span class="d-add">+      for (const a of [anchor(0, 40), anchor(width - 40, 40)]) {</span>
+<span class="d-add">+        const p = placeCallout(a, box, { width, height: 900 });</span>
+<span class="d-add">+        expect(p.arrowLeft).toBeGreaterThanOrEqual(16);</span>
+<span class="d-add">+        expect(p.arrowLeft).toBeLessThanOrEqual(box.width - 16);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;slides the tip rather than the box once the box is clamped&quot;, () =&gt; {</span>
+<span class="d-add">+    // The failure this guards: centring the arrow on the BOX. Two anchors that</span>
+<span class="d-add">+    // both clamp the box to the same right edge must still get different tips.</span>
+<span class="d-add">+    const box = { width: 300, height: 84 };</span>
+<span class="d-add">+    const vp = { width: 480, height: 900 };</span>
+<span class="d-add">+    const a = placeCallout(anchor(400, 60), box, vp);</span>
+<span class="d-add">+    const b = placeCallout(anchor(340, 60), box, vp);</span>
+<span class="d-add">+    expect(a.left).toBe(b.left);</span>
+<span class="d-add">+    expect(a.arrowLeft).not.toBe(b.arrowLeft);</span>
+<span class="d-add">+    expect(a.arrowLeft).toBeGreaterThan(b.arrowLeft);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;which side the tip grows from&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;sits below the control by default — that is where the map is&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(placeCallout(anchor(600, 200), BOX, { width: 1440, height: 900 }).side)</span>
+<span class="d-add">+      .toBe(&quot;below&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;flips above when there is no room below and there is room above&quot;, () =&gt; {</span>
+<span class="d-add">+    // Short landscape: a 380px-tall viewport with the control near the bottom.</span>
+<span class="d-add">+    const p = placeCallout(anchor(600, 200, 260, 34), BOX, { width: 1440, height: 380 });</span>
+<span class="d-add">+    expect(p.side).toBe(&quot;above&quot;);</span>
+<span class="d-add">+    expect(p.top).toBe(260 - 10 - BOX.height);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;stays below when neither side fits, rather than covering the control&quot;, () =&gt; {</span>
+<span class="d-add">+    const p = placeCallout(anchor(600, 200, 4, 30), BOX, { width: 1440, height: 100 });</span>
+<span class="d-add">+    expect(p.side).toBe(&quot;below&quot;);</span>
+<span class="d-add">+    expect(p.top).toBeGreaterThanOrEqual(8);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;how wide the box may be&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;shrinks with the viewport and never fills it edge to edge&quot;, () =&gt; {</span>
+<span class="d-add">+    for (const { width } of WIDTHS) {</span>
+<span class="d-add">+      expect(calloutMaxWidth(width)).toBeLessThanOrEqual(width - 16);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;stops at a comfortable reading width on a wide screen&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(calloutMaxWidth(1440)).toBe(300);</span>
+<span class="d-add">+    expect(calloutMaxWidth(2560)).toBe(300);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps a floor, so a very narrow window gets a box rather than a sliver&quot;, () =&gt; {</span>
+<span class="d-add">+    expect(calloutMaxWidth(120)).toBe(160);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/onboarding/calloutPlacement.ts</span>
+            <span class="stat"><span class="d-add">+118</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run coach (geometry)</span>
+        <span class="ctx-sum">Pure functions deciding where the box goes and where its tip sits, given an anchor rect, the box size and the viewport</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">calloutPlacement.ts (new)</span>
+        <span class="ctx-sum">~120 LOC — the two-rules header, the constants, clamp, calloutMaxWidth, placeCallout</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header · the box is clamped, the tip is not</span><span class="ol-sum">NEW — and why splitting this out is what makes it testable</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">MARGIN / GAP / ARROW_INSET / PREFERRED_WIDTH</span><span class="ol-sum">NEW — 8 / 10 / 16 / 300</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">clamp()</span><span class="ol-sum">NEW — guards the inverted range</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">calloutMaxWidth()</span><span class="ol-sum">NEW — read before the box exists, applied as a CSS max-width</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">placeCallout()</span><span class="ol-sum">NEW — side, top, left, arrowLeft</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The header names the failure a naive version has: an arrow centred on the BOX, which at narrow widths points at whatever is beside the control</li><li>clamp() refuses the inverted range — a box wider than the viewport would otherwise be thrown off the LEFT edge, where nothing reveals it</li><li>The vertical flip prefers BELOW, because every anchor is in the top bar and below is where the map is; when neither side fits it stays below rather than covering the control</li><li>arrowLeft is measured from the box&#x27;s own left edge and clamped to the inset, so the tip slides while the box holds still</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/onboarding/calloutPlacement.ts b/client-react/src/onboarding/calloutPlacement.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..0e19913</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/onboarding/calloutPlacement.ts</span>
+<span class="d-hunk">@@ -0,0 +1,118 @@</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// Putting the callout somewhere it can actually point from</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// Pure geometry, separated from the component for one reason: the thing that</span>
+<span class="d-add">+// goes wrong with an anchored callout is never &quot;does it render&quot;, it is &quot;does it</span>
+<span class="d-add">+// still point at the right control at 380px&quot; — and that is a question about</span>
+<span class="d-add">+// four numbers, which a test can ask far more thoroughly than a person dragging</span>
+<span class="d-add">+// a window edge can.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// Two rules do all the work, and they pull against each other:</span>
+<span class="d-add">+//</span>
+<span class="d-add">+//   THE BOX STAYS ON SCREEN. It is clamped into the viewport with a margin. A</span>
+<span class="d-add">+//   callout that runs off the right edge is worse than one that is not centred,</span>
+<span class="d-add">+//   because half its sentence is gone.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+//   THE TIP STAYS ON THE CONTROL. So when the clamp moves the box, the arrow</span>
+<span class="d-add">+//   does NOT move with it — it slides along the box&#x27;s edge to stay over the</span>
+<span class="d-add">+//   anchor&#x27;s centre. This is the part a naive implementation gets wrong: it</span>
+<span class="d-add">+//   centres the arrow on the BOX, and then at narrow widths the arrow points</span>
+<span class="d-add">+//   confidently at whatever happens to be next to the control.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// The arrow keeps a minimum inset from the box&#x27;s corners, because a tip growing</span>
+<span class="d-add">+// out of a corner reads as a rendering fault rather than as a pointer. When the</span>
+<span class="d-add">+// anchor is so far into a corner that even the inset cannot reach it, the arrow</span>
+<span class="d-add">+// stops at the inset and the box is as close as it can get — the honest failure,</span>
+<span class="d-add">+// and the only one available once the box is against the viewport edge.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// Vertically it is a simple flip: below the anchor by default, above it when</span>
+<span class="d-add">+// there is no room below AND there is room above. Below is the default because</span>
+<span class="d-add">+// every anchor the coach uses is in the top bar, so below is where the map is.</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+</span>
+<span class="d-add">+import type { AnchorBox } from &quot;./coachAnchor&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+export interface Viewport {</span>
+<span class="d-add">+  width: number;</span>
+<span class="d-add">+  height: number;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+export interface CalloutSize {</span>
+<span class="d-add">+  width: number;</span>
+<span class="d-add">+  height: number;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+export interface CalloutPlacement {</span>
+<span class="d-add">+  /** Viewport coordinates for `position: fixed`. */</span>
+<span class="d-add">+  top: number;</span>
+<span class="d-add">+  left: number;</span>
+<span class="d-add">+  /** Which side of the box the tip grows out of. */</span>
+<span class="d-add">+  side: &quot;above&quot; | &quot;below&quot;;</span>
+<span class="d-add">+  /** The tip&#x27;s centre, in pixels from the box&#x27;s own left edge. */</span>
+<span class="d-add">+  arrowLeft: number;</span>
+<span class="d-add">+  /** What the box is allowed to be, before it is measured. */</span>
+<span class="d-add">+  maxWidth: number;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Clear of the viewport edge. */</span>
+<span class="d-add">+const MARGIN = 8;</span>
+<span class="d-add">+/** Between the anchor&#x27;s edge and the box — the tip lives in here. */</span>
+<span class="d-add">+const GAP = 10;</span>
+<span class="d-add">+/** How close the tip&#x27;s centre may get to a corner of the box. */</span>
+<span class="d-add">+const ARROW_INSET = 16;</span>
+<span class="d-add">+/** Wide enough for two lines of the ask at desktop type; narrower is fine. */</span>
+<span class="d-add">+const PREFERRED_WIDTH = 300;</span>
+<span class="d-add">+</span>
+<span class="d-add">+function clamp(value: number, low: number, high: number): number {</span>
+<span class="d-add">+  // Guard the inverted range: at a viewport narrower than the box, `high` lands</span>
+<span class="d-add">+  // below `low` and an unguarded clamp returns the larger of the two, throwing</span>
+<span class="d-add">+  // the box off the LEFT edge — the one place there is never a scrollbar to</span>
+<span class="d-add">+  // reveal it.</span>
+<span class="d-add">+  if (high &lt; low) return low;</span>
+<span class="d-add">+  return Math.min(Math.max(value, low), high);</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** The widest the box may be here. Read before the box exists, so it can be</span>
+<span class="d-add">+ *  applied as a CSS max-width and measured afterwards. */</span>
+<span class="d-add">+export function calloutMaxWidth(viewportWidth: number): number {</span>
+<span class="d-add">+  return Math.min(PREFERRED_WIDTH, Math.max(160, viewportWidth - MARGIN * 2));</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+export function placeCallout(</span>
+<span class="d-add">+  anchor: AnchorBox,</span>
+<span class="d-add">+  size: CalloutSize,</span>
+<span class="d-add">+  viewport: Viewport</span>
+<span class="d-add">+): CalloutPlacement {</span>
+<span class="d-add">+  const maxWidth = calloutMaxWidth(viewport.width);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const below = anchor.top + anchor.height + GAP;</span>
+<span class="d-add">+  const above = anchor.top - GAP - size.height;</span>
+<span class="d-add">+  const fitsBelow = below + size.height &lt;= viewport.height - MARGIN;</span>
+<span class="d-add">+  const fitsAbove = above &gt;= MARGIN;</span>
+<span class="d-add">+  // Below unless it does not fit and above does. When NEITHER fits — a control</span>
+<span class="d-add">+  // taller than the viewport minus the box, which short landscape can produce —</span>
+<span class="d-add">+  // stay below and let the clamp deal with it, because below is where the map</span>
+<span class="d-add">+  // is and an overlapping callout above the bar covers the control itself.</span>
+<span class="d-add">+  const side: &quot;above&quot; | &quot;below&quot; = !fitsBelow &amp;&amp; fitsAbove ? &quot;above&quot; : &quot;below&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const top = clamp(</span>
+<span class="d-add">+    side === &quot;below&quot; ? below : above,</span>
+<span class="d-add">+    MARGIN,</span>
+<span class="d-add">+    Math.max(MARGIN, viewport.height - size.height - MARGIN)</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const anchorCentre = anchor.left + anchor.width / 2;</span>
+<span class="d-add">+  const left = clamp(</span>
+<span class="d-add">+    anchorCentre - size.width / 2,</span>
+<span class="d-add">+    MARGIN,</span>
+<span class="d-add">+    viewport.width - size.width - MARGIN</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+</span>
+<span class="d-add">+  const arrowLeft = clamp(</span>
+<span class="d-add">+    anchorCentre - left,</span>
+<span class="d-add">+    ARROW_INSET,</span>
+<span class="d-add">+    Math.max(ARROW_INSET, size.width - ARROW_INSET)</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+</span>
+<span class="d-add">+  return { top, left, side, arrowLeft, maxWidth };</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/onboarding/coachAnchor.ts</span>
+            <span class="stat"><span class="d-add">+181</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run coach (anchoring)</span>
+        <span class="ctx-sum">Finds the piece of chrome a step is about, tracks its live rect, and reports when an address search is open</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">coachAnchor.ts (new)</span>
+        <span class="ctx-sum">~175 LOC — the why-nothing-is-a-constant header, the visibility test, the observer set</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header · two chrome modes, three grids, absent anchors</span><span class="ol-sum">NEW — why every hard-coded position would be wrong</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CoachTarget / AnchorBox / CoachAnchor</span><span class="ol-sum">NEW — and the long note on `typing`</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">liveRect()</span><span class="ol-sum">NEW — three ways to be missing: display:none, zero rect, visibility:hidden</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">same()</span><span class="ol-sum">NEW — whole-pixel comparison, so a repaint is not a move</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">useCoachAnchor()</span><span class="ol-sum">NEW — query, observe, coalesce, re-measure</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The header states the three reasons a constant cannot work here, including that the anchor is sometimes ABSENT and that absent is a first-class answer</li><li>`typing` carries the restraint rule: an address search is one intention with four steps in it, and the coach goes quiet for all of it</li><li>liveRect rejects visibility:hidden as well as display:none — `hidden-reserve` keeps its layout box, so a rect alone would say the cast pair is there when it is invisible</li><li>measure() re-attaches the ResizeObserver when the element IDENTITY changes: a field is a &lt;button&gt; at rest and a &lt;div&gt; while typing</li><li>schedule() coalesces on setTimeout, NOT requestAnimationFrame — the bug that produced this comment is named in place</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/onboarding/coachAnchor.ts b/client-react/src/onboarding/coachAnchor.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..26dcd30</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/onboarding/coachAnchor.ts</span>
+<span class="d-hunk">@@ -0,0 +1,181 @@</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// Where the coach points — measured, never guessed</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// The first-run coach used to be one strip at the bottom of the map saying</span>
+<span class="d-add">+// &quot;Tap the map where that stretch starts.&quot; A strip at the bottom of the screen</span>
+<span class="d-add">+// cannot point, so the sentence had to describe the control instead of</span>
+<span class="d-add">+// indicating it, and the control it described is at the TOP of the screen in a</span>
+<span class="d-add">+// bar the reader had not looked at yet. Now the coach is a callout hung off the</span>
+<span class="d-add">+// real element, with an arrow tip on it.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// That turns the whole problem into one question — WHERE IS THAT ELEMENT RIGHT</span>
+<span class="d-add">+// NOW — and this module is the answer. Nothing here is a constant, because</span>
+<span class="d-add">+// every constant would be wrong at some width:</span>
+<span class="d-add">+//</span>
+<span class="d-add">+//   · The chrome has TWO MODES. `data-chrome=&quot;float&quot;` (the default) lays the</span>
+<span class="d-add">+//     bar out as a 6-column grid of floating plates; `banner` is a stacked bar</span>
+<span class="d-add">+//     in normal flow. Start and End are in completely different places in the</span>
+<span class="d-add">+//     two, and the mode is chosen per device, not per breakpoint.</span>
+<span class="d-add">+//   · Inside float there are three grids — &gt;1080px, 580–1080px, and &lt;580px —</span>
+<span class="d-add">+//     and the Start/End plate moves grid area in each.</span>
+<span class="d-add">+//   · THE ANCHOR CAN BE ABSENT. `.topbar-legend` is `display: none` in short</span>
+<span class="d-add">+//     landscape, and the whole legend is never rendered at all on a point-only</span>
+<span class="d-add">+//     map (a station map, or a theme whose inputMode is &quot;point&quot;). The cast</span>
+<span class="d-add">+//     plate is `display: none` in float mode until a selection exists, and</span>
+<span class="d-add">+//     `visibility: hidden` (`hidden-reserve`) when a cast is not yet possible.</span>
+<span class="d-add">+//     A callout with an arrow tip pointing at nothing is worse than the strip</span>
+<span class="d-add">+//     it replaced, so &quot;absent&quot; is a first-class answer here and the caller</span>
+<span class="d-add">+//     falls back to the bottom strip when it comes back.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// So: ask the DOM, watch it, and re-ask on anything that could have moved it.</span>
+<span class="d-add">+// The observers are the same set `useLogoAnchor` settled on for the same reason</span>
+<span class="d-add">+// — resize, a ResizeObserver on the element, a MutationObserver over the whole</span>
+<span class="d-add">+// bar (class and attribute changes included, because that is how the fields</span>
+<span class="d-add">+// switch into their typing state), and `document.fonts.ready`, since the bar&#x27;s</span>
+<span class="d-add">+// own height changes when the mono face lands.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+// One extra fact this reports that the logo hook did not need: whether an</span>
+<span class="d-add">+// ADDRESS SEARCH IS OPEN in the legend. The flow has to stand down while</span>
+<span class="d-add">+// somebody is typing an address — see the note on `typing` below.</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+</span>
+<span class="d-add">+import { useEffect, useState } from &quot;react&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Which piece of chrome the coach is pointing at. Matches `data-coach` in</span>
+<span class="d-add">+ *  TopBar.tsx — the only coupling between this flow and the bar. */</span>
+<span class="d-add">+export type CoachTarget = &quot;start&quot; | &quot;end&quot; | &quot;cast&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+export interface AnchorBox {</span>
+<span class="d-add">+  top: number;</span>
+<span class="d-add">+  left: number;</span>
+<span class="d-add">+  width: number;</span>
+<span class="d-add">+  height: number;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+export interface CoachAnchor {</span>
+<span class="d-add">+  /** The element&#x27;s live viewport rect, or null when it is not on screen. */</span>
+<span class="d-add">+  box: AnchorBox | null;</span>
+<span class="d-add">+  /**</span>
+<span class="d-add">+   * An address search is open in the legend.</span>
+<span class="d-add">+   *</span>
+<span class="d-add">+   * This is the &quot;atomic&quot; case the coach must not interrupt: somebody clicks the</span>
+<span class="d-add">+   * Start field, types a street, waits for the geocoder, arrows down the list</span>
+<span class="d-add">+   * and presses Enter. That is one intention with four steps in it, and a</span>
+<span class="d-add">+   * callout with an arrow tip parked over the suggestion list — which opens</span>
+<span class="d-add">+   * from the same plate — is in the way of the very control it is pointing at.</span>
+<span class="d-add">+   * So the coach goes quiet for the whole of it and comes back on the other</span>
+<span class="d-add">+   * side, by which time the point has landed and the step has already moved on.</span>
+<span class="d-add">+   *</span>
+<span class="d-add">+   * Read from the DOM rather than from TopBar&#x27;s own `typingField` state on</span>
+<span class="d-add">+   * purpose: it is the same observer that is already watching the bar, it needs</span>
+<span class="d-add">+   * no prop drilled through a component another workstream is editing, and the</span>
+<span class="d-add">+   * class it keys on (`.legend-tool.typing`) is the one the float chrome&#x27;s own</span>
+<span class="d-add">+   * stacking rules key on too, so it cannot quietly stop meaning this.</span>
+<span class="d-add">+   */</span>
+<span class="d-add">+  typing: boolean;</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+const EMPTY: CoachAnchor = { box: null, typing: false };</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** On screen, taking up space, and actually painted. Three different ways to</span>
+<span class="d-add">+ *  be missing and all three are in play here: `display:none` (the legend in</span>
+<span class="d-add">+ *  short landscape, the cast plate before a selection), a zero rect, and</span>
+<span class="d-add">+ *  `visibility:hidden` (`hidden-reserve`, which keeps its layout box). */</span>
+<span class="d-add">+function liveRect(el: HTMLElement): AnchorBox | null {</span>
+<span class="d-add">+  if (el.offsetParent === null) return null;</span>
+<span class="d-add">+  if (getComputedStyle(el).visibility === &quot;hidden&quot;) return null;</span>
+<span class="d-add">+  const r = el.getBoundingClientRect();</span>
+<span class="d-add">+  if (r.width &lt;= 0 || r.height &lt;= 0) return null;</span>
+<span class="d-add">+  return { top: r.top, left: r.left, width: r.width, height: r.height };</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+function same(a: AnchorBox | null, b: AnchorBox | null): boolean {</span>
+<span class="d-add">+  if (a === b) return true;</span>
+<span class="d-add">+  if (!a || !b) return false;</span>
+<span class="d-add">+  // Sub-pixel jitter from a backdrop-filter repaint is not a move. Rounding to</span>
+<span class="d-add">+  // whole pixels keeps a resize from re-rendering the callout every frame.</span>
+<span class="d-add">+  return (</span>
+<span class="d-add">+    Math.round(a.top) === Math.round(b.top) &amp;&amp;</span>
+<span class="d-add">+    Math.round(a.left) === Math.round(b.left) &amp;&amp;</span>
+<span class="d-add">+    Math.round(a.width) === Math.round(b.width) &amp;&amp;</span>
+<span class="d-add">+    Math.round(a.height) === Math.round(b.height)</span>
+<span class="d-add">+  );</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+export function useCoachAnchor(target: CoachTarget | null): CoachAnchor {</span>
+<span class="d-add">+  const [anchor, setAnchor] = useState&lt;CoachAnchor&gt;(EMPTY);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  useEffect(() =&gt; {</span>
+<span class="d-add">+    if (!target) {</span>
+<span class="d-add">+      setAnchor(EMPTY);</span>
+<span class="d-add">+      return;</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+</span>
+<span class="d-add">+    let current: HTMLElement | null = null;</span>
+<span class="d-add">+    let ro: ResizeObserver | null = null;</span>
+<span class="d-add">+    let pending = 0;</span>
+<span class="d-add">+</span>
+<span class="d-add">+    const measure = () =&gt; {</span>
+<span class="d-add">+      const el = document.querySelector&lt;HTMLElement&gt;(`[data-coach=&quot;${target}&quot;]`);</span>
+<span class="d-add">+      // Both renderings of a field carry the attribute — the resting button and</span>
+<span class="d-add">+      // the typing div are different elements in the same slot — so the element</span>
+<span class="d-add">+      // itself is replaced, not just moved, every time somebody opens a search.</span>
+<span class="d-add">+      if (el !== current) {</span>
+<span class="d-add">+        current = el;</span>
+<span class="d-add">+        ro?.disconnect();</span>
+<span class="d-add">+        ro = null;</span>
+<span class="d-add">+        if (el) {</span>
+<span class="d-add">+          ro = new ResizeObserver(schedule);</span>
+<span class="d-add">+          ro.observe(el);</span>
+<span class="d-add">+        }</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+      const box = el ? liveRect(el) : null;</span>
+<span class="d-add">+      const typing = !!document.querySelector(&quot;.legend-tool.typing&quot;);</span>
+<span class="d-add">+      setAnchor((prev) =&gt;</span>
+<span class="d-add">+        same(prev.box, box) &amp;&amp; prev.typing === typing ? prev : { box, typing }</span>
+<span class="d-add">+      );</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+</span>
+<span class="d-add">+    // Coalesce: a single width change fires resize, the ResizeObserver and a</span>
+<span class="d-add">+    // pile of mutations, and each one would otherwise measure the same layout.</span>
+<span class="d-add">+    //</span>
+<span class="d-add">+    // A TIMEOUT, NOT requestAnimationFrame, and this is not a style choice. rAF</span>
+<span class="d-add">+    // does not run in a hidden or fully occluded window — Chrome stops the frame</span>
+<span class="d-add">+    // clock — so a coach coalesced on it freezes at whatever it last measured.</span>
+<span class="d-add">+    // The case that actually broke: the visitor clicks the Start field, the</span>
+<span class="d-add">+    // field swaps to its typing state, the MutationObserver fires, and the</span>
+<span class="d-add">+    // callback never runs, so the coach stays sitting over the suggestion list</span>
+<span class="d-add">+    // it is supposed to stand aside for. There is nothing to align to a frame</span>
+<span class="d-add">+    // here anyway — this reads layout and sets state, and the render that</span>
+<span class="d-add">+    // follows is React&#x27;s to schedule.</span>
+<span class="d-add">+    const schedule = () =&gt; {</span>
+<span class="d-add">+      if (pending) return;</span>
+<span class="d-add">+      pending = window.setTimeout(() =&gt; {</span>
+<span class="d-add">+        pending = 0;</span>
+<span class="d-add">+        measure();</span>
+<span class="d-add">+      }, 0);</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+</span>
+<span class="d-add">+    measure();</span>
+<span class="d-add">+    window.addEventListener(&quot;resize&quot;, schedule);</span>
+<span class="d-add">+    // The float chrome scrolls nothing, but the banner bar is in normal flow</span>
+<span class="d-add">+    // and a short viewport can put it under the fold.</span>
+<span class="d-add">+    window.addEventListener(&quot;scroll&quot;, schedule, true);</span>
+<span class="d-add">+    const mo = new MutationObserver(schedule);</span>
+<span class="d-add">+    const topbar = document.querySelector(&quot;.topbar&quot;);</span>
+<span class="d-add">+    if (topbar) {</span>
+<span class="d-add">+      mo.observe(topbar, { childList: true, subtree: true, attributes: true });</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    document.fonts?.ready.then(schedule).catch(() =&gt; {});</span>
+<span class="d-add">+</span>
+<span class="d-add">+    return () =&gt; {</span>
+<span class="d-add">+      window.removeEventListener(&quot;resize&quot;, schedule);</span>
+<span class="d-add">+      window.removeEventListener(&quot;scroll&quot;, schedule, true);</span>
+<span class="d-add">+      mo.disconnect();</span>
+<span class="d-add">+      ro?.disconnect();</span>
+<span class="d-add">+      if (pending) clearTimeout(pending);</span>
+<span class="d-add">+    };</span>
+<span class="d-add">+  }, [target]);</span>
+<span class="d-add">+</span>
+<span class="d-add">+  return anchor;</span>
+<span class="d-add">+}</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
