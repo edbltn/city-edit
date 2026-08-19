@@ -7,8 +7,10 @@ import {
   PROPOSAL_LABEL_FILTER,
   PROPOSAL_LABEL_TEXT_SIZE,
   PROPOSAL_MIN_LEAFLET_ZOOM,
-  PROPOSAL_PUCK_OFFSET,
+  PROPOSAL_PUCK_H,
+  PROPOSAL_PUCK_PADDING,
   PROPOSAL_PUCK_SIZE,
+  PROPOSAL_TEXT_PADDING,
   PROPOSAL_TEXT_MAX_WIDTH,
   PROPOSAL_TEXT_OFFSET_EM,
   pinTailBelowAnchorPx,
@@ -243,9 +245,34 @@ describe("the pin footprint", () => {
   // and these don't, the reserved hole stops matching the pin drawn over it.
   it("matches the divIcon geometry the Leaflet pin is drawn at", () => {
     expect([PIN_W, PIN_H]).toEqual([34, 42]);
-    // Bottom-anchored the puck covers y ∈ [−42, 0]; the pin, anchored at its
-    // tail tip (17, 36), covers [−36, +6]. The offset is the difference.
-    expect(PROPOSAL_PUCK_OFFSET).toEqual([0, 6]);
+    // Bottom-anchored on the tail tip, the puck covers y in [-37, 0]: the pin's
+    // INK (its square starts at y=3, its tip is the anchor at y=36, so 33 tall)
+    // grown by the 1.1 hover scale it pivots through. NOT the 42px element box,
+    // whose bottom 6px are empty — reserving those would eat the clearance the
+    // label has under its own pin, and this puck is placed before that label.
+    expect(PROPOSAL_PUCK_H).toBe(37);
+    expect(PROPOSAL_PUCK_H).toBeGreaterThanOrEqual((36 - 3) * 1.1);
+    expect(PROPOSAL_PUCK_H).toBeLessThan(PIN_H);
+  });
+
+  // The one that fails silently and catastrophically. The puck is placed in its
+  // own layer ABOVE the words, so it goes into the collision index first — and
+  // a symbol has no idea that the puck sitting on it belongs to the very
+  // proposal it is labelling. If the two boxes ever touch, EVERY proposal label
+  // stops drawing at that zoom, with nothing in the console to say why.
+  //
+  // Boxes, relative to the anchor (down is positive): the puck ends at 0 and is
+  // grown by its own padding; the text starts at text-offset (in ems of the
+  // type size, which rides its own zoom ramp) and is grown UPWARD by its
+  // padding. The gap between them is what this asserts.
+  it("leaves the label clear of its own puck, which is placed before it", () => {
+    const offsetEm = PROPOSAL_TEXT_OFFSET_EM[1];
+    for (let z = 11; z <= 20; z++) {
+      const size = rampAt(PROPOSAL_LABEL_TEXT_SIZE, z - 1);
+      const textBoxTop = offsetEm * size - PROPOSAL_TEXT_PADDING;
+      const puckBottom = PROPOSAL_PUCK_PADDING;
+      expect(textBoxTop - puckBottom).toBeGreaterThan(2);
+    }
   });
 
   // The label cannot win a z-fight with its own pin: the pins are Leaflet DOM

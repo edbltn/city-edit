@@ -30,14 +30,15 @@ import { registerPlaceIcons, placeIconExpression } from "./placeIcons";
 import { PLACE_LABEL_TEXT_SIZE } from "./placeLabelStyle";
 import {
   PIN_W,
-  PIN_H,
   PROPOSAL_LABEL_FILTER,
   PROPOSAL_LABEL_FONT,
   PROPOSAL_LABEL_TEXT_SIZE,
   PROPOSAL_MIN_LEAFLET_ZOOM,
+  PROPOSAL_PUCK_H,
   PROPOSAL_PUCK_IMAGE,
-  PROPOSAL_PUCK_OFFSET,
+  PROPOSAL_PUCK_PADDING,
   PROPOSAL_PUCK_SIZE,
+  PROPOSAL_TEXT_PADDING,
   PROPOSAL_TEXT_MAX_WIDTH,
   PROPOSAL_TEXT_OFFSET_EM,
   proposalTextField,
@@ -349,9 +350,11 @@ async function addPlaceLabels(map: maplibregl.Map, mapStyle: MapStyle): Promise<
   dlog("maplibre", "place labels added", url);
 }
 
-/** Source and layer ids for the proposal label layer. */
+/** Source and layer ids for the proposal label layers. One source, two layers:
+ *  the words, and above them the invisible pin footprints they have to dodge. */
 const PROPOSAL_SOURCE = "proposal-labels";
 const PROPOSAL_LAYER = "proposal-labels";
+const PROPOSAL_PUCK_LAYER = "proposal-pucks";
 
 /** An empty payload, so the layer can exist before GraphLayer has anything to
  *  say — the alternative is adding the layer late and having to re-establish
@@ -363,10 +366,10 @@ const EMPTY_PROPOSALS: GeoJSON.FeatureCollection = { type: "FeatureCollection", 
  *
  * The pins are Leaflet divIcons floating above the GL canvas, so MapLibre has
  * no idea they exist and will cheerfully place a deli's name straight through
- * one. This puts a PIN_W × PIN_H hole in the collision index at each proposal's
- * location: fully transparent pixels (a zeroed RGBA buffer — collision boxes
- * come from the image's dimensions, never its contents), positioned by
- * PROPOSAL_PUCK_OFFSET to coincide exactly with the pin drawn over it.
+ * one. This puts a PIN_W × PROPOSAL_PUCK_H hole in the collision index at each
+ * proposal's location: fully transparent pixels (a zeroed RGBA buffer —
+ * collision boxes come from the image's dimensions, never its contents),
+ * bottom-anchored on the tail tip so it covers exactly the pin's ink.
  *
  * It is registered at pixelRatio 1 rather than placeIcons' 2 because there is
  * nothing to keep crisp; the size is a footprint, not artwork.
@@ -375,7 +378,7 @@ function registerProposalPuck(map: maplibregl.Map): void {
   if (map.hasImage(PROPOSAL_PUCK_IMAGE)) return;
   map.addImage(
     PROPOSAL_PUCK_IMAGE,
-    { width: PIN_W, height: PIN_H, data: new Uint8Array(PIN_W * PIN_H * 4) },
+    { width: PIN_W, height: PROPOSAL_PUCK_H, data: new Uint8Array(PIN_W * PROPOSAL_PUCK_H * 4) },
     { pixelRatio: 1 },
   );
 }
@@ -396,6 +399,22 @@ function registerProposalPuck(map: maplibregl.Map): void {
  * the POI names move aside — including around the pucks, so a business name can
  * no longer land underneath a proposal pin, which it could before this layer
  * existed.
+ *
+ * WHY IT IS TWO LAYERS. The words and the pin footprints are placed in separate
+ * passes, footprints first, and that ordering is the entire point. Carried on
+ * ONE symbol, a pin's puck and its own words go into the collision index
+ * together, in rank order — so proposal #1's words are placed, and then
+ * proposal #2's puck lands on top of them, because a puck is
+ * `icon-allow-overlap` and cannot be asked to stand down (Leaflet is going to
+ * draw that pin regardless of what MapLibre decides). The result was a headline
+ * claim with its last word sitting under a neighbouring pin. Splitting the puck
+ * into its own layer ABOVE this one puts every pin — including the ones whose
+ * own labels the reveal schedule has not unlocked yet — into the index before
+ * the first word is placed, so a label that cannot clear the pins simply does
+ * not draw. Which is the trade: the fix cannot make the text paint OVER a pin
+ * (that needs one renderer, see the note on PROPOSAL_TEXT_OFFSET_EM), so it
+ * makes the text yield instead. Nothing legible is lost — the labels that stop
+ * drawing are exactly the ones that used to be drawn and then buried.
  *
  * WHY IT IS THE VIVID ONE. Place labels are pulled 58% toward grey (POI_MUTE)
  * to leave the proposals room to be the loudest thing on the map. Until now
@@ -427,15 +446,6 @@ function addProposalLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
     minzoom: PROPOSAL_MIN_LEAFLET_ZOOM - 1,
     filter: PROPOSAL_LABEL_FILTER,
     layout: {
-      // The invisible pin footprint. `icon-allow-overlap` keeps it from ever
-      // being suppressed — the Leaflet pin is drawn whatever MapLibre decides,
-      // so its footprint must always be reserved — while leaving
-      // `icon-ignore-placement` at false so everything else still avoids it.
-      "icon-image": PROPOSAL_PUCK_IMAGE,
-      "icon-size": PROPOSAL_PUCK_SIZE,
-      "icon-anchor": "bottom",
-      "icon-offset": PROPOSAL_PUCK_OFFSET,
-      "icon-allow-overlap": true,
       // Text hangs BELOW the tail tip, the one side of the anchor the pin does
       // not occupy. Deliberately a fixed anchor rather than
       // `text-variable-anchor`: letting labels hop around their pins to dodge
@@ -447,12 +457,6 @@ function addProposalLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
       // guarded across the zoom range — see PROPOSAL_TEXT_OFFSET_EM, which also
       // explains why this cannot be solved with a z-index.
       "text-offset": PROPOSAL_TEXT_OFFSET_EM,
-      // Without this, a label that cannot place takes the puck down with it and
-      // the pin loses its reserved footprint. With it, a crowded pin keeps its
-      // space and simply goes quiet — the same graceful degradation the place
-      // labels use, and the reason a dense downtown thins to pins rather than
-      // turning into a wall of type.
-      "text-optional": true,
       "text-field": proposalTextField(colors.count),
       "text-font": [PROPOSAL_LABEL_FONT],
       "text-size": PROPOSAL_LABEL_TEXT_SIZE,
@@ -462,12 +466,9 @@ function addProposalLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
       // is also the second half of the tier signal (place labels sit at 0.01).
       "text-letter-spacing": 0.05,
       "text-justify": "center",
-      // Tighter than the place labels' 6. Started at 8, on the reasoning that
-      // two labels close enough to read as one paragraph is worse than dropping
-      // one — but padding is charged on EVERY side of a three-line block, so 8
-      // was silencing neighbours that had real room between them. 4 still keeps
-      // a visible gutter and buys back the placements.
-      "text-padding": 4,
+      // Charged on every side, and the top side is the one that has to fit
+      // between the label and its own puck — see PROPOSAL_TEXT_PADDING.
+      "text-padding": PROPOSAL_TEXT_PADDING,
       // Lower sorts first and wins placement, and rank 0 is the strongest
       // proposal — so when two labels want the same space, the one with more
       // votes behind it takes it. Ties never happen: rank is a dense sequence.
@@ -489,7 +490,36 @@ function addProposalLabels(map: maplibregl.Map, mapStyle: MapStyle): void {
       "text-halo-blur": 0.2,
     },
   });
-  dlog("maplibre", "proposal labels added");
+
+  // The pin footprints — placed FIRST, because this layer is added last and
+  // placement runs top-down. Nothing is drawn: the image is transparent, and
+  // this layer exists only to occupy space in the collision index.
+  map.addLayer({
+    id: PROPOSAL_PUCK_LAYER,
+    type: "symbol",
+    source: PROPOSAL_SOURCE,
+    // No filter and no minzoom, on purpose. The reveal schedule decides which
+    // proposals get WORDS; every proposal gets a PIN at every zoom, and it is
+    // the pin — not the label — whose footprint has to be reserved. Filtering
+    // this layer the way the label layer is filtered would leave the wide zooms
+    // (where the schedule holds most labels back, and where the pins crowd
+    // hardest) reserving almost nothing.
+    layout: {
+      "icon-image": PROPOSAL_PUCK_IMAGE,
+      "icon-size": PROPOSAL_PUCK_SIZE,
+      // Bottom-anchored on the tail tip, which is the feature's own coordinate:
+      // the puck rises from the location the way the pin does.
+      "icon-anchor": "bottom",
+      // `icon-allow-overlap` keeps a puck from ever being suppressed — the
+      // Leaflet pin is drawn whatever MapLibre decides, so its footprint must
+      // always be reserved, including where pins overlap each other — while
+      // leaving `icon-ignore-placement` at its default false, which is what
+      // puts the puck INTO the index for everything below to avoid.
+      "icon-allow-overlap": true,
+      "icon-padding": PROPOSAL_PUCK_PADDING,
+    },
+  });
+  dlog("maplibre", "proposal labels added (words + pucks)");
 }
 
 function buildStyle(

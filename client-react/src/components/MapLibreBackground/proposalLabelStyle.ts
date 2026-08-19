@@ -20,36 +20,69 @@ export const PROPOSAL_LABEL_FONT = "Red Hat Mono Regular";
 
 // ── The pin footprint ───────────────────────────────────────────────────────
 // The proposal pin is a Leaflet divIcon, drawn in the OTHER renderer, on top of
-// the GL canvas. MapLibre cannot see it, so it would happily place a POI name
-// straight through one. These are voteTypeIcon.ts's SVG_W / SVG_H / TIP: a
-// 34×42 pin whose tail tip — the anchor, the point that sits on the location —
-// is at (17, 36). Relative to that anchor the pin body occupies y ∈ [−36, +6].
-// A transparent image of this size registered on the symbol keeps the pin's
-// footprint in MapLibre's collision index; see PROPOSAL_PUCK_OFFSET.
+// the GL canvas. MapLibre cannot see it, so it would happily place a POI name —
+// or another proposal's own words — straight through one. These are
+// voteTypeIcon.ts's SVG_W / SVG_H / TIP: a 34×42 element whose tail tip — the
+// anchor, the point that sits on the location — is at (17, 36). A transparent
+// image registered on the symbol keeps that footprint in MapLibre's collision
+// index; the `proposal-pucks` layer is what places it (see addProposalLabels).
 export const PIN_W = 34;
 export const PIN_H = 42;
 const PIN_TIP_Y = 36;
+/** Top edge of the pin's INK — voteTypeIcon.ts draws its square from y=3. */
+const PIN_INK_TOP_Y = 3;
 
-/** Bottom-anchored, the puck covers y ∈ [−42, 0]; the pin covers [−36, +6].
- *  Shift it down by the difference so the two coincide exactly. */
-export const PROPOSAL_PUCK_OFFSET: [number, number] = [0, PIN_H - PIN_TIP_Y];
+/** The 1.1x the pin grows on hover and when selected. It pivots on the tail tip
+ *  (`transform-origin: 17px 36px`), so the element's empty tail grows DOWN,
+ *  into the label, while the ink can only grow UP. */
+const PIN_HOVER_SCALE = 1.1;
+
+/**
+ * Height of the reserved footprint — the pin's INK, not its element box.
+ *
+ * The two differ, and the difference is what makes the collision reservation
+ * safe to place before the text instead of alongside it. The element is 42px
+ * tall anchored 36 down, so its box runs y ∈ [−36, +6]; but the shape inside it
+ * runs from y=3 to the tail tip at y=36, i.e. y ∈ [−33, 0] — the bottom 6px are
+ * empty, and nothing is ever drawn below the anchor. Reserving the empty strip
+ * cost the label 6px of the ~7px of clearance it has under its own pin, which
+ * is fine while the puck rides along with the text in one symbol (a symbol
+ * never collides with itself) and fatal the moment the puck is placed first, in
+ * its own layer, where it CAN suppress its own label.
+ *
+ * Hovered, the ink scales about the tip: 33 × 1.1 = 36.3 above the anchor, so
+ * 37 covers a hovered pin and still stops exactly at the anchor.
+ */
+export const PROPOSAL_PUCK_H = Math.ceil((PIN_TIP_Y - PIN_INK_TOP_Y) * PIN_HOVER_SCALE);
+
+/** Collision padding on the puck. Zero, deliberately: MapLibre's default of 2
+ *  would push the reserved box 2px BELOW the anchor — back into the strip the
+ *  label needs — for no gain, since the box is already 3px larger than the ink
+ *  it stands in for. Every pixel here is spent twice, once against neighbouring
+ *  labels and once against the label directly underneath. */
+export const PROPOSAL_PUCK_PADDING = 0;
+
+/** Collision padding around the label text. Tighter than the place labels' 6:
+ *  padding is charged on EVERY side of a three-line block, and at 8 it was
+ *  silencing neighbours with real room between them. Named here because the
+ *  clearance under the pin is measured against it. */
+export const PROPOSAL_TEXT_PADDING = 4;
 
 /** How far the pin's tail hangs BELOW its anchor, before scaling. */
 const PIN_TAIL_BELOW_ANCHOR = PIN_H - PIN_TIP_Y;
-/** The 1.1x the pin grows on hover and when selected. It pivots on the tail tip
- *  (`transform-origin: 17px 36px`), so the tail grows DOWN, into the label. */
-const PIN_HOVER_SCALE = 1.1;
 
 /**
  * Clearance between the pin's tail and the top of the label, in ems of the text
  * size (`text-offset`, paired with `text-anchor: "top"`).
  *
- * This is the ONLY defence the label has against being covered by its pin, and
- * it cannot be replaced by a z-index. The pins are Leaflet DOM in a pane above
- * the entire GL canvas — MapLibreBackground renders as a sibling before
- * MapContainer at `zIndex: 0` — so a pin always paints over GL text no matter
- * how the style is ordered. (Inside GL the text is already in front of every
- * icon: `proposal-labels` is the topmost symbol layer.)
+ * This is the ONLY defence the label has against its OWN pin, and it cannot be
+ * replaced by a z-index. The pins are Leaflet DOM in a pane above the entire GL
+ * canvas — MapLibreBackground renders as a sibling before MapContainer at
+ * `zIndex: 0` — so a pin always paints over GL text no matter how the style is
+ * ordered. Against every OTHER pin the defence is collision, not clearance: the
+ * `proposal-pucks` layer reserves all of them before a single word is placed,
+ * so a label that would land under a neighbour's pin now stands down instead of
+ * being drawn and then buried.
  *
  * It started at 0.55em, which was flush and therefore wrong — ~6px at the mid
  * zooms against a tail that hangs exactly 6px, so the first line of text began
