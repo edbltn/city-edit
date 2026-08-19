@@ -99,12 +99,12 @@
 
   <nav class="toc"><a href="#voice">A vote type is a need, not a shift somebody signs up for</a>
 <a href="#suppress">The mark goes down on a decision, not on a sighting</a>
-<a href="#vocab">Ten vote types leave nyc-tactical</a>
+<a href="#vocab">Twelve vote types leave nyc-tactical</a>
 <a href="#copy">The arrow, everywhere it was visible</a>
     <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
   </nav>
 
-  <p class="lede">Three notes from the owner on the first-run wall, and one of them reverses a decision this flow was built around. The tiles stop translating a vote type into a job the reader would do and name the NEED instead — &quot;This unused patch of land needs flowers…&quot;, not &quot;I&#39;d put flowers where this bed is bare dirt…&quot; — across nyc-tactical and four other maps&#39; walls. The local &quot;don&#39;t ask again&quot; mark stops being written when the wall APPEARS and waits for the visitor to decide: a first vote, or &quot;just take me to the map&quot;. Ten vote types leave nyc-tactical&#39;s vocabulary with their tiles; none of them carried a single vote, here or in prod, and <strong>prod is untouched pending sign-off</strong>.</p>
+  <p class="lede">Three notes from the owner on the first-run wall, and one of them reverses a decision this flow was built around. The tiles stop translating a vote type into a job the reader would do and name the NEED instead — &quot;This unused patch of land needs flowers…&quot;, not &quot;I&#39;d put flowers where this bed is bare dirt…&quot; — across nyc-tactical and four other maps&#39; walls. The local &quot;don&#39;t ask again&quot; mark stops being written when the wall APPEARS and waits for the visitor to decide: a first vote, or &quot;just take me to the map&quot;. Twelve vote types leave nyc-tactical&#39;s vocabulary with their tiles — <strong>25 → 13</strong> — including a redundant second flower slip and an invitation to open a fire hydrant; none of them carried a single vote, here or in prod, and <strong>prod is untouched pending sign-off</strong>.</p>
 
   
     <section class="card" id="voice">
@@ -117,10 +117,12 @@
 <li>The derived tier had the same shape hard-coded for the volunteering verbs: <code>run / organize / chalk / adopt / clear / sweep / shovel / water / repaint</code> all produced <code>I could &lt;do it&gt; here…</code>, so every custom map inherited the defect too</li></ul>
       <h3>What changed</h3>
       <ul><li>The rule is inverted and stated first in the file: <strong>a need, never an offer of labour</strong>. &quot;This unused patch of land needs flowers…&quot; is the same vote type, the same cast, and a sentence somebody actually thinks. Anything shaped <code>I&#39;d &lt;verb&gt;…</code> is now named in the header as the smell to check before adding a line</li>
-<li>First person is demoted to a preference: personal where the need is personal (&quot;My street is too hard to cross…&quot;), plain statement where the need belongs to the street (&quot;Cars drive too fast here…&quot;). <strong>11 nyc-tactical tiles</strong> rewritten to the owner&#39;s own copy</li>
+<li>First person is demoted to a preference: personal where the need is personal (&quot;My street is too hard to cross…&quot;), plain statement where the need belongs to the street (&quot;Cars drive too fast here…&quot;). <strong>13 nyc-tactical tiles</strong> rewritten to the owner&#39;s own copy over two passes</li>
 <li>The same sweep applied to the other maps&#39; walls: <strong>10 further labels</strong> — <code>Add tree</code>, <code>Plant trees</code>, <code>Create a tree pit</code>, <code>Create a community garden</code>, <code>Street redesign</code>, <code>Improve school crossing</code>, <code>Water the street trees along here</code>, <code>Weed and mulch this median</code>, <code>Add greenway connection</code>, <code>Highway</code></li>
 <li>The derived branch says <code>Somebody needs to &lt;x&gt; here…</code> instead of <code>I could &lt;x&gt; here…</code>, so a map authored after this file obeys the rule without anybody writing a line for it</li>
-<li><code>I&#39;d ride this route if it had a lane…</code> and <code>I&#39;d walk this whole way under trees…</code> are deliberately LEFT: using the thing being asked for is a need, not labour. The test below draws that line explicitly rather than banning the <code>I&#39;d</code> opening wholesale</li></ul>
+<li><code>I&#39;d ride this route if it had a lane…</code> and <code>I&#39;d walk this whole way under trees…</code> are deliberately LEFT: using the thing being asked for is a need, not labour. The test below draws that line explicitly rather than banning the <code>I&#39;d</code> opening wholesale</li>
+<li>The ellipsis rule survived a round trip and came back ABSOLUTE. Two of the owner&#39;s first-pass lines stopped bare, so the test was relaxed to allow a complete thought to end without one — and the next pass put the ellipsis back on both. A mixed wall reads as a rendering bug, so <strong>every line ends in … without exception</strong>, and the test says so again</li>
+<li>Second-pass copy: the Little Free Library slip names the NEED rather than the fixture that meets it (&quot;This community needs better access to books…&quot;), and the litter pickup becomes &quot;Garbage is piling up at this spot…&quot; — which also separates it cleanly from the route-kind litter slip covering a whole stretch</li></ul>
       <h3>Files touched</h3>
       <ul class="files"><li>client-react/src/onboarding/phrasebook.ts</li>
 <li>client-react/src/onboarding/phrasebook.test.ts</li></ul>
@@ -150,17 +152,19 @@
 
     <section class="card" id="vocab">
       <div class="tag">VOCABULARY</div>
-      <h2>Ten vote types leave nyc-tactical</h2>
+      <h2>Twelve vote types leave nyc-tactical</h2>
       <h3>Symptom</h3>
-      <p>The wall carried tiles for a snow-only observation, three that recruit other people&#39;s children, a family of group rides / runs / tours, a community fridge and a snowbank crossing.</p>
+      <p>The wall carried tiles for a snow-only observation, three that recruit other people&#39;s children, a family of group rides / runs / tours, a community fridge, a snowbank crossing, a second flower slip nobody could choose between, and an invitation to open a fire hydrant.</p>
       <h3>Root cause</h3>
       <ul><li>The wall is built from the map&#39;s REAL vote types (<code>tiles.ts</code> reads <code>/api/maps/&lt;slug&gt;</code>), so a tile cannot be removed without removing the type — which is the correct coupling: a slip that cannot cast is worse than no slip</li>
 <li>Seasonal types (<code>Chalk the sneckdown outline</code>, <code>Shovel out this crossing</code>) read as broken for the nine months they do not apply</li></ul>
       <h3>What changed</h3>
-      <ul><li>Removed locally with <code>server/manage_vote_types.py remove</code> — the CLI, not raw SQL, so the read-back check runs and the target database is printed on every call: <strong>25 → 15 types</strong></li>
-<li>The 11 phrasebook entries for the retired labels are deleted outright rather than left orphaned</li>
-<li><strong>Nothing was destroyed.</strong> All ten carry ZERO votes, in local and in prod alike — so no <code>rebuild_redis_for_map</code> pass was needed and no vote data was at risk. The count is in the sign-off table below because the owner asked to see it before agreeing, not because it turned out to be non-zero</li>
-<li><strong>Prod is untouched</strong>, per the brief. Eight of the ten are already absent there (the 2026-08-14 24→18 trim took them); the two prod still authors are <code>Host a community fridge</code> and <code>Shovel out this crossing</code></li></ul>
+      <ul><li>Removed locally with <code>server/manage_vote_types.py remove</code> — the CLI, not raw SQL, so the read-back check runs and the target database is printed on every call: <strong>25 → 13 types</strong> across the two passes</li>
+<li>First pass, ten: the sneckdown one (not relevant all year), the three that recruit other people&#39;s children, the group ride / run / tour / commuter-train family, the community fridge, and the snowbank crossing</li>
+<li>Second pass, two more: <code>Plant a pollinator bed</code> was redundant against <code>Flower-bomb this tree bed</code> — two flower slips on one wall is a choice nobody can make meaningfully — and <code>Get a hydrant spray cap</code> is out because opening a hydrant is not something this app should invite anyone to do</li>
+<li>Their phrasebook entries are deleted outright rather than left orphaned. That matters more than it looks: deleting the SENTENCE for a label a map still authors does not remove the tile, it silently downgrades it to a derived line — the pollinator slip reappeared as &quot;I&#39;d love to see a pollinator bed on this spot…&quot; in the 30–60s window before the map-config cache expired. The vote type is what removes a tile</li>
+<li><strong>Nothing was destroyed.</strong> All twelve carry ZERO votes, in local and in prod alike — so no <code>rebuild_redis_for_map</code> pass was needed and no vote data was at risk. The count is in the sign-off table because the owner asked to see it before agreeing, not because it turned out to be non-zero</li>
+<li><strong>Prod is untouched</strong>, per the brief. Eight of the twelve are already absent there (the 2026-08-14 24→18 trim took them); the four prod still authors are <code>Host a community fridge</code>, <code>Shovel out this crossing</code>, <code>Plant a pollinator bed</code> and <code>Get a hydrant spray cap</code></li></ul>
       <h3>Files touched</h3>
       <ul class="files"><li>client-react/src/onboarding/phrasebook.ts</li>
 <li>(local DB) maps.custom_vote_types for nyc-tactical</li></ul>
@@ -189,7 +193,7 @@
     <div class="tag">Verification</div>
     <h2>What was run</h2>
     <ul><li><code>npx vitest run</code> — <strong>662 passed, 1 skipped, 40 files</strong>. <code>npx tsc -b</code> clean (Vite dev never type-checks, so this is the pre-flight that matters).</li>
-<li>The wall on <code>localhost:3000/m/nyc-tactical</code>, reset with the owner&#39;s three storage lines, renders <strong>15 tiles</strong>: the 11 rewrites plus the 4 the owner marked good, in the order the brief listed them. No arrow; the footer reads &quot;or just take me to the map&quot;.</li>
+<li>The wall on <code>localhost:3000/m/nyc-tactical</code>, reset with the owner&#39;s three storage lines, renders <strong>13 tiles</strong>, every one ending in an ellipsis (asserted in the page, not by eye). No arrow; the footer reads &quot;or just take me to the map&quot;.</li>
 <li>With the wall on screen and nothing chosen: <code>localStorage[&quot;cityedit.onboarded&quot;]</code> is <strong>null</strong>. It was &quot;1&quot; at this point before.</li>
 <li>Reloaded on the bare wall → the wall came back, still unsuppressed. Picked &quot;A tree bed near me needs love…&quot;, reloaded again → <strong>the coach resumed at the start step with that sentence, no wall</strong>.</li>
 <li>Clicked &quot;or just take me to the map&quot; → local and session marks both flip to &quot;1&quot; and the wall closes.</li>
@@ -200,12 +204,12 @@
   <section class="card checklist" id="checklist">
     <div class="tag">For you</div>
     <h2>Manual checklist</h2>
-    <ul><li>Reset with the three storage lines and open <code>http://localhost:3000/m/nyc-tactical?tab=onboard</code> — read the 15 tiles and confirm none of them sounds like an offer to do a job.</li>
+    <ul><li>Reset with the three storage lines and open <code>http://localhost:3000/m/nyc-tactical?tab=onboard</code> — read the 13 tiles and confirm none of them sounds like an offer to do a job, and that every one trails off in an ellipsis.</li>
 <li>Reload while the wall is up: it should come back. Then pick a tile and reload again: you should land back in the coach mid-flow, NOT on the wall.</li>
 <li>Click &quot;or just take me to the map&quot;, then reload: no wall. That is the mark being written on the decision.</li>
 <li>Open How it Works → &quot;Not sure where to start?&quot; and confirm the button reads &quot;What needs fixing?&quot; with no arrow — and that pressing it reopens the wall.</li>
 <li>Open <code>/m/nyc-trees</code> and <code>/m/sac-proposals</code> walls and check the generalized rewrites read as needs (&quot;This corner needs a tree…&quot;, &quot;This whole junction needs starting over…&quot;).</li>
-<li>Read the prod sign-off table in the chat and say yes or no to the two prod vote types. Nothing has been written to prod.</li></ul>
+<li>Read the prod sign-off table in the chat and say yes or no to the FOUR vote types prod still authors. Nothing has been written to prod.</li></ul>
   </section>
 
   <section id="diff">
@@ -496,7 +500,7 @@
         
         <details>
           <summary><span class="fname">client-react/src/onboarding/phrasebook.test.ts</span>
-            <span class="stat"><span class="d-add">+26</span> / <span class="d-del">-9</span></span>
+            <span class="stat"><span class="d-add">+23</span> / <span class="d-del">-7</span></span>
           </summary>
           
     <div class="ctx">
@@ -517,33 +521,29 @@
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
-        <ul class="ctx-outline"><li class="dim"><span class="ol-label">PRESET_LABELS</span><span class="ol-sum">unchanged — the union of the three shipped vote sets</span></li><li class="dim"><span class="ol-label">describe(coverage)</span><span class="ol-sum">unchanged — still passes: no preset lost its curated line</span></li><li class="changed"><span class="ol-label">it(leaves every sentence unfinished)</span><span class="ol-sum">REPLACED by &amp;quot;leaves every sentence open&amp;quot; — bans a terminal . ! ?</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">it(keeps every sentence short)</span><span class="ol-sum">unchanged — 78-character cap</span></li><li class="changed"><span class="ol-label">it(speaks in the first person)</span><span class="ol-sum">REPLACED by two tests: never volunteers, never second person</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">it(never speaks in the imperative)</span><span class="ol-sum">unchanged — no sentence opens with the label&amp;#39;s own verb</span></li><li class="changed"><span class="ol-label">describe(derivation)</span><span class="ol-sum">the volunteering case now expects a need</span><span class="ol-tag">changed</span></li></ul>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">PRESET_LABELS</span><span class="ol-sum">unchanged — the union of the three shipped vote sets</span></li><li class="dim"><span class="ol-label">describe(coverage)</span><span class="ol-sum">unchanged — still passes: no preset lost its curated line</span></li><li class="changed"><span class="ol-label">it(leaves every sentence unfinished)</span><span class="ol-sum">relaxed, then restored — still requires a trailing … on every line</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">it(keeps every sentence short)</span><span class="ol-sum">unchanged — 78-character cap</span></li><li class="changed"><span class="ol-label">it(speaks in the first person)</span><span class="ol-sum">REPLACED by two tests: never volunteers, never second person</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">it(never speaks in the imperative)</span><span class="ol-sum">unchanged — no sentence opens with the label&amp;#39;s own verb</span></li><li class="changed"><span class="ol-label">describe(derivation)</span><span class="ol-sum">the volunteering case now expects a need</span><span class="ol-tag">changed</span></li></ul>
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">Changed blocks (top → bottom)</div>
-        <ol class="ctx-blocks"><li>&amp;quot;leaves every sentence open&amp;quot;: /[.!?]$/ must not match — the trailing … is the norm but two of the owner&amp;#39;s lines are complete thoughts and stop bare</li><li>&amp;quot;never volunteers the reader for a job&amp;quot;: bans an I&amp;#39;d/I would/I could/I can opening followed by a LABOUR verb (chalk, paint, plant, water, weed, shovel, adopt, install, host, run, lead, …)</li><li>The same regex deliberately omits ride and walk, so &amp;quot;I&amp;#39;d ride this route if it had a lane…&amp;quot; survives — using the thing asked for is a need</li><li>&amp;quot;never speaks to the reader about their own street&amp;quot;: the you/your half of the old first-person test, kept as its own case</li><li>The derivation expectation moves from &amp;quot;I could run a paint day here…&amp;quot; to &amp;quot;Somebody needs to run a paint day here…&amp;quot;</li></ol>
+        <ol class="ctx-blocks"><li>&amp;quot;leaves every sentence unfinished&amp;quot;: endsWith(…) on every line. It was briefly widened to merely ban a terminal full stop, for two first-pass lines that stopped bare; both got their ellipsis in the second pass and the assertion went back</li><li>&amp;quot;never volunteers the reader for a job&amp;quot;: bans an I&amp;#39;d/I would/I could/I can opening followed by a LABOUR verb (chalk, paint, plant, water, weed, shovel, adopt, install, host, run, lead, …)</li><li>The same regex deliberately omits ride and walk, so &amp;quot;I&amp;#39;d ride this route if it had a lane…&amp;quot; survives — using the thing asked for is a need</li><li>&amp;quot;never speaks to the reader about their own street&amp;quot;: the you/your half of the old first-person test, kept as its own case</li><li>The derivation expectation moves from &amp;quot;I could run a paint day here…&amp;quot; to &amp;quot;Somebody needs to run a paint day here…&amp;quot;</li></ol>
       </div>
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/onboarding/phrasebook.test.ts b/client-react/src/onboarding/phrasebook.test.ts</span>
-<span class="d-meta">index 31e3042..ac30fbd 100644</span>
+<span class="d-meta">index 31e3042..2047f2f 100644</span>
 <span class="d-meta">--- a/client-react/src/onboarding/phrasebook.test.ts</span>
 <span class="d-meta">+++ b/client-react/src/onboarding/phrasebook.test.ts</span>
-<span class="d-hunk">@@ -23,20 +23,34 @@ describe(&quot;coverage&quot;, () =&gt; {</span>
-<span class="d-ctx"> describe(&quot;the voice&quot;, () =&gt; {</span>
+<span class="d-hunk">@@ -24,6 +24,9 @@ describe(&quot;the voice&quot;, () =&gt; {</span>
 <span class="d-ctx">   const all = Object.values(CURATED);</span>
 <span class="d-ctx"> </span>
-<span class="d-del">-  it(&quot;leaves every sentence unfinished&quot;, () =&gt; {</span>
-<span class="d-del">-    expect(all.filter((s) =&gt; !s.endsWith(&quot;…&quot;))).toEqual([]);</span>
-<span class="d-add">+  it(&quot;leaves every sentence open&quot;, () =&gt; {</span>
-<span class="d-add">+    // Usually a trailing &quot;…&quot;, finished by pointing at the map. A line that is</span>
-<span class="d-add">+    // already a whole thought (&quot;There is too much litter in this area&quot;) may stop</span>
-<span class="d-add">+    // without one — but nothing closes with a full stop, which is the shape of a</span>
-<span class="d-add">+    // caption rather than something somebody said.</span>
-<span class="d-add">+    expect(all.filter((s) =&gt; /[.!?]$/.test(s))).toEqual([]);</span>
+<span class="d-ctx">   it(&quot;leaves every sentence unfinished&quot;, () =&gt; {</span>
+<span class="d-add">+    // The sentence is finished by pointing at the map, so it stops on an</span>
+<span class="d-add">+    // ellipsis rather than a full stop — every line, without exception. A mixed</span>
+<span class="d-add">+    // wall reads as a rendering bug.</span>
+<span class="d-ctx">     expect(all.filter((s) =&gt; !s.endsWith(&quot;…&quot;))).toEqual([]);</span>
 <span class="d-ctx">   });</span>
 <span class="d-ctx"> </span>
-<span class="d-ctx">   it(&quot;keeps every sentence short enough for a phone&quot;, () =&gt; {</span>
+<span class="d-hunk">@@ -31,12 +34,22 @@ describe(&quot;the voice&quot;, () =&gt; {</span>
 <span class="d-ctx">     expect(all.filter((s) =&gt; s.length &gt; 78)).toEqual([]);</span>
 <span class="d-ctx">   });</span>
 <span class="d-ctx"> </span>
@@ -571,7 +571,7 @@
 <span class="d-ctx">   });</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx">   it(&quot;never speaks in the imperative of a work order&quot;, () =&gt; {</span>
-<span class="d-hunk">@@ -61,8 +75,11 @@ describe(&quot;derivation, for labels written after this file&quot;, () =&gt; {</span>
+<span class="d-hunk">@@ -61,8 +74,11 @@ describe(&quot;derivation, for labels written after this file&quot;, () =&gt; {</span>
 <span class="d-ctx">       .toBe(&quot;I&#x27;ve been waiting for someone to fix the drainage grate here…&quot;);</span>
 <span class="d-ctx">   });</span>
 <span class="d-ctx"> </span>
@@ -589,7 +589,7 @@
         
         <details>
           <summary><span class="fname">client-react/src/onboarding/phrasebook.ts</span>
-            <span class="stat"><span class="d-add">+45</span> / <span class="d-del">-37</span></span>
+            <span class="stat"><span class="d-add">+42</span> / <span class="d-del">-37</span></span>
           </summary>
           
     <div class="ctx">
@@ -610,19 +610,19 @@
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
-        <ul class="ctx-outline"><li class="dim"><span class="ol-label">header · two tiers, no third</span><span class="ol-sum">unchanged — why every slip must name a real vote type</span></li><li class="changed"><span class="ol-label">header · rules of the voice</span><span class="ol-sum">REWRITTEN — need-not-offer is now rule one; first person demoted to a preference; the ellipsis relaxed</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Walking / Danger / Cycling / Transit</span><span class="ol-sum">1 line — Street redesign</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Access</span><span class="ol-sum">1 line — Improve school crossing</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Green</span><span class="ol-sum">4 lines — Add tree, Plant trees, Create a tree pit, Create a community garden</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Public space</span><span class="ol-sum">1 line — Add greenway connection</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Tactical</span><span class="ol-sum">11 rewritten, 10 DELETED, 2 more rewritten (water trees, weed median)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · odds and ends</span><span class="ol-sum">1 line — Highway</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">withArticle / stripPlaceTail</span><span class="ol-sum">unchanged — grammar helpers for the derived tier</span></li><li class="changed"><span class="ol-label">derive()</span><span class="ol-sum">the volunteering-verb branch — &amp;quot;I could …&amp;quot; becomes &amp;quot;Somebody needs to …&amp;quot;</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">openerFor / isCurated</span><span class="ol-sum">unchanged — curated first, derived otherwise</span></li></ul>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">header · two tiers, no third</span><span class="ol-sum">unchanged — why every slip must name a real vote type</span></li><li class="changed"><span class="ol-label">header · rules of the voice</span><span class="ol-sum">REWRITTEN — need-not-offer is now rule one; first person demoted to a preference; the ellipsis absolute</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Walking / Danger / Cycling / Transit</span><span class="ol-sum">1 line — Street redesign</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Access</span><span class="ol-sum">1 line — Improve school crossing</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Green</span><span class="ol-sum">4 lines — Add tree, Plant trees, Create a tree pit, Create a community garden</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Public space</span><span class="ol-sum">1 line — Add greenway connection</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Tactical</span><span class="ol-sum">13 rewritten, 12 DELETED, 2 more rewritten (water trees, weed median)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · odds and ends</span><span class="ol-sum">1 line — Highway</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">withArticle / stripPlaceTail</span><span class="ol-sum">unchanged — grammar helpers for the derived tier</span></li><li class="changed"><span class="ol-label">derive()</span><span class="ol-sum">the volunteering-verb branch — &amp;quot;I could …&amp;quot; becomes &amp;quot;Somebody needs to …&amp;quot;</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">openerFor / isCurated</span><span class="ol-sum">unchanged — curated first, derived otherwise</span></li></ul>
       </div>
       <div class="ctx-map">
         <div class="ctx-map-title">Changed blocks (top → bottom)</div>
-        <ol class="ctx-blocks"><li>Voice rules: NEED NEVER AN OFFER OF LABOUR is stated first, with the flowers pair as the worked example, and &amp;quot;anything shaped I&amp;#39;d &lt;verb&gt; … is the smell&amp;quot; as the check</li><li>Voice rules: first person becomes a preference, and the note says WHY — the absolute rule is what pushed lines into I&amp;#39;d shapes</li><li>Voice rules: a line that is already a whole thought may stop without the trailing …, but nothing closes with a full stop</li><li>11 nyc-tactical entries rewritten to the owner&amp;#39;s copy, in wall order (ghost crosswalk → hydrant spray cap)</li><li>10 entries deleted with their vote types: sneckdown, bike bus, walking school bus, hopscotch, commuter bike train, group ride, group run, walking tour, community fridge, shovel-out crossing</li><li>10 entries on the other maps rewritten to needs — tree, tree pit, community garden, junction redesign, school crossing, street trees, median, greenway connection, highway</li><li>derive(): the run/organize/chalk/adopt/clear/sweep/shovel/water/repaint branch returns &amp;quot;Somebody needs to …&amp;quot;, with a comment saying this is the branch the rule matters most on</li></ol>
+        <ol class="ctx-blocks"><li>Voice rules: NEED NEVER AN OFFER OF LABOUR is stated first, with the flowers pair as the worked example, and &amp;quot;anything shaped I&amp;#39;d &lt;verb&gt; … is the smell&amp;quot; as the check</li><li>Voice rules: first person becomes a preference, and the note says WHY — the absolute rule is what pushed lines into I&amp;#39;d shapes</li><li>Voice rules: every line ends in …, without exception — relaxed in the first pass for two bare lines, then restored when both got their ellipsis back</li><li>13 nyc-tactical entries rewritten to the owner&amp;#39;s copy, in wall order (ghost crosswalk → curb repaint)</li><li>12 entries deleted with their vote types: sneckdown, bike bus, walking school bus, hopscotch, commuter bike train, group ride, group run, walking tour, community fridge, shovel-out crossing, pollinator bed, hydrant spray cap</li><li>10 entries on the other maps rewritten to needs — tree, tree pit, community garden, junction redesign, school crossing, street trees, median, greenway connection, highway</li><li>derive(): the run/organize/chalk/adopt/clear/sweep/shovel/water/repaint branch returns &amp;quot;Somebody needs to …&amp;quot;, with a comment saying this is the branch the rule matters most on</li></ol>
       </div>
     </div>
     
           <pre class="diff"><span class="d-meta">diff --git a/client-react/src/onboarding/phrasebook.ts b/client-react/src/onboarding/phrasebook.ts</span>
-<span class="d-meta">index 62045ab..da69560 100644</span>
+<span class="d-meta">index 62045ab..a764c93 100644</span>
 <span class="d-meta">--- a/client-react/src/onboarding/phrasebook.ts</span>
 <span class="d-meta">+++ b/client-react/src/onboarding/phrasebook.ts</span>
-<span class="d-hunk">@@ -32,14 +32,28 @@</span>
+<span class="d-hunk">@@ -32,14 +32,27 @@</span>
 <span class="d-ctx"> // tiles.ts.</span>
 <span class="d-ctx"> //</span>
 <span class="d-ctx"> // Rules of the voice, so later additions match:</span>
@@ -648,15 +648,13 @@
 <span class="d-ctx"> //   · A complaint is allowed to be a complaint. The vote it produces is the</span>
 <span class="d-ctx"> //     REMEDY (a + for the fix), which is the whole reason a complaint-shaped</span>
 <span class="d-ctx"> //     opener can drive a support-shaped data model.</span>
-<span class="d-del">-//   · It ends in &quot;…&quot; because the sentence is finished by pointing at the map.</span>
-<span class="d-add">+//   · It is left OPEN — usually a trailing &quot;…&quot;, because the sentence is finished</span>
-<span class="d-add">+//     by pointing at the map. A line that is already a complete thought on its</span>
-<span class="d-add">+//     own (&quot;There is too much litter in this area&quot;) may stop without one, but</span>
-<span class="d-add">+//     nothing ever closes with a full stop.</span>
+<span class="d-ctx"> //   · It ends in &quot;…&quot; because the sentence is finished by pointing at the map.</span>
+<span class="d-add">+//     Every line, without exception — a bare full stop turns the slip into a</span>
+<span class="d-add">+//     caption, and a mixed wall reads as a rendering bug.</span>
 <span class="d-ctx"> //   · Never more than two lines at a phone&#x27;s width.</span>
 <span class="d-ctx"> // ==========================================================================</span>
 <span class="d-ctx"> </span>
-<span class="d-hunk">@@ -73,7 +87,7 @@ export const CURATED: Record&lt;string, string&gt; = {</span>
+<span class="d-hunk">@@ -73,7 +86,7 @@ export const CURATED: Record&lt;string, string&gt; = {</span>
 <span class="d-ctx">   &quot;Lower speed limit&quot;: &quot;I watch cars do 45 down this 25 street…&quot;,</span>
 <span class="d-ctx">   &quot;Add traffic calming&quot;: &quot;I flinch at how fast cars take this stretch…&quot;,</span>
 <span class="d-ctx">   &quot;Add curb extension&quot;: &quot;I step into traffic to see past the parked cars…&quot;,</span>
@@ -665,7 +663,7 @@
 <span class="d-ctx">   &quot;Repave street&quot;: &quot;I rattle through potholes all down this street…&quot;,</span>
 <span class="d-ctx">   &quot;Add speed bump&quot;: &quot;I need something here to slow the traffic down…&quot;,</span>
 <span class="d-ctx"> </span>
-<span class="d-hunk">@@ -113,12 +127,12 @@ export const CURATED: Record&lt;string, string&gt; = {</span>
+<span class="d-hunk">@@ -113,12 +126,12 @@ export const CURATED: Record&lt;string, string&gt; = {</span>
 <span class="d-ctx">   &quot;Add audible pedestrian signal&quot;: &quot;I can&#x27;t hear when it&#x27;s safe to cross here…&quot;,</span>
 <span class="d-ctx">   &quot;Add accessible parking space&quot;: &quot;I can&#x27;t park anywhere near enough to get in…&quot;,</span>
 <span class="d-ctx">   &quot;Elevator for reduced mobility&quot;: &quot;I can&#x27;t get up here without taking the stairs…&quot;,</span>
@@ -681,7 +679,7 @@
 <span class="d-ctx">   &quot;More trees&quot;: &quot;I can&#x27;t find a scrap of shade along here…&quot;,</span>
 <span class="d-ctx">   &quot;Add tree-lined street&quot;: &quot;I bake walking down this street in July…&quot;,</span>
 <span class="d-ctx">   &quot;Create green corridor&quot;: &quot;I&#x27;d have this green the whole way…&quot;,</span>
-<span class="d-hunk">@@ -127,10 +141,10 @@ export const CURATED: Record&lt;string, string&gt; = {</span>
+<span class="d-hunk">@@ -127,10 +140,10 @@ export const CURATED: Record&lt;string, string&gt; = {</span>
 <span class="d-ctx">   &quot;De-pave / restore soil&quot;: &quot;I can&#x27;t see what this asphalt does for any of us…&quot;,</span>
 <span class="d-ctx">   &quot;Add bioswale corridor&quot;: &quot;I wade down this street every time it rains…&quot;,</span>
 <span class="d-ctx">   &quot;Add a bioswale&quot;: &quot;I watch the water pool here with nowhere to go…&quot;,</span>
@@ -694,7 +692,7 @@
 <span class="d-ctx">   &quot;Restore soil&quot;: &quot;I couldn&#x27;t dig into this ground if I tried…&quot;,</span>
 <span class="d-ctx">   &quot;Protect existing tree&quot;: &quot;I don&#x27;t think this tree survives what&#x27;s coming…&quot;,</span>
 <span class="d-ctx">   &quot;Tree needs pruning&quot;: &quot;I duck these branches every time I pass…&quot;,</span>
-<span class="d-hunk">@@ -139,45 +153,35 @@ export const CURATED: Record&lt;string, string&gt; = {</span>
+<span class="d-hunk">@@ -139,45 +152,33 @@ export const CURATED: Record&lt;string, string&gt; = {</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx">   // ── Public space ───────────────────────────────────────────────────────</span>
 <span class="d-ctx">   &quot;Better lighting&quot;: &quot;I find it far too dark here at night…&quot;,</span>
@@ -715,11 +713,12 @@
 <span class="d-del">-  &quot;Route a group run here&quot;: &quot;I&#x27;d send our run this way…&quot;,</span>
 <span class="d-del">-  &quot;Lead a walking tour&quot;: &quot;I know a story along this street worth telling…&quot;,</span>
 <span class="d-del">-  &quot;Pick up trash along here&quot;: &quot;I walk through knee-deep litter here…&quot;,</span>
+<span class="d-del">-  &quot;Run a litter pickup here&quot;: &quot;I watch everyone&#x27;s garbage collect on this spot…&quot;,</span>
 <span class="d-add">+  &quot;Chalk walk-time wayfinding&quot;: &quot;People get lost easily here…&quot;,</span>
 <span class="d-add">+  &quot;Chalk a ghost crosswalk&quot;: &quot;My street is too hard to cross…&quot;,</span>
 <span class="d-add">+  &quot;Chalk a slow-zone message&quot;: &quot;Cars drive too fast here…&quot;,</span>
-<span class="d-add">+  &quot;Pick up trash along here&quot;: &quot;There is too much litter in this area&quot;,</span>
-<span class="d-ctx">   &quot;Run a litter pickup here&quot;: &quot;I watch everyone&#x27;s garbage collect on this spot…&quot;,</span>
+<span class="d-add">+  &quot;Pick up trash along here&quot;: &quot;There is too much litter in this area…&quot;,</span>
+<span class="d-add">+  &quot;Run a litter pickup here&quot;: &quot;Garbage is piling up at this spot…&quot;,</span>
 <span class="d-ctx">   &quot;Clear this catch basin&quot;: &quot;I&#x27;ve seen this drain choke and the corner flood…&quot;,</span>
 <span class="d-ctx">   &quot;Clear the catch basins along this stretch&quot;: &quot;I&#x27;ve found every drain along here blocked…&quot;,</span>
 <span class="d-del">-  &quot;Shovel out this crossing&quot;: &quot;I climb a snowbank at this crossing all winter…&quot;,</span>
@@ -732,14 +731,12 @@
 <span class="d-del">-  &quot;Start a seed library&quot;: &quot;I&#x27;d swap seeds with the block right here…&quot;,</span>
 <span class="d-add">+  &quot;Adopt and tend this tree bed&quot;: &quot;A tree bed near me needs love…&quot;,</span>
 <span class="d-add">+  &quot;Flower-bomb this tree bed&quot;: &quot;This unused patch of land needs flowers…&quot;,</span>
-<span class="d-add">+  &quot;Plant a pollinator bed&quot;: &quot;This area needs more flowers…&quot;,</span>
-<span class="d-add">+  &quot;Install a Little Free Library&quot;: &quot;This corner could do with a little library&quot;,</span>
+<span class="d-add">+  &quot;Install a Little Free Library&quot;: &quot;This community needs better access to books…&quot;,</span>
 <span class="d-add">+  &quot;Start a seed library&quot;: &quot;Let&#x27;s install a seed bank here…&quot;,</span>
 <span class="d-ctx">   &quot;Activate the plaza furniture&quot;: &quot;Nothing in this plaza invites me to stay…&quot;,</span>
 <span class="d-del">-  &quot;Repaint this call box or utility box&quot;: &quot;I&#x27;d paint over this grey scar on the corner…&quot;,</span>
 <span class="d-del">-  &quot;Get a hydrant spray cap&quot;: &quot;I&#x27;ve nowhere to cool off around here in August…&quot;,</span>
 <span class="d-add">+  &quot;Repaint this call box or utility box&quot;: &quot;This curb needs a fresh paint job…&quot;,</span>
-<span class="d-add">+  &quot;Get a hydrant spray cap&quot;: &quot;There is nowhere to cool down here in August…&quot;,</span>
 <span class="d-ctx">   &quot;Cut back the overgrowth along here&quot;: &quot;I duck the whole way along this stretch…&quot;,</span>
 <span class="d-del">-  &quot;Water the street trees along here&quot;: &quot;I&#x27;d water these trees — they&#x27;re dying of thirst…&quot;,</span>
 <span class="d-del">-  &quot;Weed and mulch this median&quot;: &quot;I&#x27;d clear the weeds off this median myself…&quot;,</span>
@@ -755,7 +752,7 @@
 <span class="d-ctx"> };</span>
 <span class="d-ctx"> </span>
 <span class="d-ctx"> const ARTICLED = /^(a|an|the|this|these|my|your|our)\s/i;</span>
-<span class="d-hunk">@@ -246,7 +250,11 @@ function derive(label: string): string {</span>
+<span class="d-hunk">@@ -246,7 +247,11 @@ function derive(label: string): string {</span>
 <span class="d-ctx">     case &quot;shovel&quot;:</span>
 <span class="d-ctx">     case &quot;water&quot;:</span>
 <span class="d-ctx">     case &quot;repaint&quot;:</span>
