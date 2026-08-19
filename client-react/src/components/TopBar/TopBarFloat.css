@@ -148,6 +148,27 @@
     0 16px 40px -12px rgba(0, 0, 0, 0.28);
 }
 
+/* ==========================================================================
+   ONE INVARIANT ABOUT HORIZONTAL SPACE, written down so it does not have to be
+   re-decided at every breakpoint:
+
+     LEFTOVER WIDTH IN A ROW BELONGS TO THE MAP AND VOTE PILLS, EXCLUSIVELY.
+
+   Nothing else in the bar grows. Minus and plus are square — fixed, equal,
+   width derived from height, never a flex-grow. Clear is its own label plus
+   padding. The -/+/Clear block is content-sized as a whole and pinned to the
+   right edge. Whatever remains goes to the pills growing to meet that block,
+   so no gap sits in the middle of a row and the group keeps one right edge.
+
+   The bug that prompted writing it down: the block sat in an `auto` track that
+   had been handed 251px for 117px of content, so it stretched — and globals
+   styles .actions-group with `justify-content: flex-end`, which pushed its
+   three children to that track's right end and left 133px of empty plate on
+   the left. That empty plate read as an enormous minus cell. The minus was
+   never growing; the TRACK was. Any non-pill track allowed to take free space
+   produces the same illusion, which is why they are max-content now.
+   ========================================================================== */
+
 /* ONE definition of "a thing floating on the map", worn by every plate, and
    the only place a shadow is written in this sheet.
 
@@ -802,7 +823,13 @@
        positioned element cannot push anything. Now the row measures them and
        the 1fr column gives way instead. */
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    /* Three tracks, and the last one belongs to the -/+ block ALONE. The wide
+       things on the right — the rail and the legend — span tracks 2 and 3
+       instead of sitting in one, so track 3 measures the block and nothing
+       else. That is what lets the pills span out to the block and touch it:
+       sharing a track with the 174px rail left the block pinned right with
+       111px of empty track between it and the pills. */
+    grid-template-columns: minmax(0, 1fr) max-content max-content;
     /* Row 4 IS the gap. It was a margin-top on the blocks that start the
        picker row, which works for a one-row pill but silently SQUASHES the
        -/+ block: that block stretches across two rows, so a top margin came
@@ -827,7 +854,7 @@
   }
 
   .topbar[data-chrome="float"] .logo-mobile-banner {
-    grid-area: 1 / 1;
+    grid-area: 1 / 1 / 2 / 3;
     justify-self: start;
     align-self: center;
     min-width: 0;
@@ -865,17 +892,18 @@
      the 1fr column shrinks and the rail keeps its size, so they cannot meet. */
   .topbar[data-chrome="float"] .nav-rail {
     position: static;
-    grid-area: 1 / 2;
+    grid-area: 1 / 2 / 2 / 4;
     justify-self: end;
     align-self: center;
     margin-bottom: var(--space-2);
   }
 
   .topbar[data-chrome="float"] .legend-pair-tools { grid-area: 2 / 1 / 4 / 2; }
-  .topbar[data-chrome="float"] .legend-pair-key   { grid-area: 2 / 2 / 4 / 3; }
-  .topbar[data-chrome="float"] .mode-switcher-group { grid-area: 5 / 1; }
-  .topbar[data-chrome="float"] .vote-switcher-group { grid-area: 6 / 1; }
-  .topbar[data-chrome="float"] .actions-group       { grid-area: 5 / 2 / 7 / 3; }
+  .topbar[data-chrome="float"] .legend-pair-key   { grid-area: 2 / 2 / 4 / 4; }
+  /* The pills span out to the block's track, so no gap sits in the middle. */
+  .topbar[data-chrome="float"] .mode-switcher-group { grid-area: 5 / 1 / 6 / 3; }
+  .topbar[data-chrome="float"] .vote-switcher-group { grid-area: 6 / 1 / 7 / 3; }
+  .topbar[data-chrome="float"] .actions-group       { grid-area: 5 / 3 / 7 / 4; justify-self: end; }
 
   /* Stacked in one column, End sits above Map, so the pill edges fall between
      different pairs than they do on the desktop grid. */
@@ -1272,11 +1300,16 @@
 
 @media (min-width: 580px) and (max-width: 1080px) {
   .topbar[data-chrome="float"] {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    /* max-content, NOT auto. An `auto` track can be handed free space, and
+       that is exactly how the block came to be 251px wide for 117px of
+       content. Only the two 1fr tracks may grow. */
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) max-content;
   }
 
   .topbar[data-chrome="float"] .logo-mobile-banner { grid-area: 1 / 1 / 2 / 3; }
-  .topbar[data-chrome="float"] .nav-rail           { grid-area: 1 / 3 / 2 / 4; }
+  /* Spans 2-3 so track 3 measures the -/+ block alone, exactly as in the
+     stacked arrangement. */
+  .topbar[data-chrome="float"] .nav-rail           { grid-area: 1 / 2 / 2 / 4; }
 
   .topbar[data-chrome="float"] .legend-pair-tools  { grid-area: 2 / 1 / 4 / 3; }
   .topbar[data-chrome="float"] .legend-pair-key    { grid-area: 2 / 3 / 4 / 4; }
@@ -1298,11 +1331,16 @@
     grid-area: 5 / 3 / 6 / 4;
     display: flex;
     align-items: stretch;
+    /* Content-sized and pinned right, and its children packed from the start —
+       globals justifies this element to flex-end, which is what opened the
+       empty plate on the left once the block was stretched. */
+    justify-self: end;
+    justify-content: flex-start;
     /* Content-sized: two squares plus whatever Clear needs. border-box so the
        block's outer height IS one row — content-box left it 2px taller than
        the pills beside it and the group's bottom edge came out ragged. */
     box-sizing: border-box;
-    width: auto;
+    width: max-content;
     height: var(--float-row);
   }
 
