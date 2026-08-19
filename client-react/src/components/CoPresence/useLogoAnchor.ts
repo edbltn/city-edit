@@ -28,13 +28,33 @@ import { useEffect, useState } from "react";
  *
  * And the underside of the logo is not always free. On desktop the island is
  * its own column and the space beneath it is map. On a phone the logo is the
- * FIRST ROW of a 194px stacked topbar, so "directly under the logo" is the
- * legend — measured, not guessed: the strip landed at y=42 behind
+ * FIRST ROW of a stacked topbar, so "directly under the logo" is the legend —
+ * measured, not guessed: the strip landed at y=42 behind
  * `.legend-item-coords`, invisible, because the topbar outranks it (z 600 vs
  * 200). So the anchor is the lower of the logo's underside and the chrome's:
- * as far up as the logo allows, never inside something else. One rule for both
- * breakpoints rather than a second copy of their media query — and it keeps
- * holding if the island stops stretching to the topbar's full height.
+ * as far up as the logo allows, never inside something else.
+ *
+ * Which is the chrome's underside, and it is NOT `.topbar`'s box. That box is
+ * a grid which RESERVES its rows whether or not they are used — below 1080px
+ * the template is `44px 31.39 31.39 8px 31.39 31.39`, six rows for the banner,
+ * the Start/End card and the two pills. Between 600px and 1079px the Map and
+ * Vote pills sit SIDE BY SIDE and share one row, so the last row is reserved
+ * and empty, and `.topbar.bottom` is 39.4px below anything anyone can see.
+ * Measured at 720px: the pill band ends at 154.2, the box ends at 193.6, and
+ * the strip sat on the box — one pip adrift, floating on bare map with a
+ * visible seam above it. Full width and phone width never showed it because
+ * there the last row IS occupied and the two numbers coincide.
+ *
+ * So we measure what the chrome actually PAINTS: the lowest visible, in-flow
+ * descendant that stays inside the padded box, plus that padding. No class
+ * names, so the rows can be renamed, reordered or re-broken without touching
+ * this file; the reserved-but-empty tail simply stops counting. The three
+ * exclusions are what "visible" has to mean here, each one load-bearing:
+ * absolutely positioned nodes are the dropdowns, which hang far BELOW the
+ * chrome when open; `visibility:hidden` is how those same dropdowns park when
+ * closed (`.mode-search` is 26px lower than the pill that owns it, in flow and
+ * with a real rect, and it moved the anchor until it was excluded); and
+ * anything reaching past the padded box is by definition not one of the rows.
  */
 
 export interface LogoBox {
@@ -59,12 +79,35 @@ function visibleLogo(): Element | null {
   return null;
 }
 
+/** The lowest pixel the chrome actually paints inside its own padded box.
+ *
+ *  Returns the top of the box when it can find nothing — an empty chrome has
+ *  no underside to sit under, and the caller falls back to the logo. */
+function paintedChromeBottom(topbar: HTMLElement): number {
+  const box = topbar.getBoundingClientRect();
+  const padBottom = parseFloat(getComputedStyle(topbar).paddingBottom) || 0;
+  // Reserved-but-empty rows live below this line; so does every open dropdown.
+  const floor = box.bottom - padBottom + 0.5;
+  let lowest = box.top;
+  for (const el of topbar.querySelectorAll("*")) {
+    if (!(el instanceof HTMLElement) || el.offsetParent === null) continue;
+    const cs = getComputedStyle(el);
+    if (cs.position === "absolute" || cs.position === "fixed") continue;
+    if (cs.visibility === "hidden" || cs.opacity === "0") continue;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0 || r.bottom > floor) continue;
+    if (r.bottom > lowest) lowest = r.bottom;
+  }
+  return lowest === box.top ? box.top : lowest + padBottom;
+}
+
 export function useLogoAnchor(): LogoBox | null {
   const [box, setBox] = useState<LogoBox | null>(null);
 
   useEffect(() => {
     let current: Element | null = null;
     let ro: ResizeObserver | null = null;
+    let chromeRo: ResizeObserver | null = null;
 
     const measure = () => {
       const el = visibleLogo();
@@ -80,8 +123,11 @@ export function useLogoAnchor(): LogoBox | null {
         ro.observe(el);
       }
       const r = el.getBoundingClientRect();
-      const chrome = document.querySelector(".topbar")?.getBoundingClientRect();
-      const bottom = Math.max(r.bottom, chrome ? chrome.bottom : r.bottom);
+      const topbar = document.querySelector(".topbar");
+      const chromeBottom = topbar instanceof HTMLElement
+        ? paintedChromeBottom(topbar) : r.bottom;
+      // Never ON the logo, never below the chrome's last painted row.
+      const bottom = Math.max(r.bottom, chromeBottom);
       setBox((prev) =>
         prev && prev.left === r.left && prev.bottom === bottom
           && prev.width === r.width
@@ -95,12 +141,19 @@ export function useLogoAnchor(): LogoBox | null {
     // arrives, either of which can change the island's height.
     const mo = new MutationObserver(measure);
     const topbar = document.querySelector(".topbar");
-    if (topbar) mo.observe(topbar, { childList: true, subtree: true, attributes: true });
+    if (topbar) {
+      mo.observe(topbar, { childList: true, subtree: true, attributes: true });
+      // Its HEIGHT can change with no mutation and no window resize — fonts
+      // landing, or a pill band re-wrapping — and the anchor reads its rows.
+      chromeRo = new ResizeObserver(measure);
+      chromeRo.observe(topbar);
+    }
     document.fonts?.ready.then(measure).catch(() => {});
 
     return () => {
       window.removeEventListener("resize", measure);
       ro?.disconnect();
+      chromeRo?.disconnect();
       mo.disconnect();
     };
   }, []);
