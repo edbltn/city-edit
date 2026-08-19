@@ -1,97 +1,75 @@
 /* ==========================================================================
    Co-presence — who else has this map open right now
 
-   Bottom-left, the quiet corner (zoom + attribution both sit bottom-right).
-   Deliberately the quietest fixed element on the map: it is a fact about the
-   room, not a control, and it must never compete with the proposal it is
-   telling you other people are reading.
+   Sits directly under the CITY EDIT logo island, top-left.
 
-   Not an EMPTY corner, though: the selection-history control claims exactly
-   this spot with the same two offsets, and the bottom-centre notice reaches
-   into it on a laptop. So the strip's distance from the bottom is one variable
-   rather than a `bottom` rewritten per case — the clearances add up instead of
-   overriding each other, and a third occupant is one more term.
+   Its `top` and `left` are NOT here. They are measured from the logo's live
+   box and written as inline styles (useLogoAnchor.ts), because the island is
+   being resized, squared and repadded in parallel: any offset committed here
+   against today's numbers would go stale without visibly breaking, which is
+   the worst way for a layout constant to be wrong. This file owns everything
+   about the strip EXCEPT where it is.
    ========================================================================== */
 
 .copresence {
   position: fixed;
-  /* Always clearing the history control's slot (28px + its border, + a gap),
-     whether or not it is showing: it appears the moment you have any history,
-     and a strip that jumps 38px when you press Back is worse than one sitting
-     a little high on a fresh map. */
-  --copresence-lift: 38px;
-  bottom: calc(var(--space-5) + var(--copresence-lift));
-  left: var(--space-5);
-  z-index: var(--z-map-notice);    /* a bottom strip, like the notice it dodges */
+  z-index: var(--z-map-notice);    /* above the map, below the cards */
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 6px 10px;
+  padding: 5px var(--space-2);
   border: 1px solid var(--hairline);
+  /* The app is squared throughout. Stated with the token rather than `0` so it
+     tracks the decision rather than restating it — and stated AGAIN in the
+     phone query below, because radius has been re-declared per breakpoint in
+     this repo before and shipped a strip that was square on desktop and round
+     on a phone. */
+  border-radius: var(--radius-sm);
   background: var(--paper);
   font-family: var(--font-main);
+  /* The scale's floor. This is caption text by any reading — an aside about
+     the room, not part of it — and the floor is where the scale says such
+     things go. Never a raw px: the scale has just been collapsed from ten
+     rendered sizes to five and a hardcoded 10 or 12 would quietly reopen it. */
   font-size: var(--font-caption);
   color: color-mix(in srgb, var(--ink) 70%, transparent);
   pointer-events: auto;            /* the title needs a hover target */
   cursor: default;
+  white-space: nowrap;
   animation: copresence-in 320ms ease-out both;
 }
 
-/* The bottom-CENTRE slot holds the map notice / event banner (up to 680px wide,
-   z 1050) and the error toast. A centred 680px box starts at x=260 on a
-   1200px viewport, and this strip runs to x=376 — so they collide on a laptop
-   and happen to miss on a wide monitor, which is the worst way for a layout
-   bug to behave. Step above whatever is in that slot; the notice is
-   dismissible, and the strip drops back when it goes.
-
-   Scoped to `body` rather than to the `#app` wrapper. #app does exist and the
-   notice renders inside it today, so this is not a bug fix — it is removing a
-   dependency on both of those staying true. Several of this app's overlays are
-   portalled to document.body, and a wrapper-scoped :has() stops matching
-   without failing the moment one more of them moves; `body` is an ancestor of
-   every mount point either way. */
-body:has(.map-notice) .copresence,
-body:has(.event-banner) .copresence {
-  --copresence-lift: calc(38px + 56px);   /* history + notice (24px offset + 40px tall) */
-}
-
-/* The audience glyph leads the sentence, in the same ink as the text so it
-   reads as part of the phrase rather than as a badge. It is inline SVG on
-   currentColor precisely so it tracks that ink through the light/dark basemap
-   flip — an <img> could not. */
+/* The audience glyph leads the count, in the same ink as the text so it reads
+   as part of the phrase rather than as a badge. Inline SVG on currentColor
+   precisely so it tracks that ink through the light/dark basemap flip — an
+   <img> could not. */
 .copresence svg {
   opacity: 0.85;
 }
 
 .copresence-text {
-  white-space: nowrap;
   font-variant-numeric: tabular-nums;   /* the count must not shift the line */
 }
 
 @keyframes copresence-in {
-  from { opacity: 0; transform: translateY(4px); }
+  from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: none; }
 }
 
-/* Phones just get smaller. The sentence used to be dropped here, back when a
-   row of squares carried the count on its own; with those gone, hiding the
-   text would leave a figure glyph and no number at all. At 10px the line is
-   ~260px, which fits a 375px screen with room to spare. */
+/* Phones. The anchor still comes from the measured logo — under 1080px that is
+   the full-width mobile banner rather than the desktop island, resolved by
+   asking which one is visible rather than by repeating their breakpoint. */
 @media (max-width: 600px) {
   .copresence {
-    bottom: calc(var(--space-2) + var(--copresence-lift));
-    left: var(--space-2);
-    padding: 5px 8px;
+    padding: 4px var(--space-2);
+    /* Re-declared on purpose. Squaring this app has been undone once already
+       by a media query that reintroduced a radius at one width; keeping the
+       token here means the phone cannot drift from the desktop. */
+    border-radius: var(--radius-sm);
+    /* Type does NOT shrink here: caption is the scale's floor precisely
+       because Red Hat Mono stops being reliably legible below it on a phone. */
     font-size: var(--font-caption);
   }
-
-  /* A notice goes near-full-width and can wrap to several lines on a phone,
-     so clear it by more than the desktop step. */
-  body:has(.map-notice) .copresence,
-  body:has(.event-banner) .copresence {
-    --copresence-lift: calc(38px + 84px);
-  }
-
 }
 
 @media (prefers-reduced-motion: reduce) {

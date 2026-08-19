@@ -1,5 +1,7 @@
+import type { CSSProperties } from "react";
 import { useWebSocketContext } from "../../context/WebSocketContext";
 import { AudienceIcon } from "./PeopleIcon";
+import { useLogoAnchor } from "./useLogoAnchor";
 import "./CoPresence.css";
 
 /** Below this we say nothing.
@@ -54,16 +56,30 @@ const MIN_TOTAL = 2;
  */
 export function CoPresence() {
   const { viewerCount } = useWebSocketContext();
+  // Measured, never assumed: the logo island is being resized and repadded in
+  // parallel, so the strip reads its live box instead of carrying an offset
+  // that would go stale without visibly breaking. See useLogoAnchor.
+  const logo = useLogoAnchor();
 
   // 0 is both "nobody" and "we lost the socket and no longer know". Both mean
   // the same thing here: stop claiming company.
   if (viewerCount < MIN_TOTAL) return null;
+  // No logo on screen (landing, or a topbar mid-swap) means no anchor, and a
+  // strip parked at 0,0 would be worse than none.
+  if (!logo) return null;
 
   const others = viewerCount - 1;
 
   return (
     <aside
       className="copresence"
+      // Left edge flush with the island's own, so the two read as one column
+      // whatever width the island settles on; top follows its underside. Both
+      // come from the measured rect — there is no offset here to go stale.
+      style={{
+        left: `${logo.left}px`,
+        top: `${logo.bottom}px`,
+      } as CSSProperties}
       // The honest small print, on hover rather than on the face of it.
       title={
         "Counted once per network connection, and only while a tab is in the "
@@ -73,8 +89,7 @@ export function CoPresence() {
     >
       <AudienceIcon others={others} />
       <span className="copresence-text">
-        You’re looking at this with {others} other{" "}
-        {others === 1 ? "viewer" : "viewers"}
+        {others} other {others === 1 ? "viewer" : "viewers"}
       </span>
     </aside>
   );

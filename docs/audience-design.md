@@ -181,7 +181,7 @@ worse claim.
 
 ## 3. Feature 2 — co-presence
 
-> "You're looking at this with 3 other viewers."
+> "3 other viewers"
 
 Shown from **one** other viewer up (`MIN_TOTAL = 2` in `CoPresence.tsx`).
 
@@ -289,12 +289,27 @@ count, one step quieter than the text it trails. It fades in, because it
 arrives seconds after the card and an unannounced layout shift at that distance
 reads as a glitch.
 
-**Co-presence** is a small strip in the bottom-left (the quiet corner — zoom
-and attribution are both bottom-right):
+**Co-presence** is a small strip directly under the CITY EDIT logo, top-left:
 
 ```
-  👥  You're looking at this with 3 other viewers
+  👥  3 other viewers
 ```
+
+Its position is not in the stylesheet. The logo island is being resized,
+squared and repadded, so the strip measures the island's live box and follows
+it (`useLogoAnchor.ts`); an offset committed against today's numbers would go
+stale without visibly breaking, which is the worst way for a layout constant to
+be wrong. Left edge flush with the island's, top on its underside — but never
+higher than the bottom of the chrome the logo sits in. That second clause is
+not defensive: on a phone the logo is the FIRST ROW of a 194px stacked topbar,
+and anchoring to it alone put the strip at y=42 behind `.legend-item-coords`,
+invisible. One rule covers both breakpoints instead of a second copy of the
+topbar's media query.
+
+The proper fix is a slot in the topbar — a child under the logo, laid out by
+normal flow, inheriting the island's width and padding for free and needing no
+JavaScript. That is TopBar.tsx, owned by the agent reworking the chrome, so it
+is requested rather than taken.
 
 A figure glyph leads it — one person for a single other viewer, two for
 several — drawn inline on `currentColor` so it sits in the strip's muted ink
