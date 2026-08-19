@@ -793,8 +793,29 @@
   border-color: var(--plate-line);
   border-radius: var(--float-radius);
   box-shadow: var(--plate-shadow);
-  overflow: hidden;
 }
+
+/* NO `overflow` in the rule above, and that is a decision, not an omission.
+
+   There WAS one — `overflow: hidden` — added when these panels still had a
+   10px radius, so their first and last rows would be clipped to the rounded
+   corners. The radius went to 0 two rounds later; the clip stayed, and
+   outlived the only thing it was ever for.
+
+   What it then did was break the vote panel outright. The panel's own sheet is
+   what scrolls it: `max-height: min(58vh, 460px)` with `overflow-y: auto`,
+   because a curated map lists 20+ types. `overflow` is a SHORTHAND, so setting
+   it here also reset overflow-y from `auto` to `hidden`, at a higher
+   specificity than the sheet that meant it. The panel kept its height cap and
+   lost its scroller: 585px of rows in a 459px box, the last 126px clipped away
+   and unreachable by wheel, trackpad, drag or keyboard. That reads as two
+   separate bugs — cannot scroll, cannot pick anything — and is one.
+
+   Whether a menu scrolls is the menu's business, not the skin's. This sheet
+   restyles the SURFACE — fill, edge, shadow, corners — and must not touch
+   anything that decides what is reachable inside it. A radius can come back
+   without this returning: `overflow-y: auto` already forces the x-axis to a
+   non-visible value, which is itself a clip to the padding box. */
 
 
 /* ==========================================================================
