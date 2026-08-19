@@ -23,12 +23,11 @@ describe("coverage", () => {
 describe("the voice", () => {
   const all = Object.values(CURATED);
 
-  it("leaves every sentence open", () => {
-    // Usually a trailing "…", finished by pointing at the map. A line that is
-    // already a whole thought ("There is too much litter in this area") may stop
-    // without one — but nothing closes with a full stop, which is the shape of a
-    // caption rather than something somebody said.
-    expect(all.filter((s) => /[.!?]$/.test(s))).toEqual([]);
+  it("leaves every sentence unfinished", () => {
+    // The sentence is finished by pointing at the map, so it stops on an
+    // ellipsis rather than a full stop — every line, without exception. A mixed
+    // wall reads as a rendering bug.
+    expect(all.filter((s) => !s.endsWith("…"))).toEqual([]);
   });
 
   it("keeps every sentence short enough for a phone", () => {

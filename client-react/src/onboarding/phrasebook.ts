@@ -50,10 +50,9 @@
 //   · A complaint is allowed to be a complaint. The vote it produces is the
 //     REMEDY (a + for the fix), which is the whole reason a complaint-shaped
 //     opener can drive a support-shaped data model.
-//   · It is left OPEN — usually a trailing "…", because the sentence is finished
-//     by pointing at the map. A line that is already a complete thought on its
-//     own ("There is too much litter in this area") may stop without one, but
-//     nothing ever closes with a full stop.
+//   · It ends in "…" because the sentence is finished by pointing at the map.
+//     Every line, without exception — a bare full stop turns the slip into a
+//     caption, and a mixed wall reads as a rendering bug.
 //   · Never more than two lines at a phone's width.
 // ==========================================================================
 
@@ -160,19 +159,17 @@ export const CURATED: Record<string, string> = {
   "Chalk walk-time wayfinding": "People get lost easily here…",
   "Chalk a ghost crosswalk": "My street is too hard to cross…",
   "Chalk a slow-zone message": "Cars drive too fast here…",
-  "Pick up trash along here": "There is too much litter in this area",
-  "Run a litter pickup here": "I watch everyone's garbage collect on this spot…",
+  "Pick up trash along here": "There is too much litter in this area…",
+  "Run a litter pickup here": "Garbage is piling up at this spot…",
   "Clear this catch basin": "I've seen this drain choke and the corner flood…",
   "Clear the catch basins along this stretch": "I've found every drain along here blocked…",
   "Shovel this sidewalk stretch": "I've never seen anyone shovel this stretch…",
   "Adopt and tend this tree bed": "A tree bed near me needs love…",
   "Flower-bomb this tree bed": "This unused patch of land needs flowers…",
-  "Plant a pollinator bed": "This area needs more flowers…",
-  "Install a Little Free Library": "This corner could do with a little library",
+  "Install a Little Free Library": "This community needs better access to books…",
   "Start a seed library": "Let's install a seed bank here…",
   "Activate the plaza furniture": "Nothing in this plaza invites me to stay…",
   "Repaint this call box or utility box": "This curb needs a fresh paint job…",
-  "Get a hydrant spray cap": "There is nowhere to cool down here in August…",
   "Cut back the overgrowth along here": "I duck the whole way along this stretch…",
   "Water the street trees along here": "These street trees are dying of thirst…",
   "Weed and mulch this median": "This median has disappeared under weeds…",
