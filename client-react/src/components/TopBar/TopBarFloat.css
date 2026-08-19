@@ -43,6 +43,14 @@
      in the sheet, so nothing can drift out of alignment with anything else. */
   --float-gutter: 10px;
 
+  /* ONE gap for the floating group, used horizontally AND vertically. The two
+     had drifted: the column-gap between the Start/End block and the legend was
+     8px while the space between that block and the Map/Vote row below it was
+     row-gap 0 — the two blocks sat flush. Measured on a 640px viewport: 8.0px
+     across, 0.0px down. Both directions read this now, so the group keeps one
+     rhythm and they cannot come apart again. */
+  --float-gap: var(--space-3);
+
   /* Translucency is the point. At 92% the plate was a fill and the map died
      under it; 72% over a heavy blur lets the map through as texture and still
      clears 5.9:1 for body text against the worst case the plate can composite
@@ -322,7 +330,10 @@
   grid-template-rows: var(--float-row) var(--float-row);
   align-items: stretch;
   /* Was --space-2; the pills read as crowded against their neighbours at 8. */
-  column-gap: var(--space-3);
+  column-gap: var(--float-gap);
+  /* Zero, because the two cells of a legend pair have to TOUCH — they are one
+     pill. The gap between blocks is applied per-block below instead, which is
+     the only way to have both in one grid. */
   row-gap: 0;
   padding: 0;
 }
@@ -763,6 +774,7 @@
 @media (max-width: 1080px) {
   .topbar[data-chrome="float"] {
     --float-gutter: 8px;
+    --float-gap: var(--space-2);
     /* NOTE: --float-radius is NOT re-declared here. It was, at 10px, and that
        is precisely how the band came out square on desktop and rounded on a
        phone: every shape reads the token, so one override inside one media
@@ -779,7 +791,7 @@
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: auto repeat(4, var(--float-row));
     align-items: stretch;
-    column-gap: var(--space-2);
+    column-gap: var(--float-gap);
     row-gap: 0;
   }
 
@@ -840,12 +852,23 @@
   .topbar[data-chrome="float"] .vote-switcher-group { grid-area: 5 / 1; }
   .topbar[data-chrome="float"] .actions-group       { grid-area: 4 / 2 / 6 / 3; }
 
+  /* The vertical half of --float-gap. row-gap cannot carry it (that would also
+     split the legend's two cells, which must touch), so the blocks that START
+     the picker row take it as a top margin. Same token as the column-gap, so
+     the space below the Start/End block is the space beside it. */
+  .topbar[data-chrome="float"] .mode-switcher-group,
+  .topbar[data-chrome="float"] .actions-group {
+    margin-top: var(--float-gap);
+  }
+
   /* Stacked in one column, End sits above Map, so the pill edges fall between
      different pairs than they do on the desktop grid. */
 
 
+  /* .actions-group already carries the row's top margin; the cast cell must
+     not add a second one inside it. */
   .topbar[data-chrome="float"] .cast-group {
-    margin-top: var(--space-2);
+    margin-top: 0;
   }
 
   .topbar[data-chrome="float"] .btn-clear {
@@ -1189,4 +1212,120 @@
 .topbar[data-chrome="float"] .vote-type-input:focus-visible,
 .topbar[data-chrome="float"] .vote-type-control:focus-visible {
   outline: none;
+}
+
+
+/* ==========================================================================
+   The middle band — Map and Vote side by side.
+
+   Deliberately NOT monotonic, and that is the point: stacked at full width,
+   SIDE BY SIDE here, stacked again at quarter width. Each end has its own
+   reason, so a single threshold cannot express it.
+
+     UPPER BOUND 1080px — where the desktop layout takes over. Above it the
+     pills are already held by --pill-cap (444px), so stacked reads fine and
+     side by side would only split a column that is not too wide to begin with.
+     Reusing the existing breakpoint rather than inventing a second one near
+     it, so there is one place the bar changes shape.
+
+     LOWER BOUND 580px — forced by the content. At this breakpoint the type is
+     11px, 1ch renders at 6.60px, and a pill's furniture (the Map:/Vote: label,
+     the icon, the chevron, the indent and the two gaps) measures 108px. Each
+     pill needs 12 characters of label before the ellipsis to stay tellable —
+     enough to separate "Add pedestrian…" from "Add public…" — so 108 + 79 =
+     187px each. The row also carries the legend beside them (174px at this
+     scale) and three gaps plus the two gutters (32px), so two pills side by
+     side need 2x187 + 174 + 32 + 8 = 580. Below that each pill is narrower
+     than the point of splitting them, so they stack again.
+
+     NOTE the legend is part of this sum. Leaving it out is how the first pass
+     landed on 560 and would have put the band's floor where each pill only
+     held ten characters.
+
+   Three columns here, not two: the pickers take one each and the -/+ over
+   Clear block keeps its own, so the row stays one row tall.
+   ========================================================================== */
+
+@media (min-width: 580px) and (max-width: 1080px) {
+  .topbar[data-chrome="float"] {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  }
+
+  .topbar[data-chrome="float"] .logo-mobile-banner { grid-area: 1 / 1 / 2 / 3; }
+  .topbar[data-chrome="float"] .nav-rail           { grid-area: 1 / 3 / 2 / 4; }
+
+  .topbar[data-chrome="float"] .legend-pair-tools  { grid-area: 2 / 1 / 4 / 3; }
+  .topbar[data-chrome="float"] .legend-pair-key    { grid-area: 2 / 3 / 4 / 4; }
+
+  /* One row, side by side. They still sit BELOW the Start/End block and the
+     legend — only these two share a row, and only with each other. */
+  .topbar[data-chrome="float"] .mode-switcher-group { grid-area: 4 / 1 / 5 / 2; }
+  .topbar[data-chrome="float"] .vote-switcher-group { grid-area: 4 / 2 / 5 / 3; }
+  .topbar[data-chrome="float"] .actions-group       { grid-area: 4 / 3 / 6 / 4; }
+
+  /* Both start the picker row now, so both take the vertical gap. */
+  .topbar[data-chrome="float"] .vote-switcher-group {
+    margin-top: var(--float-gap);
+  }
+
+  /* The empty-state span belongs to the stacked arrangement; here each pill
+     already has its own column and the block's column collapses on its own. */
+  .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .mode-switcher-group,
+  .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .vote-switcher-group {
+    grid-column: auto;
+  }
+}
+
+
+/* ==========================================================================
+   The panels are anchored to their control, in one place.
+
+   This is the third defect in this panel's geometry — first it was a few
+   pixels wider than the input on both sides, then its category rows wrapped
+   when the control gained a max-width, and now its top edge sliced the
+   placeholder in half. All three are the same root: the panel's box was
+   derived loosely from its control instead of being tied to it. So left,
+   width and top are all stated here, together, against the same box.
+
+   WHY THE TOP WAS WRONG. The panel is `top: calc(100% + ...)` against
+   `.vote-type-selector`. Closed, that element measures exactly the control and
+   the input — all three 18px — so the anchor looked correct. Open, it is not:
+   `.vote-type-input` is `position: absolute; inset: 0`, so it contributes NO
+   height, and the display text it replaces was the only thing that did. The
+   selector's in-flow content collapses the moment the panel opens, the
+   selector shrinks, and 100% of it lands part-way UP the input — which is why
+   the placeholder was cut through the middle rather than merely nudged down.
+
+   The fix is to stop letting that box breathe: the selector is stretched to
+   the pill it sits in, so its bottom is the control's bottom whether the panel
+   is open or closed, and the panel hangs off that. The input is `inset: 0` of
+   the control, so the control's bottom IS the input's bottom — the panel now
+   begins cleanly below the field in every state.
+   ========================================================================== */
+
+.topbar[data-chrome="float"] .mode-switcher-group,
+.topbar[data-chrome="float"] .vote-switcher-group {
+  align-items: stretch;
+}
+
+/* The label keeps its own centring; only the control stretches. */
+.topbar[data-chrome="float"] .mode-prefix-label {
+  align-self: center;
+}
+
+.topbar[data-chrome="float"] .mode-selector,
+.topbar[data-chrome="float"] .vote-type-selector,
+.topbar[data-chrome="float"] .vote-type-control,
+.topbar[data-chrome="float"] .mode-btn {
+  height: 100%;
+}
+
+/* ONE anchor: left, width and top, all from the control's box. */
+.topbar[data-chrome="float"] .mode-dropdown,
+.topbar[data-chrome="float"] .vote-type-dropdown {
+  left: 0;
+  right: auto;
+  width: 100%;
+  box-sizing: border-box;
+  top: calc(100% + var(--float-gap));
 }
