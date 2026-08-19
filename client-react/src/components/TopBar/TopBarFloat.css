@@ -1241,6 +1241,19 @@
    stacking context, so the pair is what has to move. */
 .topbar[data-chrome="float"] .legend-pair:has(.legend-tool.typing) {
   z-index: var(--z-autocomplete);
+  /* And it has to stop CLIPPING, which is a separate fault from stacking and
+     immune to the rung above: .legend-pair carries `overflow: hidden` so no
+     plate can spill onto a neighbour, and that clip applied to the address
+     suggestions too — they were cut off at the plate's edge instead of
+     opening over the map. An ancestor's overflow beats any z-index a
+     descendant can carry, so raising the pair alone left the panel exactly
+     where it was, sealed in its box.
+
+     Released only while the field is typing, so the plate keeps its guarantee
+     the rest of the time. The address text itself does not depend on this
+     clip — it ellipsises via `text-overflow` on the item, not by being cut off
+     at the parent. */
+  overflow: visible;
 }
 
 /* Same trap once more, for the nav cluster's hover labels. The label already
