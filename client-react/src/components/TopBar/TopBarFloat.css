@@ -853,8 +853,15 @@
     display: none;
   }
 
+  /* Column 1 ONLY. It spanned 1-2 while the rail spans 2-3, so both claimed
+     column 2 — and grid items sharing a cell simply stack, which is why the
+     "?" button was sitting on top of the wordmark's D-I-T squares. Nothing was
+     escaping its container and nothing was positioned; the two were placed on
+     top of each other. Column 1 is the 1fr track, so the wordmark now shrinks
+     under pressure (its max-width/border-box sizing already scales the mark
+     rather than cropping it) and the two can no longer meet at any width. */
   .topbar[data-chrome="float"] .logo-mobile-banner {
-    grid-area: 1 / 1 / 2 / 3;
+    grid-area: 1 / 1 / 2 / 2;
     justify-self: start;
     align-self: center;
     min-width: 0;
@@ -1118,8 +1125,31 @@
    edge stable rather than merely similar.
    ========================================================================== */
 
+/* HIDDEN, NOT REMOVED — and this is what keeps the row above from moving.
+
+   `display: none` took the block out of layout, so its grid track collapsed,
+   every other track was recomputed, and the TOP row — which shares those
+   tracks — was dragged along with it. Measured off the two states at half
+   width: placing a start point pulled the Start/End block from 980px to 705
+   and pushed the legend from 230 to 500, though nothing in that row had
+   changed. Column tracks are shared by every row in a grid, so a control
+   appearing in the bottom row cannot help but resize the top one.
+
+   Keeping the block in layout and only hiding it pins its track, so the tracks
+   either side of it are the same whether or not there is a selection. The rule
+   the whole floating group follows now:
+
+     A CONTROL APPEARING OR DISAPPEARING CHANGES WHAT IS INSIDE A ROW,
+     NEVER THE GEOMETRY OF THE ROWS AROUND IT.
+
+   The invariant from the previous round is untouched and still local to the
+   bottom row: the pills still span across the reserved track when it is empty,
+   so the slack the block is not using goes to them. It just cannot reach
+   upward any more. (Spanning does not resize tracks — the block's track has a
+   definite size of its own either way — which is why both can be true.) */
 .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .actions-group {
-  display: none;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .mode-switcher-group,
@@ -1128,9 +1158,15 @@
 }
 
 @media (max-width: 1080px) {
+  /* "Full width" here is one rule, not two states: the pills always run to the
+     LEFT EDGE OF THE -/+ BLOCK. With a selection that block takes its content
+     width at the right and the pills stop at it; without one the block is
+     reserved but empty, and the pills span across its track to the group's
+     right margin. The space the block is not using is the space they take —
+     which is all of it when there is nothing to cast. */
   .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .mode-switcher-group,
   .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .vote-switcher-group {
-    grid-column: 1 / 3;
+    grid-column: 1 / 4;
   }
 }
 
@@ -1306,9 +1342,9 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) max-content;
   }
 
-  .topbar[data-chrome="float"] .logo-mobile-banner { grid-area: 1 / 1 / 2 / 3; }
-  /* Spans 2-3 so track 3 measures the -/+ block alone, exactly as in the
-     stacked arrangement. */
+  /* Column 1 only — the same cell collision as the stacked arrangement had. */
+  .topbar[data-chrome="float"] .logo-mobile-banner { grid-area: 1 / 1 / 2 / 2; }
+  /* Spans 2-3 so track 3 measures the -/+ block alone. */
   .topbar[data-chrome="float"] .nav-rail           { grid-area: 1 / 2 / 2 / 4; }
 
   .topbar[data-chrome="float"] .legend-pair-tools  { grid-area: 2 / 1 / 4 / 3; }
