@@ -1293,17 +1293,28 @@
   background: var(--plate-bg-unblurred);
 }
 
-/* One control, one set of edges. */
+/* One control, one set of edges — but the panel is NOT the control's width.
+   `width: 100%` tied the menu to its trigger, and once the pills narrow (half
+   width and below) that clipped every label to a strip of icons: the counts
+   read "(19" and "(9/", and the type names were gone entirely, while empty map
+   sat to the right of them. A menu has to be readable before it is tidy.
+
+   So the panel sizes to its own CONTENT and only borrows the control's width
+   as a FLOOR — `min-width: 100%` keeps the seam flush under the pill, which is
+   the part that did depend on matching. */
 .topbar[data-chrome="float"] .mode-dropdown,
 .topbar[data-chrome="float"] .vote-type-dropdown {
   left: 0;
   right: auto;
-  width: 100%;
-  /* border-box, or `width: 100%` is the CONTENT width and the panel's own 1px
-     edges push it 2px past the control on the right. */
+  width: max-content;
+  min-width: 100%;
+  /* Grow leftward-in-place rather than shrink: the cap is the viewport, not
+     the trigger, so the panel keeps its full text until it genuinely runs out
+     of screen. The inset keeps it off the right edge at the widest layouts. */
+  max-width: min(92vw, 560px);
+  /* border-box, or the width above is the CONTENT width and the panel's own
+     1px edges push it 2px past the control on the right. */
   box-sizing: border-box;
-  min-width: 0;
-  max-width: none;
 }
 
 
@@ -1590,7 +1601,12 @@
 .topbar[data-chrome="float"] .vote-type-dropdown {
   left: 0;
   right: auto;
-  width: 100%;
+  /* Content-sized, with the control's width only as a floor — see the block
+     above. This rule wins on order, so the sizing has to be repeated here or
+     the panel goes back to being clipped to its trigger at every width. */
+  width: max-content;
+  min-width: 100%;
+  max-width: min(92vw, 560px);
   box-sizing: border-box;
   top: 100%;
   border-top: 0;
