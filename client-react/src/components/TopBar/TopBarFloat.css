@@ -58,6 +58,13 @@
      is the BLURRED average of the tiles, never a single bright pixel. */
   --plate-tint: color-mix(in srgb, var(--paper) 92%, var(--ink));
   --plate-bg: color-mix(in srgb, var(--plate-tint) 72%, transparent);
+  /* For a plate that cannot use the blur. 72% works everywhere else because an
+     18px backdrop blur turns the map behind it into a smooth wash; without it
+     the tiles stay sharp and whatever is drawn on top competes with street
+     lines and labels rather than sitting on a surface. More of the plate's own
+     body stands in for the blur — still translucent, so the chrome still reads
+     as floating, but quiet enough to put icons on. Only .nav-group needs it. */
+  --plate-bg-unblurred: color-mix(in srgb, var(--plate-tint) 88%, transparent);
   --plate-blur: blur(18px) saturate(1.25);
   /* The edge does the separating on a dark basemap, where a black drop shadow
      has nothing left to darken. */
@@ -374,13 +381,18 @@
   justify-content: stretch;
   align-content: stretch;
   justify-items: stretch;
-  /* content-box so the two 44px cells are exactly the content width and the
-     container's own 1px edge sits outside them */
-  box-sizing: content-box;
-  /* Two squares of the band's row, so the block matches the rows it spans on
-     both axes. (`aspect-ratio` on the cells was circular here — the column is
-     content-sized, so the width depended on a height that depended on it, and
-     Chrome resolved the whole block to zero.) */
+  /* border-box, and the height comes from the two rows it spans. Sized
+     content-box with an explicit height it was 2px TALLER than the pills
+     beside it (its own edges rode outside the number), and its inner rows came
+     out 1px shorter than --float-row — which is why the cells measured
+     31.4 x 30.4 instead of square. Letting the span define the outer box and
+     the cells derive from the inner one fixes both at once. */
+  box-sizing: border-box;
+  /* Explicit, NOT fit-content, and the cells below are explicit too rather
+     than aspect-ratio. Grid sizes columns before rows, so an aspect-ratio cell
+     whose height comes from a row has no resolvable width at column-sizing
+     time: the container hangs. (It did — the renderer locked up.) Two rows of
+     --float-row with the block's own edges inside them. */
   width: calc(2 * var(--float-row));
   justify-self: start;
   align-self: stretch;
@@ -677,9 +689,11 @@
 
 .topbar[data-chrome="float"] .btn-cast {
   flex: 0 0 auto;
-  /* Square: one row wide, one row tall. */
+  /* Square: the block's outer box is the 2-row span, so its inner height is
+     that minus its own 2px of edges, and each of the two rows is
+     --float-row - 1. The width matches that exactly. */
   height: 100%;
-  width: var(--float-row);
+  width: calc(var(--float-row) - 1px);
   box-sizing: border-box;
   padding: 0;
   margin: 0;
@@ -789,7 +803,18 @@
        the 1fr column gives way instead. */
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: auto repeat(4, var(--float-row));
+    /* Row 4 IS the gap. It was a margin-top on the blocks that start the
+       picker row, which works for a one-row pill but silently SQUASHES the
+       -/+ block: that block stretches across two rows, so a top margin came
+       out of its height and its cells measured 30.4 x 26.4 instead of square.
+       A spacer row pushes instead of shrinking. */
+    grid-template-rows:
+      auto                  /* wordmark + rail */
+      var(--float-row)      /* Start           */
+      var(--float-row)      /* End             */
+      var(--float-gap)      /* the gap         */
+      var(--float-row)      /* Map             */
+      var(--float-row);     /* Vote            */
     align-items: stretch;
     column-gap: var(--float-gap);
     row-gap: 0;
@@ -848,18 +873,9 @@
 
   .topbar[data-chrome="float"] .legend-pair-tools { grid-area: 2 / 1 / 4 / 2; }
   .topbar[data-chrome="float"] .legend-pair-key   { grid-area: 2 / 2 / 4 / 3; }
-  .topbar[data-chrome="float"] .mode-switcher-group { grid-area: 4 / 1; }
-  .topbar[data-chrome="float"] .vote-switcher-group { grid-area: 5 / 1; }
-  .topbar[data-chrome="float"] .actions-group       { grid-area: 4 / 2 / 6 / 3; }
-
-  /* The vertical half of --float-gap. row-gap cannot carry it (that would also
-     split the legend's two cells, which must touch), so the blocks that START
-     the picker row take it as a top margin. Same token as the column-gap, so
-     the space below the Start/End block is the space beside it. */
-  .topbar[data-chrome="float"] .mode-switcher-group,
-  .topbar[data-chrome="float"] .actions-group {
-    margin-top: var(--float-gap);
-  }
+  .topbar[data-chrome="float"] .mode-switcher-group { grid-area: 5 / 1; }
+  .topbar[data-chrome="float"] .vote-switcher-group { grid-area: 6 / 1; }
+  .topbar[data-chrome="float"] .actions-group       { grid-area: 5 / 2 / 7 / 3; }
 
   /* Stacked in one column, End sits above Map, so the pill edges fall between
      different pairs than they do on the desktop grid. */
@@ -1144,6 +1160,14 @@
 .topbar[data-chrome="float"] .nav-group {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  /* The icons read faint, and it is NOT the glyphs: they are already full
+     --ink at opacity 1, the same ink every other control in the bar uses. It
+     is this surface. Losing the blur (above) is what did it — the map stays
+     sharp behind the cluster, so the strokes compete with tile detail instead
+     of sitting on a wash, and the same ink that reads solid on a blurred plate
+     reads ghostly here. So the fix is the surface, not the ink: nothing about
+     the icons changes. */
+  background: var(--plate-bg-unblurred);
 }
 
 /* One control, one set of edges. */
@@ -1259,14 +1283,59 @@
 
   /* One row, side by side. They still sit BELOW the Start/End block and the
      legend — only these two share a row, and only with each other. */
-  .topbar[data-chrome="float"] .mode-switcher-group { grid-area: 4 / 1 / 5 / 2; }
-  .topbar[data-chrome="float"] .vote-switcher-group { grid-area: 4 / 2 / 5 / 3; }
-  .topbar[data-chrome="float"] .actions-group       { grid-area: 4 / 3 / 6 / 4; }
+  .topbar[data-chrome="float"] .mode-switcher-group { grid-area: 5 / 1 / 6 / 2; }
+  .topbar[data-chrome="float"] .vote-switcher-group { grid-area: 5 / 2 / 6 / 3; }
+
+  /* The action block follows the pickers. They share a row here, so it is a
+     single row too — minus, plus, Clear, side by side — and the group's bottom
+     edge is one line instead of the block hanging below its neighbours.
+
+     This is why the two responsive rules are ONE band rather than two that can
+     disagree: the pickers going side by side and the block going to one row
+     are the same decision about how much width this bar has. Outside the band
+     both revert together. */
+  .topbar[data-chrome="float"] .actions-group {
+    grid-area: 5 / 3 / 6 / 4;
+    display: flex;
+    align-items: stretch;
+    /* Content-sized: two squares plus whatever Clear needs. border-box so the
+       block's outer height IS one row — content-box left it 2px taller than
+       the pills beside it and the group's bottom edge came out ragged. */
+    box-sizing: border-box;
+    width: auto;
+    height: var(--float-row);
+  }
+
+  .topbar[data-chrome="float"] .cast-group {
+    width: auto;
+    height: 100%;
+    margin-top: 0;
+  }
+
+  /* Still square — one row wide, one row tall. A flex row must not squash
+     these into rectangles, hence the fixed basis rather than a flex grow. */
+  /* One row here, so the inner height is --float-row minus the block's two
+     edges, and the squares follow that. */
+  .topbar[data-chrome="float"] .btn-cast {
+    flex: 0 0 auto;
+    width: calc(var(--float-row) - 2px);
+    height: 100%;
+  }
+
+  /* Sized to its own text with real padding, never stretched to fill. The
+     divider between it and the plus turns from a top border into a left one,
+     because the block is now a row. */
+  .topbar[data-chrome="float"] .btn-clear {
+    width: auto;
+    flex: 0 0 auto;
+    height: 100%;
+    padding: 0 var(--space-3);
+    border-top: 0;
+    border-left: 1px solid var(--plate-line);
+  }
 
   /* Both start the picker row now, so both take the vertical gap. */
-  .topbar[data-chrome="float"] .vote-switcher-group {
-    margin-top: var(--float-gap);
-  }
+
 
   /* The empty-state span belongs to the stacked arrangement; here each pill
      already has its own column and the block's column collapses on its own. */
@@ -1320,12 +1389,25 @@
   height: 100%;
 }
 
-/* ONE anchor: left, width and top, all from the control's box. */
+/* ONE anchor: left, width and top, all from the control's box.
+
+   FLUSH — top: 100%, no offset. The panel's top edge lands exactly on the
+   input's bottom edge so the two read as one continuous surface, rather than
+   two objects with a slot of map between them.
+
+   And flush means ONE line at the seam, not two. The pill already draws a
+   hairline along its bottom edge, and the panel would draw its own along its
+   top; both are --plate-line, which is translucent, so stacking them in the
+   same pixel composites to a visibly darker, heavier rule than any other line
+   in the band. The panel gives its up, so the pill's edge is the single seam.
+   With the corners squared there is no radius to disguise a join, so this has
+   to be exact rather than close. */
 .topbar[data-chrome="float"] .mode-dropdown,
 .topbar[data-chrome="float"] .vote-type-dropdown {
   left: 0;
   right: auto;
   width: 100%;
   box-sizing: border-box;
-  top: calc(100% + var(--float-gap));
+  top: 100%;
+  border-top: 0;
 }
