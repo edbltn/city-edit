@@ -35,7 +35,7 @@ import {
   formatProposalCount, proposalLabelText, proposalRevealZoom,
 } from "../MapLibreBackground/proposalLabelStyle";
 import { makeVoteTypeIcon } from "./voteTypeIcon";
-import { pointPinZIndexOffset, routePinZIndexOffset } from "./pinStacking";
+import { pinZIndexOffset } from "./pinStacking";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import {
   candidatesForGraph, selectTopProposalsFrom, topLabelForEdges,
@@ -4555,14 +4555,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           key={w.edgeIdx}
           position={[posLat, posLng]}
           icon={icon}
-          // Stacking: a state BAND and nothing else. Inside a band Leaflet's own
-          // ordering takes over, which is by latitude — the southern (nearer)
-          // pin paints on top. The bands, and why there is no in-band term any
-          // more, are in pinStacking.ts.
-          zIndexOffset={pointPinZIndexOffset({
+          // Stacking: a state BAND and nothing else — the SAME function the
+          // corridor diamonds call, so the two kinds share one ordering space
+          // and latitude decides between them. Inside a band Leaflet's own
+          // ordering takes over, which is by latitude: the southern (nearer)
+          // pin paints on top. See pinStacking.ts.
+          zIndexOffset={pinZIndexOffset({
             fanned: !!override,
             matchedWaypoint: role !== null,
-            selected: w.edgeIdx === selectedEdgeIdx,
+            active: w.edgeIdx === selectedEdgeIdx,
           })}
           onActivate={activateIndicator}
           onDeactivate={deactivateIndicator}
@@ -4853,13 +4854,14 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           key={`route-${p.id}`}
           position={[posLat, posLng]}
           icon={icon}
-          // Route diamonds sit ABOVE every settled point icon (matched/selected/
-          // browse) so a corridor is never buried under point pins; covered ones
-          // outrank uncovered; the fanned-out spread alone stays above them
-          // (it's the explicit disambiguation gesture) — a fanned diamond joins
-          // that top band with the fanned squares. Within a band, latitude
-          // orders them, exactly as it does the squares. See pinStacking.ts.
-          zIndexOffset={routePinZIndexOffset({ fanned: !!override, covered })}
+          // The SAME bands the point pins use, and no corridor band of its own:
+          // a diamond and a square that overlap are ordered by latitude, like
+          // any two pins. `covered` is a corridor's version of "this is the one
+          // being acted on", so it takes the same band a selected point pin
+          // does. See pinStacking.ts.
+          zIndexOffset={pinZIndexOffset({
+            fanned: !!override, matchedWaypoint: false, active: covered,
+          })}
           onActivate={activate}
           onDeactivate={deactivate}
           onClick={() => {
