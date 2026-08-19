@@ -152,12 +152,14 @@
 .vote-type-dropdown {
   position: absolute;
   top: calc(100% + var(--space-1));
-  /* Locked to the selection box's left edge and grows rightward with its
-     content. `max-width` is set inline (JS) to the gap between the box's left
-     and the viewport's right edge, so long labels extend to the screen edge
+  /* Anchored to the selection box's RIGHT edge and grows leftward with its
+     content — the vote pill is the right-hand picker, so a left-anchored menu
+     wider than its trigger ran off the screen. `max-width` is set inline (JS)
+     from the box's right edge to the viewport's left, so long labels extend
+     toward the screen edge
      then ellipsize (via .vote-type-label) rather than overflowing it. */
-  left: 0;
-  right: auto;
+  left: auto;
+  right: 0;
   width: max-content;
   min-width: 100%;
   /* The legend lists every vote type on the map — 20+ on curated maps — so it

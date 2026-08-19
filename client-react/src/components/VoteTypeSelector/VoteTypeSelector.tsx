@@ -186,17 +186,26 @@ export const VoteTypeSelector = memo(function VoteTypeSelector() {
     setHighlightedIndex(0);
   }, [inputValue]);
 
-  // Cap the dropdown at the viewport's right edge: its CSS width is `max-content`
-  // (grows with the longest label), so without a cap a long custom suggestion
-  // could run off-screen. Measure once on open and on resize — the box itself is
-  // fixed width, so its left edge doesn't move while the dropdown is open.
+  // Cap the dropdown at the viewport edge it grows TOWARD. Its CSS width is
+  // `max-content` (grows with the longest label), so without a cap a long
+  // custom suggestion runs off-screen.
+  //
+  // It grows LEFTWARD: the panel anchors to its own right edge, because the
+  // vote pill is the right-hand of the two pickers and a left-anchored menu
+  // wider than its trigger went straight off the screen. So the room available
+  // is the distance from the control's RIGHT edge to the left of the viewport —
+  // measuring from `left` (as this did) caps it against the wrong side, which
+  // left the panel short of the pill's right edge instead of flush with it.
+  //
+  // Measured on open and on resize; the box is fixed width, so its edges don't
+  // move while the dropdown is open.
   useLayoutEffect(() => {
     if (!isOpen) return;
     const update = () => {
       const el = containerRef.current;
       if (!el) return;
-      const { left } = el.getBoundingClientRect();
-      setDropdownMaxWidth(Math.max(240, Math.round(window.innerWidth - left - 8)));
+      const { right } = el.getBoundingClientRect();
+      setDropdownMaxWidth(Math.max(240, Math.round(right - 8)));
     };
     update();
     window.addEventListener("resize", update);
