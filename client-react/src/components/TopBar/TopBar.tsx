@@ -98,11 +98,25 @@ export const TopBar = memo(function TopBar() {
       ? "click map to set endpoint"
       : "click here to set endpoint";
 
+  // LIT MEANS "THIS ROW HOLDS A POINT", derived from the point itself on every
+  // render. It used to mean "this tool is armed" — `activeTool` — and that is
+  // why the bar could show a highlight over an empty map: `activeTool` rests at
+  // "start", so "nothing selected" and "Start armed" are the same state and the
+  // row was lit through both. Clearing looked like the bug because clearPoints
+  // resets the flag to "start", which is the lit value; so did deleting the last
+  // waypoint, and so did arriving on the page. Nothing was going stale — the
+  // flag simply never answered the question the colour was asking.
+  //
+  // Derived state cannot drift out of step with what it describes: there is no
+  // path that removes a point without this recomputing, because it IS the point.
+  // Which tool the next map click feeds is still real and still tracked; it is
+  // just not what this colour is for. The row says what it holds, and the text
+  // inside it ("click map to set start") says what it wants.
   const startToolClass = ["legend-item", "legend-item-coords", "legend-tool"];
-  if (!isPointOnly && activeTool === "start") startToolClass.push("active");
+  if (start.coords) startToolClass.push("active");
 
   const endToolClass = ["legend-item", "legend-item-coords", "legend-tool"];
-  if (activeTool === "end") endToolClass.push("active");
+  if (end.coords) endToolClass.push("active");
 
   const startCoordsClass = ["legend-coords"];
   if (!start.coords) startCoordsClass.push("empty");
