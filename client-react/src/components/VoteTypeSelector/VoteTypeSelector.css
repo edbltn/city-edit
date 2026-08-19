@@ -189,7 +189,11 @@
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3) var(--space-2) var(--space-3);
   border-top: 1px solid var(--hairline);
-  font-size: var(--font-size-2xs);
+  /* One text size for everything inside the open panel. The section headers,
+     the row labels and the counts were three different sizes in one menu,
+     which read as noise rather than hierarchy. Hierarchy here is carried by
+     letter-spacing, uppercase and colour — all of which survive at one size. */
+  font-size: var(--control-font-size);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink);
@@ -387,7 +391,9 @@
 }
 
 .vt-net {
-  font-size: var(--font-size-2xs);
+  /* Same size as the label it sits beside — the count is de-emphasised by
+     opacity, not by being smaller. */
+  font-size: var(--control-font-size);
   font-variant-numeric: tabular-nums;
   color: var(--ink);
   opacity: 0.55;
@@ -406,7 +412,7 @@
   border: 1px solid var(--hairline);
   background: var(--paper);
   font: inherit;
-  font-size: var(--font-size-2xs);
+  font-size: var(--control-font-size);
   color: var(--ink);
   cursor: pointer;
   opacity: 0;

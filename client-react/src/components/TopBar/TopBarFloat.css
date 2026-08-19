@@ -1611,3 +1611,15 @@
   top: 100%;
   border-top: 0;
 }
+
+/* The VOTE panel anchors to its own RIGHT edge, so a menu wider than its pill
+   grows LEFTWARD, into the bar, instead of rightward off the screen. The vote
+   pill is the right-hand of the two, so left-anchoring sent its full-width
+   panel straight past the viewport and the labels were cut off again — the
+   very thing content-sizing was meant to fix. Growing left costs nothing:
+   there is always bar and map to its left, never guaranteed screen to its
+   right. The map picker keeps left: 0, being the left-hand pill. */
+.topbar[data-chrome="float"] .vote-type-dropdown {
+  left: auto;
+  right: 0;
+}
