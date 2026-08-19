@@ -1,0 +1,555 @@
+diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx
+index 8e6fd35..a7656f6 100644
+--- a/client-react/src/components/GraphLayer/GraphLayer.tsx
++++ b/client-react/src/components/GraphLayer/GraphLayer.tsx
+@@ -97,7 +97,7 @@ import { pendingCastsFor, settlePendingCastsForDelta } from "../../utils/pending
+ import {
+   useProposalAudience, describeAudience, MIN_VIEWS_SHOWN,
+ } from "../../hooks/useProposalAudience";
+-import { dlog, dwarn, derror, debugState, debugProbe } from "../../utils/debugLog";
++import { dlog, dburst, dwarn, derror, debugState, debugProbe } from "../../utils/debugLog";
+ import { useVotesVersion } from "../../utils/useVotesVersion";
+ import { getVoterId } from "../../utils/voterIdentity";
+ import { isHoverSuppressed } from "../../utils/touchHover";
+@@ -1567,8 +1567,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   }>({ epoch: -1, eligible: null, byType: new Map(), eligibleLegendLen: 0 });
+ 
+   const publishRouteProposals = useCallback((next: RouteProposal[], note: string) => {
++    // Top few only: the full list is twenty-odd corridors of label#id(score),
++    // which is a paragraph per sweep. cityedit.dumpState() has the count, and
++    // the ranking question is always about the head of the list.
++    const head = next.slice(0, 5).map((p) => `${p.label}#${p.id}(${p.score})`);
+     dlog("proposals", `recompute: ${next.length} corridors ${note}`,
+-      next.map((p) => `${p.label}#${p.id}(${p.score})`));
++      head.join(" ") + (next.length > head.length ? ` …+${next.length - head.length}` : ""));
+     debugState("routeProposals", next.length);
+     // Clustering is deterministic, so an unchanged vote state yields an
+     // identical list — keep the previous array to avoid remounting diamonds.
+@@ -1840,7 +1844,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+   const staleVotesRetriesRef = useRef(0);
+   const staleVotesTimerRef = useRef<number | null>(null);
+   const scheduleStaleVotesRefetch = useCallback(() => {
+-    if (staleVotesRetriesRef.current >= STALE_VOTES_MAX_RETRIES) return;
++    if (staleVotesRetriesRef.current >= STALE_VOTES_MAX_RETRIES) {
++      // Out of retries with the server still serving a snapshot behind its own
++      // revision: the heatmap is now knowingly stale, which is worth saying out
++      // loud once rather than going quiet.
++      if (staleVotesRetriesRef.current === STALE_VOTES_MAX_RETRIES) {
++        staleVotesRetriesRef.current += 1;  // warn once, not once per attempt
++        dwarn("votes", `still served a rev-stale snapshot after `
++          + `${STALE_VOTES_MAX_RETRIES} refetches — heatmap may lag until reload`);
++      }
++      return;
++    }
+     if (staleVotesTimerRef.current != null) return; // one pending retry is enough
+     staleVotesRetriesRef.current += 1;
+     dlog("votes", "served a rev-stale snapshot — refetching in "
+@@ -2344,7 +2358,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+         return;
+       }
+ 
+-      dlog("votes", `delta rev ${delta.rev}: "${delta.vtLabel ?? delta.vt}" `
++      dburst("votes", "delta", `delta rev ${delta.rev}: "${delta.vtLabel ?? delta.vt}" `
+         + `edges=${delta.edges.length} blocks=${Object.keys(delta.blockCounts ?? {}).length}`);
+       const legendLenBefore = graphDataRef.current?.vote_type_legend?.length ?? 0;
+       applyDeltaToGraphData(delta);
+@@ -4213,7 +4227,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
+         });
+       }
+     }
+-    dlog("proposals", `labels broadcast: ${detail.length}`
++    // Re-broadcast on every winners/proposal change AND again as each corridor's
++    // voter count lands, so this arrives in flurries — one line per flurry.
++    dburst("proposals", "labels", `labels broadcast: ${detail.length}`
+       + ` (${points.length} point, ${routes.length} route`
+       + `, ${pending} awaiting voter counts)`);
+     window.dispatchEvent(new CustomEvent<ProposalLabelDetail[]>(
+diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+index 2f9a1f8..cbb2b2b 100644
+--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
++++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx
+@@ -10,7 +10,7 @@ import { useEffect, useRef } from "react";
+ import maplibregl from "maplibre-gl";
+ import { Protocol } from "pmtiles";
+ import { CONFIG, type BlockTilesConfig } from "../../config";
+-import { dlog, dwarn, debugState } from "../../utils/debugLog";
++import { dlog, dburst, dwarn, debugState } from "../../utils/debugLog";
+ import {
+   maplibreRasterTiles,
+   maplibreLabelTiles,
+@@ -1085,8 +1085,13 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+           ?.mark("first-heat-apply");
+       }
+       applied.current = { heat: next, denomKey, norm };
+-      dlog("blocks", `heat apply (${full ? "full" : "diff"}): ${writes} writes, ${next.size} lit`
+-        + (animate ? `, ${changes.length} arriving (${arrival.size} in flight)` : ""));
++      // A diff that wrote nothing changed nothing — the interesting applies are
++      // the ones that moved heat, and votes can move it in bursts.
++      if (writes > 0 || full) {
++        dburst("blocks", "heat",
++          `heat apply (${full ? "full" : "diff"}): ${writes} writes, ${next.size} lit`
++          + (animate ? `, ${changes.length} arriving (${arrival.size} in flight)` : ""));
++      }
+       debugState("blockHeatNonzero", next.size);
+     };
+ 
+@@ -1100,7 +1105,8 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+     // which would also drop the heat key set above.
+     const onSelect = (e: Event) => {
+       const next = (e as CustomEvent<BlockSelectDetail>).detail.blockIds;
+-      dlog("blocks", `select: [${next.slice(0, 12).join(",")}${next.length > 12 ? ",…" : ""}]`);
++      dburst("blocks", "select",
++        `select: [${next.slice(0, 12).join(",")}${next.length > 12 ? ",…" : ""}]`);
+       const ml = mapRef.current;
+       if (ml && ml.getSource("blocks")) {
+         const nextSet = new Set(next);
+@@ -1164,7 +1170,6 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa
+           properties: { key: p.key, text: p.text, count: p.count, rank: p.rank, minz: p.minz },
+         })),
+       });
+-      dlog("maplibre", `proposal labels: ${items.length} features`);
+       debugState("proposalLabels", items.length);
+     };
+ 
+diff --git a/client-react/src/context/RouteContext.tsx b/client-react/src/context/RouteContext.tsx
+index f98d77a..41645ba 100644
+--- a/client-react/src/context/RouteContext.tsx
++++ b/client-react/src/context/RouteContext.tsx
+@@ -17,7 +17,7 @@ import { blockCoverage, type VoteDirection } from "../utils/voteStore";
+ import { useVotesVersion } from "../utils/useVotesVersion";
+ import { castVotes, voteButtonState } from "../utils/castVote";
+ import { reverseGeocode } from "../utils/geocode";
+-import { dlog, derror } from "../utils/debugLog";
++import { dwarn, derror } from "../utils/debugLog";
+ import { useTheme } from "./ThemeContext";
+ import { useGraphSnap } from "./GraphSnapContext";
+ import type { ForcedCorridor, Selection } from "../selection/types";
+@@ -666,7 +666,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+           if (failed.length > 0) {
+             // Partial geometry would read as a complete route (and every
+             // consumer indexes split paths positionally), so show none of it.
+-            dlog("proposals", "no route for segment(s)", failed, "— clearing path");
++            dwarn("proposals", "no route for segment(s)", failed, "— clearing path");
+             setSplitDesirePaths([]);
+             setError(NO_ROUTE_MESSAGE);
+             return;
+@@ -715,7 +715,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {
+         if (calcVersion !== splitCalcVersionRef.current || aborted) return false;
+ 
+         if (failed.length > 0 || paths.length !== mids.length + 1) {
+-          dlog("proposals", "no route to dropped waypoint", pending.coords, "— not adding it");
++          dwarn("proposals", "no route to dropped waypoint", pending.coords, "— not adding it");
+           setPendingWaypoint(null);
+           setError(NO_ROUTE_MESSAGE);
+           return false;
+diff --git a/client-react/src/context/WebSocketContext.tsx b/client-react/src/context/WebSocketContext.tsx
+index 5d29201..06c1ce9 100644
+--- a/client-react/src/context/WebSocketContext.tsx
++++ b/client-react/src/context/WebSocketContext.tsx
+@@ -63,6 +63,12 @@ interface WebSocketContextValue {
+     label: string, blockIds: number[]) => Promise<ViewCount | null>;
+ }
+ 
++/** A socket closed by our own teardown carries this flag. The mark lives on the
++ *  socket itself — not in a ref (a remount racing the old socket's close event
++ *  would mistake its own connection for the dead one) and not in a module-level
++ *  set (the dev server can hand out more than one instance of a module). */
++type MarkedSocket = WebSocket & { __cityeditTeardown?: boolean };
++
+ const WebSocketContext = createContext<WebSocketContextValue | null>(null);
+ 
+ export function WebSocketProvider({ children }: { children: ReactNode }) {
+@@ -201,6 +207,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
+     };
+ 
+     ws.onclose = () => {
++      // A socket WE closed (provider unmount — in dev, StrictMode's throwaway
++      // first mount) is not a disconnection to warn about, and nothing is left
++      // to reconnect for: the next mount opens its own.
++      if ((ws as MarkedSocket).__cityeditTeardown) {
++        dlog("ws", "closed by teardown");
++        return;
++      }
+       dwarn("ws", `disconnected — reconnecting in ${backoffRef.current}ms`);
+       setConnectionStatus("disconnected");
+       // We can no longer see the room, so we must stop claiming to. Leaving
+@@ -225,7 +238,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
+     connect();
+     return () => {
+       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+-      if (wsRef.current) wsRef.current.close();
++      if (wsRef.current) {
++        (wsRef.current as MarkedSocket).__cityeditTeardown = true;
++        wsRef.current.close();
++      }
+     };
+   }, [connect]);
+ 
+diff --git a/client-react/src/onboarding/firstRun.ts b/client-react/src/onboarding/firstRun.ts
+index 5a052db..3a8391a 100644
+--- a/client-react/src/onboarding/firstRun.ts
++++ b/client-react/src/onboarding/firstRun.ts
+@@ -73,7 +73,7 @@
+ // ==========================================================================
+ 
+ import { CONFIG } from "../config";
+-import { dlog } from "../utils/debugLog";
++import { dlog, dwarn } from "../utils/debugLog";
+ import { getVoterId } from "../utils/voterIdentity";
+ 
+ /** Written the moment the wall is shown, and again when the flow ends.
+@@ -132,6 +132,9 @@ export function unsuppress(): void {
+   }
+ }
+ 
++/** The one in-flight /api/visitor probe, shared by every caller. */
++let visitorProbe: Promise<boolean> | null = null;
++
+ /**
+  * Has the person behind this request opened a map before this one?
+  *
+@@ -143,7 +146,16 @@ export function unsuppress(): void {
+ export async function hasVisitedBefore(): Promise<boolean> {
+   const cached = readStore(window.sessionStorage, ANSWER_KEY);
+   if (cached === "1" || cached === "0") return cached === "1";
++  // The sessionStorage answer is only written once the reply lands, so two
++  // callers in the same tick (a remount, two consumers of the flow) would each
++  // fire their own probe and each log its own answer. One in-flight probe is
++  // enough — everyone waits on it.
++  if (visitorProbe) return visitorProbe;
++  visitorProbe = probeVisitor().finally(() => { visitorProbe = null; });
++  return visitorProbe;
++}
+ 
++async function probeVisitor(): Promise<boolean> {
+   try {
+     const url =
+       `${CONFIG.apiUrl}/visitor?voter_id=${encodeURIComponent(getVoterId())}`;
+@@ -155,7 +167,7 @@ export async function hasVisitedBefore(): Promise<boolean> {
+     writeStore(window.sessionStorage, ANSWER_KEY, visited ? "1" : "0");
+     return visited;
+   } catch {
+-    dlog("onboard", "visitor probe failed — assuming a returning visitor");
++    dwarn("onboard", "visitor probe failed — assuming a returning visitor");
+     return true;
+   }
+ }
+diff --git a/client-react/src/utils/debugLog.test.ts b/client-react/src/utils/debugLog.test.ts
+new file mode 100644
+index 0000000..5f51f15
+--- /dev/null
++++ b/client-react/src/utils/debugLog.test.ts
+@@ -0,0 +1,106 @@
++// ==========================================================================
++// Debug logging: off by default, and bursts cost two lines, not two hundred
++// ==========================================================================
++// The console is a debugging aid only while it is readable. These pin the two
++// promises that keep it that way: a channel nobody asked for prints nothing at
++// all, and a stream that fires per hover / per delta / per frame collapses to
++// its first line plus one summary.
++
++import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
++import { dlog, dburst, dwarn, derror, _setDebugChannels } from "./debugLog";
++
++let log: ReturnType<typeof vi.spyOn>;
++let warn: ReturnType<typeof vi.spyOn>;
++let error: ReturnType<typeof vi.spyOn>;
++
++beforeEach(() => {
++  // `performance` too: the burst summaries measure elapsed time with
++  // performance.now(), and a frozen clock would hide the max-window flush.
++  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
++  log = vi.spyOn(console, "log").mockImplementation(() => {});
++  warn = vi.spyOn(console, "warn").mockImplementation(() => {});
++  error = vi.spyOn(console, "error").mockImplementation(() => {});
++  _setDebugChannels("");
++});
++
++afterEach(() => {
++  _setDebugChannels("");
++  vi.useRealTimers();
++  vi.restoreAllMocks();
++});
++
++/** Every line the console was handed, joined the way devtools shows it. */
++function lines(): string[] {
++  return log.mock.calls.map((args) => args.join(" "));
++}
++
++describe("dlog", () => {
++  it("says nothing on a channel nobody enabled", () => {
++    dlog("blocks", "select: [1]");
++    dburst("blocks", "select", "select: [1]");
++    vi.advanceTimersByTime(10000);
++    expect(log).not.toHaveBeenCalled();
++  });
++
++  it("prints on an enabled channel only", () => {
++    _setDebugChannels("blocks");
++    dlog("blocks", "in");
++    dlog("votes", "out");
++    expect(lines()).toEqual(["[blocks] in"]);
++  });
++});
++
++describe("dburst", () => {
++  beforeEach(() => _setDebugChannels("blocks"));
++
++  it("prints the first event and summarises the rest of the burst", () => {
++    dburst("blocks", "select", "select: [1]");
++    for (let i = 2; i <= 40; i++) {
++      vi.advanceTimersByTime(50);
++      dburst("blocks", "select", `select: [${i}]`);
++    }
++    expect(lines()).toEqual(["[blocks] select: [1]"]);   // 39 events, one line
++
++    vi.advanceTimersByTime(1000);                        // …the burst goes quiet
++    expect(lines()).toHaveLength(2);
++    expect(lines()[1]).toMatch(/^\[blocks\] \+39 more in \d+ms — last: select: \[40\]$/);
++  });
++
++  it("reports a stream that never goes quiet instead of hiding behind line one", () => {
++    for (let i = 0; i < 400; i++) {           // 20s of an every-50ms loop
++      dburst("blocks", "heat", `heat apply: ${i}`);
++      vi.advanceTimersByTime(50);
++    }
++    // One opening line, then a summary every 5s — never one line per event.
++    expect(lines().length).toBeGreaterThan(1);
++    expect(lines().length).toBeLessThan(12);
++    expect(lines().filter((l) => l.includes("more in")).length).toBeGreaterThan(0);
++  });
++
++  it("keeps separate streams separate", () => {
++    dburst("blocks", "select", "select: [1]");
++    dburst("blocks", "heat", "heat apply: 1");
++    expect(lines()).toEqual(["[blocks] select: [1]", "[blocks] heat apply: 1"]);
++  });
++
++  it("starts a fresh line once a burst has been summarised", () => {
++    dburst("blocks", "select", "a");
++    dburst("blocks", "select", "b");
++    vi.advanceTimersByTime(1000);
++    dburst("blocks", "select", "c");
++    expect(lines()).toEqual([
++      "[blocks] a",
++      expect.stringMatching(/^\[blocks\] \+1 more in \d+ms — last: b$/),
++      "[blocks] c",
++    ]);
++  });
++});
++
++describe("dwarn / derror", () => {
++  it("survive the channel being off — a failure is not chatter", () => {
++    dwarn("votes", "topology/vote dimension mismatch");
++    derror("topo", "topology decode failed");
++    expect(warn).toHaveBeenCalledWith("[votes]", "topology/vote dimension mismatch");
++    expect(error).toHaveBeenCalledWith("[topo]", "topology decode failed");
++  });
++});
+diff --git a/client-react/src/utils/debugLog.ts b/client-react/src/utils/debugLog.ts
+index ef4961e..517c95c 100644
+--- a/client-react/src/utils/debugLog.ts
++++ b/client-react/src/utils/debugLog.ts
+@@ -7,10 +7,14 @@
+ // pattern "\[cast\]|\[blocks\]|…") can filter reliably.
+ //
+ // Channels are off by default in normal use. Enable them per tab:
+-//   • open the app with ?tab=<name>   → names the tab AND enables all channels
++//   • open the app with ?tab=<name>   → names the tab AND enables TAB_CHANNELS
++//   • add ?debug=cast,blocks (or ?debug=* / ?debug=off) to override that
+ //   • or in the console: cityedit.debug.enable("cast,blocks") / .enable("*")
+ //   • or persistently: localStorage.cityedit_debug = "*"
+ //
++// Anything that can fire per hover, per delta or per frame goes through
++// dburst() instead of dlog(), so a burst costs two lines, not two hundred.
++//
+ // A named tab gets "[dbg:<name>]" appended to its <title> (kept there by a
+ // MutationObserver, since the app rewrites the title on map changes) and the
+ // name survives reloads via sessionStorage — so "the tab called eric" is
+@@ -34,6 +38,12 @@ const ALL_CHANNELS: readonly DebugChannel[] = [
+   "sticker", "audience", "onboard", "ws",
+ ];
+ 
++// What a named ?tab=<name> turns on. Every channel is quiet enough now (the
++// per-hover / per-delta streams go through dburst) that all-on stays readable,
++// which is what a debug tab is for: you don't yet know which subsystem is
++// lying to you. Narrow or widen per load with ?debug=<spec>.
++const TAB_CHANNELS: readonly DebugChannel[] = ALL_CHANNELS;
++
+ const STORAGE_KEY = "cityedit_debug";
+ const TAB_KEY = "cityedit_tab_name";
+ 
+@@ -63,14 +73,77 @@ export function derror(channel: DebugChannel, ...args: unknown[]): void {
+   console.error(`[${channel}]`, ...args);
+ }
+ 
++// ── Bursty events ───────────────────────────────────────────────────────────
++// Some things fire per hover, per delta, per frame. One line each turns the
++// console into a scrollback that nobody reads, so those go through dburst:
++// the first event of a burst prints as usual, the rest are counted, and when
++// the burst goes quiet ONE summary line reports how many there were, how long
++// it took, and what the last one said. `key` separates independent streams
++// within a channel (e.g. "select" vs "heat" in `blocks`).
++
++const BURST_QUIET_MS = 800;   // this much silence ends a burst
++const BURST_MAX_MS = 5000;    // …and a burst that never stops reports anyway
++
++type Burst = {
++  channel: DebugChannel; count: number; last: string;
++  t0: number; deadline: number; timer: ReturnType<typeof setTimeout>;
++};
++const bursts = new Map<string, Burst>();
++
++function nowMs(): number {
++  return typeof performance !== "undefined" ? performance.now() : Date.now();
++}
++
++function flushBurst(key: string): void {
++  const b = bursts.get(key);
++  if (!b) return;
++  bursts.delete(key);
++  clearTimeout(b.timer);
++  if (b.count > 0) {
++    console.log(
++      `[${b.channel}] +${b.count} more in ${Math.round(nowMs() - b.t0)}ms — last: ${b.last}`);
++  }
++}
++
++/** Log `message` if `channel` is on, collapsing bursts into one summary line. */
++export function dburst(channel: DebugChannel, key: string, message: string): void {
++  if (!enabled.has(channel)) return;
++  const k = `${channel}\u0000${key}`;
++  const now = nowMs();
++  let b = bursts.get(k);
++  if (!b) {
++    console.log(`[${channel}]`, message);
++    b = { channel, count: 0, last: message, t0: now, deadline: now + BURST_MAX_MS,
++          timer: 0 as unknown as ReturnType<typeof setTimeout> };
++    bursts.set(k, b);
++  } else {
++    b.count += 1;
++    b.last = message;
++    clearTimeout(b.timer);
++  }
++  // Trailing-edge: the summary lands when the stream stops — but a stream that
++  // never stops still reports every BURST_MAX_MS, so a runaway loop is visible
++  // rather than hidden behind its own first line.
++  b.timer = setTimeout(() => flushBurst(k), Math.max(0, Math.min(BURST_QUIET_MS, b.deadline - now)));
++}
++
+ function enable(spec: string = "*"): string[] {
+   for (const c of parseSpec(spec)) enabled.add(c);
+   try { window.localStorage.setItem(STORAGE_KEY, [...enabled].join(",")); } catch { /* private mode */ }
+   return [...enabled];
+ }
+ 
++/** Test hook: set the enabled channels directly, bypassing URL and storage. */
++export function _setDebugChannels(spec: string): void {
++  enabled = parseSpec(spec);
++  for (const b of bursts.values()) clearTimeout(b.timer);
++  bursts.clear();
++}
++
+ function disable(): void {
+   enabled = new Set();
++  for (const b of bursts.values()) clearTimeout(b.timer);
++  bursts.clear();
+   try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* private mode */ }
+ }
+ 
+@@ -132,8 +205,22 @@ export function initDebug(): void {
+ 
+   if (name) {
+     applyTitleSuffix(name);
+-    for (const c of ALL_CHANNELS) enabled.add(c);
+-    console.log(`[dbg] tab "${name}" — all debug channels on. cityedit.debug / cityedit.dumpState() available.`);
++    for (const c of TAB_CHANNELS) enabled.add(c);
++  }
++
++  // ?debug=<spec> is the override, and it wins: "*" for everything, a comma
++  // list for exactly those channels, "off" for none (a named tab you want
++  // silent for one reload).
++  let spec: string | null = null;
++  try { spec = new URLSearchParams(window.location.search).get("debug"); } catch { /* private mode */ }
++  if (spec != null) {
++    enabled = spec.trim() === "off" ? new Set() : parseSpec(spec);
++  }
++
++  if (name || enabled.size > 0) {
++    console.log(
++      `[dbg]${name ? ` tab "${name}" —` : ""} channels: ${[...enabled].join(",") || "none"}`
++      + ` (?debug=* for all, cityedit.debug.enable("blocks"), cityedit.dumpState())`);
+   }
+ 
+   (window as unknown as Record<string, unknown>).cityedit = {
+diff --git a/docs/debugging.md b/docs/debugging.md
+index c379501..26f16f2 100644
+--- a/docs/debugging.md
++++ b/docs/debugging.md
+@@ -19,6 +19,19 @@ Claude can debug the *same* tab together. Three pieces: **named debug tabs**
+    `cityedit` console helpers. The name sticks across reloads and in-app
+    navigation (sessionStorage), so it survives the app rewriting the URL.
+ 
++   All channels at once stays readable because the lines that could fire per
++   hover, per delta or per frame are burst-collapsed (see *Bursty lines*
++   below). To narrow it anyway, add `debug`:
++
++   ```
++   ?tab=eric&debug=cast,blocks   # only these two
++   ?tab=eric&debug=off           # named tab, silent console
++   ?debug=votes                  # channels without naming the tab
++   ```
++
++   `?debug=` wins over the tab default and over `localStorage.cityedit_debug`,
++   for that page load only.
++
+ 2. Reproduce whatever you're testing in that tab.
+ 
+ 3. Tell Claude: *"check tab eric"*. Claude will locate the tab by its
+@@ -41,10 +54,34 @@ prints as `[channel] message`, so filtering is reliable in devtools
+ | `votes` | `/api/graph-votes` loads (rev, legend), WS deltas applied, revision gaps → full refetch |
+ | `cast` | **every press**: the planBlockVote decision (`cast`/`clear` counts, or `UNVOTE-ALL`) + the server's response (`changed/cleared/capped/evicted`) |
+ | `store` | local my-votes store: load-time server reset (how many stale entries dropped) |
+-| `blocks` | block heat broadcasts (how many blocks lit) + block-selection sets |
+-| `proposals` | route-proposal recomputes: corridor count, scores, timing |
+-| `maplibre` | lifecycle: `load` fired (raster fallback unmounts), WebGL-unavailable fallback, source errors |
+-| `ws` | websocket connect / disconnect / bad messages |
++| `blocks` | block heat applies (writes + blocks lit) + block-selection sets (per hover — burst-collapsed) |
++| `proposals` | route-proposal recomputes (count, top 5, timing), label broadcasts, routes that failed to calculate |
++| `maplibre` | lifecycle: `load` fired (raster fallback unmounts), WebGL-unavailable fallback, source errors, canvas/container resizes |
++| `sticker` | scanned-sticker resolution: lookup, location, pinning |
++| `audience` | proposal view counts + live co-presence |
++| `onboard` | first-run flow: visitor probe, tile pick, step transitions |
++| `ws` | websocket connect / disconnect / sync packets / bad messages |
++
++### Bursty lines: `+N more in Mms`
++
++Anything that can fire per hover, per delta or per frame goes through
++`dburst(channel, key, message)` instead of `dlog`. The first event of a burst
++prints normally, the rest are counted, and when the stream goes quiet (or every
++5s if it never does) one summary lands:
++
++```
++[blocks] select: [148339]
++[blocks] +14 more in 5081ms — last: select: [259586]
++```
++
++So a mouse sweep across twenty blocks costs two lines, and a vote storm costs
++two lines per burst — while a runaway loop still announces itself rather than
++hiding behind its own first line. If you need every event (say you are counting
++selection dispatches), read the count off the summary, or watch the
++corresponding `debugState` key with `cityedit.dumpState()`.
++
++Warnings and errors never go through any of this: `dwarn`/`derror` print
++regardless of which channels are on, because a failure is not chatter.
+ 
+ Enabling without a named tab:
+ 
+@@ -52,6 +89,7 @@ Enabling without a named tab:
+ cityedit.debug.enable("cast,blocks")   // specific channels
+ cityedit.debug.enable("*")             // everything (persisted in localStorage)
+ cityedit.debug.disable()
++cityedit.debug.channels()              // what is on right now
+ ```
+ 
+ or set `localStorage.cityedit_debug = "*"` and reload.

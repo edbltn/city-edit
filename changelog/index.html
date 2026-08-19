@@ -29,6 +29,24 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-19-console-noise.html">
+    <div class="date">2026-08-19</div>
+    <h2>Quiet the console: bursts cost two lines, not two hundred</h2>
+    <p>A debug tab turns on all eleven channels at once, and four of the lines behind them fire
+    per hover, per delta or per apply &mdash; one mouse sweep across a block face printed
+    <strong>33 selection lines</strong>, which is how a debugging aid teaches you to stop reading
+    it. Rather than delete the evidence, those streams now go through one coalescing logger:
+    the first event prints, the rest are counted, and one summary lands when the burst goes quiet
+    (<em>&ldquo;+39 more in 1950ms&rdquo;</em>) &mdash; or every 5s if it never does, so a runaway
+    loop still announces itself. A <strong>normal visitor&rsquo;s console is now completely
+    silent</strong>: that took fixing a socket <em>we</em> close on unmount, which was warning about
+    itself and then reconnecting. Three things reporting real trouble at debug level moved up to
+    warnings, including giving up on a rev-stale snapshot &mdash; which used to return in silence
+    and leave the heatmap knowingly stale. Plain load <strong>7 &rarr; 6</strong> lines (0 of them
+    ours), named tab <strong>30 &rarr; 23</strong>, and a tab under interaction
+    <strong>72 &rarr; 41</strong>.</p>
+  </a>
+
   <a class="entry" href="./2026-08-18-optimistic-vote.html">
     <div class="date">2026-08-18</div>
     <h2>Voting that answers in the click&rsquo;s own tick</h2>

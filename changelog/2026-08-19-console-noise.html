@@ -1,0 +1,1041 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quiet the console: bursts cost two lines, not two hundred — 2026-08-19</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>Quiet the console: bursts cost two lines, not two hundred</h1>
+    <div class="dateline">2026-08-19 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#burst">One logger for anything that can fire in a flurry</a>
+<a href="#silent">A visitor with no debug flag now sees nothing at all</a>
+<a href="#promote">Three real problems were whispering on a channel nobody had on</a>
+<a href="#tab">?tab= keeps all eleven channels — and ?debug= arrives for when that is wrong</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">The debug console had grown past the point where anyone reads it: a named <code>?tab=</code> turns on all eleven channels, and four of the lines behind them fire per hover, per delta or per apply — a mouse sweep across a few blocks printed 33 <code>[blocks] select</code> lines. Rather than delete the evidence, those streams now go through one coalescing logger: first line, then <em>“+39 more in 1950ms”</em> when the burst goes quiet. A normal visitor's console is now completely silent, three lines that were reporting real trouble at debug level were promoted to warnings, and <code>?debug=&lt;channels&gt;</code> arrived for when all-on is still too much.</p>
+
+  
+    <section class="card" id="burst">
+      <div class="tag">THE FIX</div>
+      <h2>One logger for anything that can fire in a flurry</h2>
+      <h3>Symptom</h3>
+      <p>A hover sweep across a downtown block face printed 33 <code>[blocks] select: [id]</code> lines; every no-op heat diff announced <code>0 writes</code>; every incoming vote delta and every proposal-label re-broadcast took a line of its own.</p>
+      <h3>Root cause</h3>
+      <ul><li>These are not badly-written log lines — each one is the right thing to know <em>once</em>. The problem is their rate: block selection is dispatched on every hover target change, heat applies on every delta and every legend toggle, label broadcasts again each time a corridor's voter count lands</li>
+<li>Deleting them was the obvious move and the wrong one: selection and heat are exactly what you are reading the console for when selection or heat is broken</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>dburst(channel, key, message)</code> prints the first event of a burst, counts the rest, and emits ONE summary when the stream goes quiet (400–800ms of silence): <code>[blocks] +14 more in 5081ms — last: select: [259586]</code></li>
+<li>A stream that never goes quiet still reports every 5s — a runaway loop has to be visible, not hidden behind its own first line</li>
+<li><code>key</code> keeps independent streams in one channel apart, so <code>blocks/select</code> and <code>blocks/heat</code> summarise separately rather than interleaving into nonsense</li>
+<li>Applied to the four flurry-prone streams: block selection (per hover), heat applies (per delta / filter toggle), vote deltas (per incoming vote), proposal-label broadcasts (per voter count landing)</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/utils/debugLog.ts</li>
+<li>client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="silent">
+      <div class="tag">NORMAL SESSIONS</div>
+      <h2>A visitor with no debug flag now sees nothing at all</h2>
+      <h3>Symptom</h3>
+      <p>A plain load of <code>/m/nyc-walkways</code> — no tab, no flag — printed <code>[ws] disconnected — reconnecting in 1000ms</code> as a warning, and then reconnected.</p>
+      <h3>Root cause</h3>
+      <ul><li>The provider's unmount cleanup closes the socket. That close runs through the same <code>onclose</code> as a network drop, so our own teardown warned about itself and then scheduled a reconnect for a connection nobody wanted</li>
+<li>In dev, StrictMode's throwaway first mount makes this fire on every single page load</li>
+<li>The obvious fixes both fail: a ref is racy (a remount's own socket gets mistaken for the dead one) and a module-level WeakSet is worse — the dev server can hand out more than one instance of a module, which is exactly what the probe found (two module ids, marks written into one set and read from the other)</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The mark lives on the socket object itself, so it cannot be separated from the socket it describes</li>
+<li>An intentional close logs <code>[ws] closed by teardown</code> at debug level and returns — no warning, no reconnect</li>
+<li>Result: <strong>zero app-originated console lines</strong> on a plain load. What remains is Vite's own HMR client, Chrome's React-DevTools notice, and (headless only) two WebGL driver notices</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/context/WebSocketContext.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="promote">
+      <div class="tag">ERRORS SURVIVE</div>
+      <h2>Three real problems were whispering on a channel nobody had on</h2>
+      <h3>Symptom</h3>
+      <p>Noise reduction can quietly become silence. These went the other way — up.</p>
+      <h3>Root cause</h3>
+      <ul><li>A route that fails to calculate clears the path and shows the user <code>NO_ROUTE_MESSAGE</code>; it was reporting that at <code>dlog</code> level, invisible unless you happened to have <code>proposals</code> on</li>
+<li>A failed <code>/api/visitor</code> probe fails closed (everyone is treated as a returning visitor) and said so at debug level</li>
+<li>Worst of the three: <code>scheduleStaleVotesRefetch</code> gave up after its last retry with a bare <code>return</code>. The server is still serving a snapshot behind its own revision, the heatmap is knowingly stale, and nothing anywhere said so</li></ul>
+      <h3>What changed</h3>
+      <ul><li>All three now go through <code>dwarn</code>, which prints regardless of which channels are enabled</li>
+<li>The stale-snapshot give-up is new text, not a promotion — it warns exactly once (the retry counter is stepped past the ceiling) rather than on every subsequent attempt</li>
+<li><code>dwarn</code>/<code>derror</code> are pinned by test: a failure is not chatter, and no channel setting can turn one off</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/context/RouteContext.tsx</li>
+<li>client-react/src/onboarding/firstRun.ts</li>
+<li>client-react/src/components/GraphLayer/GraphLayer.tsx</li></ul>
+    </section>
+    
+
+    <section class="card" id="tab">
+      <div class="tag">DEBUG TABS</div>
+      <h2>?tab= keeps all eleven channels — and ?debug= arrives for when that is wrong</h2>
+      <h3>Symptom</h3>
+      <p>Eleven channels at once was the complaint. The choice was: default a named tab to a useful subset, or make every channel quiet enough that all-on is readable.</p>
+      <h3>Root cause</h3>
+      <ul><li>A subset default has a failure mode that is hard to recover from: you open a debug tab to find out why blocks are not lighting, see no <code>[blocks]</code> lines, and conclude the subsystem is dead when in fact it was never switched on</li>
+<li>The whole point of a named tab is that you do not yet know which subsystem is lying to you</li></ul>
+      <h3>What changed</h3>
+      <ul><li><strong>Chosen: keep all-on</strong>, and make it readable — which the burst collapsing does. A named tab's load is now 17 app lines, and the interactive streams cost two lines per burst instead of one per event</li>
+<li><code>?debug=&lt;spec&gt;</code> overrides it per page load, and wins over both the tab default and <code>localStorage.cityedit_debug</code>: <code>?debug=cast,blocks</code>, <code>?debug=*</code>, <code>?debug=off</code> (a named tab you want silent for one reload)</li>
+<li>The banner line now states what is actually on, so a tab is never silently narrower than you think</li>
+<li>Two removed redundancies while here: MapLibre re-logged the label count GraphLayer had just logged, and every proposals recompute dumped all twenty corridors (now the top 5 and “…+15”)</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/utils/debugLog.ts</li>
+<li>docs/debugging.md</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li>Measured, not asserted — <code>/m/nyc-walkways</code> in headless Chromium, fresh browser context each run (no localStorage carry-over), 20s settle, every console event captured: <strong>plain 7 → 6 lines</strong> and <strong><code>?tab=check</code> 30 → 23</strong>. Both after-numbers reproduced exactly across two consecutive runs.</li>
+<li>Of the 6 remaining plain-load lines, <strong>0 are ours</strong>: 2 Vite HMR client, 1 React DevTools notice, 2 Chrome WebGL driver notices (headless only), 1 Chrome notice about the StrictMode socket we close while it is still connecting — browser-generated, not suppressible from the page.</li>
+<li>Under interaction (hover sweep of 40 moves, a drag-pan, two clicks, zoom in/out) a named tab went <strong>72 → 41</strong> lines, with the <code>blocks</code> channel alone falling <strong>37 → 11</strong>. 6 of the remaining 41 are another session's in-flight <code>[audience]</code> lines.</li>
+<li>The teardown fix was found by probe, not by reasoning: sockets and module instances were stamped with ids, which showed the mark being written into one module instance's set and read from another's (<code>mod hlpo</code> vs <code>mod vp5r</code>). That is why the flag ended up on the socket object.</li>
+<li>New unit test <code>debugLog.test.ts</code> (7 cases) pins the contract: a disabled channel prints nothing, a 40-event burst is one line plus one summary, a never-quiet stream still reports, separate keys stay separate, and <code>dwarn</code>/<code>derror</code> survive every channel being off. Fake timers include <code>performance</code>, without which the max-window flush cannot be tested at all.</li>
+<li>Full suite green: <strong>661 passed, 1 skipped</strong>. <code>npx tsc -b</code> clean for these files.</li>
+<li>Committed hunk-by-hunk. <code>GraphLayer.tsx</code> and <code>MapLibreBackground.tsx</code> are being rewritten by another session right now, so only the hunks matching this work were staged (5/8 and 4/13); the rest of both files is still uncommitted in the working tree, untouched.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Open <code>http://localhost:3000/m/nyc-walkways</code> with devtools open and no debug params — expect nothing from the app: Vite's HMR lines and Chrome's own notices only.</li>
+<li>Open <code>http://localhost:3000/m/nyc-walkways?tab=check</code> and read the first line: it names the tab and lists exactly which channels are on.</li>
+<li>In that tab, sweep the mouse across a dozen blocks — expect one <code>[blocks] select</code> line and then a <code>+N more in Mms</code> summary when you stop, not one line per block.</li>
+<li>Try <code>?tab=check&amp;debug=cast,blocks</code> and confirm the other nine channels stay quiet; try <code>?debug=off</code> on the same named tab and confirm it goes silent without losing the <code>[dbg:check]</code> title tag.</li>
+<li>Cast a vote in the debug tab and confirm <code>[cast] press</code>, <code>[cast] server:</code> and the block heat lines still tell the whole story of the press — the press path was deliberately left one-line-per-action.</li>
+<li>Run <code>npx vitest run src/utils/debugLog.test.ts</code> (7 tests) if you want the burst behaviour checked without a browser.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+            <span class="stat"><span class="d-add">+21</span> / <span class="d-del">-5</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · graph + votes</span>
+        <span class="ctx-sum">The vote layer: topology load, /api/graph-votes, WS deltas, block heat broadcasts, client-side route proposals, pins</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">GraphLayer.tsx</span>
+        <span class="ctx-sum">~4900 LOC — topology, votes, deltas, proposals, selection, markers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports</span><span class="ol-sum">+1 word — dburst</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">topology load / IndexedDB cache</span><span class="ol-sum">unchanged — one-shot [topo] ready line</span></li><li class="changed"><span class="ol-label">publishRouteProposals</span><span class="ol-sum">+4 lines — top 5 corridors instead of all twenty</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">scheduleStaleVotesRefetch</span><span class="ol-sum">+10 lines — warns once when the retries run out</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">fetchVotes</span><span class="ol-sum">unchanged — [votes] loaded rev, and its dwarn on a dimension mismatch</span></li><li class="changed"><span class="ol-label">delta subscription</span><span class="ol-sum">+1 line — per-delta line burst-collapses</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">sync packets</span><span class="ol-sum">unchanged — 3 dwarns on the paths that force a full refetch</span></li><li class="dim"><span class="ol-label">block heat broadcast / proposals recompute</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">proposal label broadcast</span><span class="ol-sum">+3 lines — flurry of label broadcasts collapses</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">pins, markers, diamonds</span><span class="ol-sum">unchanged — one line per click is one line per action</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The recompute line kept its count and timing (that is the perf number) and lost the paragraph of label#id(score) — the ranking question is always about the head of the list</li><li>The stale-snapshot give-up steps the retry counter PAST the ceiling so the warning fires once, not on every later attempt</li><li>Label broadcasts fire again as each corridor&#x27;s voter count resolves, which is why they arrive in flurries rather than singly</li><li>[cast] pinned resolve was measured before being left alone: it fires once per click, not per hover</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/GraphLayer/GraphLayer.tsx b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">index 8e6fd35..a7656f6 100644</span>
+<span class="d-meta">--- a/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/GraphLayer/GraphLayer.tsx</span>
+<span class="d-hunk">@@ -97,7 +97,7 @@ import { pendingCastsFor, settlePendingCastsForDelta } from &quot;../../utils/pending</span>
+<span class="d-ctx"> import {</span>
+<span class="d-ctx">   useProposalAudience, describeAudience, MIN_VIEWS_SHOWN,</span>
+<span class="d-ctx"> } from &quot;../../hooks/useProposalAudience&quot;;</span>
+<span class="d-del">-import { dlog, dwarn, derror, debugState, debugProbe } from &quot;../../utils/debugLog&quot;;</span>
+<span class="d-add">+import { dlog, dburst, dwarn, derror, debugState, debugProbe } from &quot;../../utils/debugLog&quot;;</span>
+<span class="d-ctx"> import { useVotesVersion } from &quot;../../utils/useVotesVersion&quot;;</span>
+<span class="d-ctx"> import { getVoterId } from &quot;../../utils/voterIdentity&quot;;</span>
+<span class="d-ctx"> import { isHoverSuppressed } from &quot;../../utils/touchHover&quot;;</span>
+<span class="d-hunk">@@ -1567,8 +1567,12 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   }&gt;({ epoch: -1, eligible: null, byType: new Map(), eligibleLegendLen: 0 });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   const publishRouteProposals = useCallback((next: RouteProposal[], note: string) =&gt; {</span>
+<span class="d-add">+    // Top few only: the full list is twenty-odd corridors of label#id(score),</span>
+<span class="d-add">+    // which is a paragraph per sweep. cityedit.dumpState() has the count, and</span>
+<span class="d-add">+    // the ranking question is always about the head of the list.</span>
+<span class="d-add">+    const head = next.slice(0, 5).map((p) =&gt; `${p.label}#${p.id}(${p.score})`);</span>
+<span class="d-ctx">     dlog(&quot;proposals&quot;, `recompute: ${next.length} corridors ${note}`,</span>
+<span class="d-del">-      next.map((p) =&gt; `${p.label}#${p.id}(${p.score})`));</span>
+<span class="d-add">+      head.join(&quot; &quot;) + (next.length &gt; head.length ? ` …+${next.length - head.length}` : &quot;&quot;));</span>
+<span class="d-ctx">     debugState(&quot;routeProposals&quot;, next.length);</span>
+<span class="d-ctx">     // Clustering is deterministic, so an unchanged vote state yields an</span>
+<span class="d-ctx">     // identical list — keep the previous array to avoid remounting diamonds.</span>
+<span class="d-hunk">@@ -1840,7 +1844,17 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">   const staleVotesRetriesRef = useRef(0);</span>
+<span class="d-ctx">   const staleVotesTimerRef = useRef&lt;number | null&gt;(null);</span>
+<span class="d-ctx">   const scheduleStaleVotesRefetch = useCallback(() =&gt; {</span>
+<span class="d-del">-    if (staleVotesRetriesRef.current &gt;= STALE_VOTES_MAX_RETRIES) return;</span>
+<span class="d-add">+    if (staleVotesRetriesRef.current &gt;= STALE_VOTES_MAX_RETRIES) {</span>
+<span class="d-add">+      // Out of retries with the server still serving a snapshot behind its own</span>
+<span class="d-add">+      // revision: the heatmap is now knowingly stale, which is worth saying out</span>
+<span class="d-add">+      // loud once rather than going quiet.</span>
+<span class="d-add">+      if (staleVotesRetriesRef.current === STALE_VOTES_MAX_RETRIES) {</span>
+<span class="d-add">+        staleVotesRetriesRef.current += 1;  // warn once, not once per attempt</span>
+<span class="d-add">+        dwarn(&quot;votes&quot;, `still served a rev-stale snapshot after `</span>
+<span class="d-add">+          + `${STALE_VOTES_MAX_RETRIES} refetches — heatmap may lag until reload`);</span>
+<span class="d-add">+      }</span>
+<span class="d-add">+      return;</span>
+<span class="d-add">+    }</span>
+<span class="d-ctx">     if (staleVotesTimerRef.current != null) return; // one pending retry is enough</span>
+<span class="d-ctx">     staleVotesRetriesRef.current += 1;</span>
+<span class="d-ctx">     dlog(&quot;votes&quot;, &quot;served a rev-stale snapshot — refetching in &quot;</span>
+<span class="d-hunk">@@ -2344,7 +2358,7 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         return;</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-      dlog(&quot;votes&quot;, `delta rev ${delta.rev}: &quot;${delta.vtLabel ?? delta.vt}&quot; `</span>
+<span class="d-add">+      dburst(&quot;votes&quot;, &quot;delta&quot;, `delta rev ${delta.rev}: &quot;${delta.vtLabel ?? delta.vt}&quot; `</span>
+<span class="d-ctx">         + `edges=${delta.edges.length} blocks=${Object.keys(delta.blockCounts ?? {}).length}`);</span>
+<span class="d-ctx">       const legendLenBefore = graphDataRef.current?.vote_type_legend?.length ?? 0;</span>
+<span class="d-ctx">       applyDeltaToGraphData(delta);</span>
+<span class="d-hunk">@@ -4213,7 +4227,9 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay</span>
+<span class="d-ctx">         });</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">     }</span>
+<span class="d-del">-    dlog(&quot;proposals&quot;, `labels broadcast: ${detail.length}`</span>
+<span class="d-add">+    // Re-broadcast on every winners/proposal change AND again as each corridor&#x27;s</span>
+<span class="d-add">+    // voter count lands, so this arrives in flurries — one line per flurry.</span>
+<span class="d-add">+    dburst(&quot;proposals&quot;, &quot;labels&quot;, `labels broadcast: ${detail.length}`</span>
+<span class="d-ctx">       + ` (${points.length} point, ${routes.length} route`</span>
+<span class="d-ctx">       + `, ${pending} awaiting voter counts)`);</span>
+<span class="d-ctx">     window.dispatchEvent(new CustomEvent&lt;ProposalLabelDetail[]&gt;(</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+            <span class="stat"><span class="d-add">+10</span> / <span class="d-del">-5</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · base map (MapLibre GL)</span>
+        <span class="ctx-sum">The GL base map under Leaflet: block tiles + feature-state heat, place labels, proposal labels, zoom-ride camera sync</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">MapLibreBackground.tsx</span>
+        <span class="ctx-sum">~1200 LOC — style build, block tiles, heat/selection feature-state, label layers</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports</span><span class="ol-sum">+1 word — dburst</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">style / raster + label tiles</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">rebindBlockTiles / place labels / proposal labels (setup)</span><span class="ol-sum">unchanged — one-shot lifecycle lines, left alone</span></li><li class="dim"><span class="ol-label">map load, error handlers</span><span class="ol-sum">unchanged — dwarn on GL errors stays</span></li><li class="changed"><span class="ol-label">heat apply (feature-state)</span><span class="ol-sum">+6 lines — no-op diffs stay silent, the rest burst-collapse</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">block selection (onSelect)</span><span class="ol-sum">+2 lines — per-hover line burst-collapses</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">proposal label source</span><span class="ol-sum">−1 line — dropped the count GraphLayer already logs</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">camera sync / zoom ride / resize</span><span class="ol-sum">unchanged — the resize line is already debounced</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>if (writes &gt; 0 || full): a diff that wrote nothing changed nothing — it was a line saying so on every delta</li><li>The full apply still logs unconditionally: first paint is worth one line even at 0 writes</li><li>onSelect fires on every hover TARGET change (the dispatcher dedupes by block-id key, not by pointer move) — this is the 33-lines-per-sweep source</li><li>debugState(&quot;proposalLabels&quot;) stays after the dlog removal, so dumpState() still answers &#x27;how many labels are drawn&#x27;</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">index 2f9a1f8..cbb2b2b 100644</span>
+<span class="d-meta">--- a/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/MapLibreBackground/MapLibreBackground.tsx</span>
+<span class="d-hunk">@@ -10,7 +10,7 @@ import { useEffect, useRef } from &quot;react&quot;;</span>
+<span class="d-ctx"> import maplibregl from &quot;maplibre-gl&quot;;</span>
+<span class="d-ctx"> import { Protocol } from &quot;pmtiles&quot;;</span>
+<span class="d-ctx"> import { CONFIG, type BlockTilesConfig } from &quot;../../config&quot;;</span>
+<span class="d-del">-import { dlog, dwarn, debugState } from &quot;../../utils/debugLog&quot;;</span>
+<span class="d-add">+import { dlog, dburst, dwarn, debugState } from &quot;../../utils/debugLog&quot;;</span>
+<span class="d-ctx"> import {</span>
+<span class="d-ctx">   maplibreRasterTiles,</span>
+<span class="d-ctx">   maplibreLabelTiles,</span>
+<span class="d-hunk">@@ -1085,8 +1085,13 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">           ?.mark(&quot;first-heat-apply&quot;);</span>
+<span class="d-ctx">       }</span>
+<span class="d-ctx">       applied.current = { heat: next, denomKey, norm };</span>
+<span class="d-del">-      dlog(&quot;blocks&quot;, `heat apply (${full ? &quot;full&quot; : &quot;diff&quot;}): ${writes} writes, ${next.size} lit`</span>
+<span class="d-del">-        + (animate ? `, ${changes.length} arriving (${arrival.size} in flight)` : &quot;&quot;));</span>
+<span class="d-add">+      // A diff that wrote nothing changed nothing — the interesting applies are</span>
+<span class="d-add">+      // the ones that moved heat, and votes can move it in bursts.</span>
+<span class="d-add">+      if (writes &gt; 0 || full) {</span>
+<span class="d-add">+        dburst(&quot;blocks&quot;, &quot;heat&quot;,</span>
+<span class="d-add">+          `heat apply (${full ? &quot;full&quot; : &quot;diff&quot;}): ${writes} writes, ${next.size} lit`</span>
+<span class="d-add">+          + (animate ? `, ${changes.length} arriving (${arrival.size} in flight)` : &quot;&quot;));</span>
+<span class="d-add">+      }</span>
+<span class="d-ctx">       debugState(&quot;blockHeatNonzero&quot;, next.size);</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -1100,7 +1105,8 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">     // which would also drop the heat key set above.</span>
+<span class="d-ctx">     const onSelect = (e: Event) =&gt; {</span>
+<span class="d-ctx">       const next = (e as CustomEvent&lt;BlockSelectDetail&gt;).detail.blockIds;</span>
+<span class="d-del">-      dlog(&quot;blocks&quot;, `select: [${next.slice(0, 12).join(&quot;,&quot;)}${next.length &gt; 12 ? &quot;,…&quot; : &quot;&quot;}]`);</span>
+<span class="d-add">+      dburst(&quot;blocks&quot;, &quot;select&quot;,</span>
+<span class="d-add">+        `select: [${next.slice(0, 12).join(&quot;,&quot;)}${next.length &gt; 12 ? &quot;,…&quot; : &quot;&quot;}]`);</span>
+<span class="d-ctx">       const ml = mapRef.current;</span>
+<span class="d-ctx">       if (ml &amp;&amp; ml.getSource(&quot;blocks&quot;)) {</span>
+<span class="d-ctx">         const nextSet = new Set(next);</span>
+<span class="d-hunk">@@ -1164,7 +1170,6 @@ export function MapLibreBackground({ leafletMap, mapStyle, onReady }: MapLibreBa</span>
+<span class="d-ctx">           properties: { key: p.key, text: p.text, count: p.count, rank: p.rank, minz: p.minz },</span>
+<span class="d-ctx">         })),</span>
+<span class="d-ctx">       });</span>
+<span class="d-del">-      dlog(&quot;maplibre&quot;, `proposal labels: ${items.length} features`);</span>
+<span class="d-ctx">       debugState(&quot;proposalLabels&quot;, items.length);</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/context/RouteContext.tsx</span>
+            <span class="stat"><span class="d-add">+3</span> / <span class="d-del">-3</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill on">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · selection + routing</span>
+        <span class="ctx-sum">The ordered Selection and the OSRM calls that turn it into a drawn path</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">RouteContext.tsx</span>
+        <span class="ctx-sum">~900 LOC — selection reducer, segment calculation, waypoint drops</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">imports</span><span class="ol-sum">dlog → dwarn (no dlog left in this file)</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">selection reducer / URL sync</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">calculateAllSegments consumer</span><span class="ol-sum">1 line — a failed route is a warning</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dropped-waypoint path</span><span class="ol-sum">1 line — same, for the drop that cannot route</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Both sites already set a user-visible error (NO_ROUTE_MESSAGE) — the console was the only place that stayed quiet about it</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/context/RouteContext.tsx b/client-react/src/context/RouteContext.tsx</span>
+<span class="d-meta">index f98d77a..41645ba 100644</span>
+<span class="d-meta">--- a/client-react/src/context/RouteContext.tsx</span>
+<span class="d-meta">+++ b/client-react/src/context/RouteContext.tsx</span>
+<span class="d-hunk">@@ -17,7 +17,7 @@ import { blockCoverage, type VoteDirection } from &quot;../utils/voteStore&quot;;</span>
+<span class="d-ctx"> import { useVotesVersion } from &quot;../utils/useVotesVersion&quot;;</span>
+<span class="d-ctx"> import { castVotes, voteButtonState } from &quot;../utils/castVote&quot;;</span>
+<span class="d-ctx"> import { reverseGeocode } from &quot;../utils/geocode&quot;;</span>
+<span class="d-del">-import { dlog, derror } from &quot;../utils/debugLog&quot;;</span>
+<span class="d-add">+import { dwarn, derror } from &quot;../utils/debugLog&quot;;</span>
+<span class="d-ctx"> import { useTheme } from &quot;./ThemeContext&quot;;</span>
+<span class="d-ctx"> import { useGraphSnap } from &quot;./GraphSnapContext&quot;;</span>
+<span class="d-ctx"> import type { ForcedCorridor, Selection } from &quot;../selection/types&quot;;</span>
+<span class="d-hunk">@@ -666,7 +666,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {</span>
+<span class="d-ctx">           if (failed.length &gt; 0) {</span>
+<span class="d-ctx">             // Partial geometry would read as a complete route (and every</span>
+<span class="d-ctx">             // consumer indexes split paths positionally), so show none of it.</span>
+<span class="d-del">-            dlog(&quot;proposals&quot;, &quot;no route for segment(s)&quot;, failed, &quot;— clearing path&quot;);</span>
+<span class="d-add">+            dwarn(&quot;proposals&quot;, &quot;no route for segment(s)&quot;, failed, &quot;— clearing path&quot;);</span>
+<span class="d-ctx">             setSplitDesirePaths([]);</span>
+<span class="d-ctx">             setError(NO_ROUTE_MESSAGE);</span>
+<span class="d-ctx">             return;</span>
+<span class="d-hunk">@@ -715,7 +715,7 @@ export function RouteProvider({ children }: { children: ReactNode }) {</span>
+<span class="d-ctx">         if (calcVersion !== splitCalcVersionRef.current || aborted) return false;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         if (failed.length &gt; 0 || paths.length !== mids.length + 1) {</span>
+<span class="d-del">-          dlog(&quot;proposals&quot;, &quot;no route to dropped waypoint&quot;, pending.coords, &quot;— not adding it&quot;);</span>
+<span class="d-add">+          dwarn(&quot;proposals&quot;, &quot;no route to dropped waypoint&quot;, pending.coords, &quot;— not adding it&quot;);</span>
+<span class="d-ctx">           setPendingWaypoint(null);</span>
+<span class="d-ctx">           setError(NO_ROUTE_MESSAGE);</span>
+<span class="d-ctx">           return false;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/context/WebSocketContext.tsx</span>
+            <span class="stat"><span class="d-add">+17</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · realtime</span>
+        <span class="ctx-sum">The single socket: vote deltas, sync packets, presence, view counts — one connection per tab, by design</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">WebSocketContext.tsx</span>
+        <span class="ctx-sum">~350 LOC — connect/backoff, binary + JSON message handling, subscriptions</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">context value / types</span><span class="ol-sum">+5 lines — the MarkedSocket type</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">connect(): url, onopen</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">onmessage: binary frames, JSON kinds</span><span class="ol-sum">unchanged — dwarns on undecodable frames stay</span></li><li class="changed"><span class="ol-label">onclose</span><span class="ol-sum">+7 lines — our own teardown is not a disconnection</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">mount effect / cleanup</span><span class="ol-sum">+3 lines — marks the socket before closing it</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">subscribe* / reportProposalView</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The mark is a property on the socket, not a ref and not a module-level WeakSet — a ref races the remount, and the dev server proved it can hand out two instances of this module</li><li>An intentional close returns BEFORE scheduling a reconnect: on unmount there is nothing left to reconnect for, and the next mount opens its own</li><li>Chrome still prints its own &#x27;closed before the connection is established&#x27; notice for the socket we close mid-handshake; that one is the browser&#x27;s, not ours</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/context/WebSocketContext.tsx b/client-react/src/context/WebSocketContext.tsx</span>
+<span class="d-meta">index 5d29201..06c1ce9 100644</span>
+<span class="d-meta">--- a/client-react/src/context/WebSocketContext.tsx</span>
+<span class="d-meta">+++ b/client-react/src/context/WebSocketContext.tsx</span>
+<span class="d-hunk">@@ -63,6 +63,12 @@ interface WebSocketContextValue {</span>
+<span class="d-ctx">     label: string, blockIds: number[]) =&gt; Promise&lt;ViewCount | null&gt;;</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/** A socket closed by our own teardown carries this flag. The mark lives on the</span>
+<span class="d-add">+ *  socket itself — not in a ref (a remount racing the old socket&#x27;s close event</span>
+<span class="d-add">+ *  would mistake its own connection for the dead one) and not in a module-level</span>
+<span class="d-add">+ *  set (the dev server can hand out more than one instance of a module). */</span>
+<span class="d-add">+type MarkedSocket = WebSocket &amp; { __cityeditTeardown?: boolean };</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> const WebSocketContext = createContext&lt;WebSocketContextValue | null&gt;(null);</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> export function WebSocketProvider({ children }: { children: ReactNode }) {</span>
+<span class="d-hunk">@@ -201,6 +207,13 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">     ws.onclose = () =&gt; {</span>
+<span class="d-add">+      // A socket WE closed (provider unmount — in dev, StrictMode&#x27;s throwaway</span>
+<span class="d-add">+      // first mount) is not a disconnection to warn about, and nothing is left</span>
+<span class="d-add">+      // to reconnect for: the next mount opens its own.</span>
+<span class="d-add">+      if ((ws as MarkedSocket).__cityeditTeardown) {</span>
+<span class="d-add">+        dlog(&quot;ws&quot;, &quot;closed by teardown&quot;);</span>
+<span class="d-add">+        return;</span>
+<span class="d-add">+      }</span>
+<span class="d-ctx">       dwarn(&quot;ws&quot;, `disconnected — reconnecting in ${backoffRef.current}ms`);</span>
+<span class="d-ctx">       setConnectionStatus(&quot;disconnected&quot;);</span>
+<span class="d-ctx">       // We can no longer see the room, so we must stop claiming to. Leaving</span>
+<span class="d-hunk">@@ -225,7 +238,10 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {</span>
+<span class="d-ctx">     connect();</span>
+<span class="d-ctx">     return () =&gt; {</span>
+<span class="d-ctx">       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);</span>
+<span class="d-del">-      if (wsRef.current) wsRef.current.close();</span>
+<span class="d-add">+      if (wsRef.current) {</span>
+<span class="d-add">+        (wsRef.current as MarkedSocket).__cityeditTeardown = true;</span>
+<span class="d-add">+        wsRef.current.close();</span>
+<span class="d-add">+      }</span>
+<span class="d-ctx">     };</span>
+<span class="d-ctx">   }, [connect]);</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/onboarding/firstRun.ts</span>
+            <span class="stat"><span class="d-add">+14</span> / <span class="d-del">-2</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · onboarding</span>
+        <span class="ctx-sum">First-run flow: is this a new visitor, which tile did they pick, has the wall been shown</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">firstRun.ts</span>
+        <span class="ctx-sum">~200 LOC — session storage keys, the visitor probe, flow state</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">storage helpers</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">visitorProbe (new)</span><span class="ol-sum">+2 lines — the one in-flight probe</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">hasVisitedBefore</span><span class="ol-sum">+7 lines — shares that probe instead of racing another</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">probeVisitor (extracted)</span><span class="ol-sum">1 line — the failure path is now a warning</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">tile / wall state</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The sessionStorage answer is only written when the reply lands, so two callers in the same tick each fired their own /api/visitor request AND each logged its own answer</li><li>Memoising the in-flight promise fixes both: one request, one line. It also fails closed exactly as before — the catch still answers true</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/onboarding/firstRun.ts b/client-react/src/onboarding/firstRun.ts</span>
+<span class="d-meta">index 5a052db..3a8391a 100644</span>
+<span class="d-meta">--- a/client-react/src/onboarding/firstRun.ts</span>
+<span class="d-meta">+++ b/client-react/src/onboarding/firstRun.ts</span>
+<span class="d-hunk">@@ -73,7 +73,7 @@</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> import { CONFIG } from &quot;../config&quot;;</span>
+<span class="d-del">-import { dlog } from &quot;../utils/debugLog&quot;;</span>
+<span class="d-add">+import { dlog, dwarn } from &quot;../utils/debugLog&quot;;</span>
+<span class="d-ctx"> import { getVoterId } from &quot;../utils/voterIdentity&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** Written the moment the wall is shown, and again when the flow ends.</span>
+<span class="d-hunk">@@ -132,6 +132,9 @@ export function unsuppress(): void {</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/** The one in-flight /api/visitor probe, shared by every caller. */</span>
+<span class="d-add">+let visitorProbe: Promise&lt;boolean&gt; | null = null;</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> /**</span>
+<span class="d-ctx">  * Has the person behind this request opened a map before this one?</span>
+<span class="d-ctx">  *</span>
+<span class="d-hunk">@@ -143,7 +146,16 @@ export function unsuppress(): void {</span>
+<span class="d-ctx"> export async function hasVisitedBefore(): Promise&lt;boolean&gt; {</span>
+<span class="d-ctx">   const cached = readStore(window.sessionStorage, ANSWER_KEY);</span>
+<span class="d-ctx">   if (cached === &quot;1&quot; || cached === &quot;0&quot;) return cached === &quot;1&quot;;</span>
+<span class="d-add">+  // The sessionStorage answer is only written once the reply lands, so two</span>
+<span class="d-add">+  // callers in the same tick (a remount, two consumers of the flow) would each</span>
+<span class="d-add">+  // fire their own probe and each log its own answer. One in-flight probe is</span>
+<span class="d-add">+  // enough — everyone waits on it.</span>
+<span class="d-add">+  if (visitorProbe) return visitorProbe;</span>
+<span class="d-add">+  visitorProbe = probeVisitor().finally(() =&gt; { visitorProbe = null; });</span>
+<span class="d-add">+  return visitorProbe;</span>
+<span class="d-add">+}</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+async function probeVisitor(): Promise&lt;boolean&gt; {</span>
+<span class="d-ctx">   try {</span>
+<span class="d-ctx">     const url =</span>
+<span class="d-ctx">       `${CONFIG.apiUrl}/visitor?voter_id=${encodeURIComponent(getVoterId())}`;</span>
+<span class="d-hunk">@@ -155,7 +167,7 @@ export async function hasVisitedBefore(): Promise&lt;boolean&gt; {</span>
+<span class="d-ctx">     writeStore(window.sessionStorage, ANSWER_KEY, visited ? &quot;1&quot; : &quot;0&quot;);</span>
+<span class="d-ctx">     return visited;</span>
+<span class="d-ctx">   } catch {</span>
+<span class="d-del">-    dlog(&quot;onboard&quot;, &quot;visitor probe failed — assuming a returning visitor&quot;);</span>
+<span class="d-add">+    dwarn(&quot;onboard&quot;, &quot;visitor probe failed — assuming a returning visitor&quot;);</span>
+<span class="d-ctx">     return true;</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> }</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/debugLog.test.ts</span>
+            <span class="stat"><span class="d-add">+106</span> / <span class="d-del">-0</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · debug plumbing</span>
+        <span class="ctx-sum">Unit tests — vitest, node environment (no jsdom in this project), fake timers including performance</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">debugLog.test.ts</span>
+        <span class="ctx-sum">106 LOC — 7 cases across dlog, dburst and dwarn/derror</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">setup / lines()</span><span class="ol-sum">new — console spies + fake timers with performance faked</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dlog: silent when off / prints when on</span><span class="ol-sum">new — the default-off promise</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dburst: first line + summary</span><span class="ol-sum">new — 40 events, 2 lines</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dburst: never-quiet stream</span><span class="ol-sum">new — 400 events over 20s stays under 12 lines but is never 1</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dburst: separate keys, re-arm after flush</span><span class="ol-sum">new</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">dwarn / derror survive channels being off</span><span class="ol-sum">new — the noise-vs-failure line</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>vi.useFakeTimers({ toFake: [..., &quot;performance&quot;] }) — dburst measures elapsed time with performance.now(), so a frozen clock hides the max-window flush entirely (this test failed exactly that way first)</li><li>_setDebugChannels is the test hook because enable() lives behind window.cityedit and these tests run in node</li><li>The never-quiet case asserts a RANGE (&gt;1, &lt;12), not an exact count — the contract is &#x27;summarises&#x27;, not &#x27;summarises at this precise cadence&#x27;</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/debugLog.test.ts b/client-react/src/utils/debugLog.test.ts</span>
+<span class="d-meta">new file mode 100644</span>
+<span class="d-meta">index 0000000..5f51f15</span>
+<span class="d-meta">--- /dev/null</span>
+<span class="d-meta">+++ b/client-react/src/utils/debugLog.test.ts</span>
+<span class="d-hunk">@@ -0,0 +1,106 @@</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// Debug logging: off by default, and bursts cost two lines, not two hundred</span>
+<span class="d-add">+// ==========================================================================</span>
+<span class="d-add">+// The console is a debugging aid only while it is readable. These pin the two</span>
+<span class="d-add">+// promises that keep it that way: a channel nobody asked for prints nothing at</span>
+<span class="d-add">+// all, and a stream that fires per hover / per delta / per frame collapses to</span>
+<span class="d-add">+// its first line plus one summary.</span>
+<span class="d-add">+</span>
+<span class="d-add">+import { describe, it, expect, beforeEach, afterEach, vi } from &quot;vitest&quot;;</span>
+<span class="d-add">+import { dlog, dburst, dwarn, derror, _setDebugChannels } from &quot;./debugLog&quot;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+let log: ReturnType&lt;typeof vi.spyOn&gt;;</span>
+<span class="d-add">+let warn: ReturnType&lt;typeof vi.spyOn&gt;;</span>
+<span class="d-add">+let error: ReturnType&lt;typeof vi.spyOn&gt;;</span>
+<span class="d-add">+</span>
+<span class="d-add">+beforeEach(() =&gt; {</span>
+<span class="d-add">+  // `performance` too: the burst summaries measure elapsed time with</span>
+<span class="d-add">+  // performance.now(), and a frozen clock would hide the max-window flush.</span>
+<span class="d-add">+  vi.useFakeTimers({ toFake: [&quot;setTimeout&quot;, &quot;clearTimeout&quot;, &quot;Date&quot;, &quot;performance&quot;] });</span>
+<span class="d-add">+  log = vi.spyOn(console, &quot;log&quot;).mockImplementation(() =&gt; {});</span>
+<span class="d-add">+  warn = vi.spyOn(console, &quot;warn&quot;).mockImplementation(() =&gt; {});</span>
+<span class="d-add">+  error = vi.spyOn(console, &quot;error&quot;).mockImplementation(() =&gt; {});</span>
+<span class="d-add">+  _setDebugChannels(&quot;&quot;);</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+afterEach(() =&gt; {</span>
+<span class="d-add">+  _setDebugChannels(&quot;&quot;);</span>
+<span class="d-add">+  vi.useRealTimers();</span>
+<span class="d-add">+  vi.restoreAllMocks();</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Every line the console was handed, joined the way devtools shows it. */</span>
+<span class="d-add">+function lines(): string[] {</span>
+<span class="d-add">+  return log.mock.calls.map((args) =&gt; args.join(&quot; &quot;));</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;dlog&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;says nothing on a channel nobody enabled&quot;, () =&gt; {</span>
+<span class="d-add">+    dlog(&quot;blocks&quot;, &quot;select: [1]&quot;);</span>
+<span class="d-add">+    dburst(&quot;blocks&quot;, &quot;select&quot;, &quot;select: [1]&quot;);</span>
+<span class="d-add">+    vi.advanceTimersByTime(10000);</span>
+<span class="d-add">+    expect(log).not.toHaveBeenCalled();</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;prints on an enabled channel only&quot;, () =&gt; {</span>
+<span class="d-add">+    _setDebugChannels(&quot;blocks&quot;);</span>
+<span class="d-add">+    dlog(&quot;blocks&quot;, &quot;in&quot;);</span>
+<span class="d-add">+    dlog(&quot;votes&quot;, &quot;out&quot;);</span>
+<span class="d-add">+    expect(lines()).toEqual([&quot;[blocks] in&quot;]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;dburst&quot;, () =&gt; {</span>
+<span class="d-add">+  beforeEach(() =&gt; _setDebugChannels(&quot;blocks&quot;));</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;prints the first event and summarises the rest of the burst&quot;, () =&gt; {</span>
+<span class="d-add">+    dburst(&quot;blocks&quot;, &quot;select&quot;, &quot;select: [1]&quot;);</span>
+<span class="d-add">+    for (let i = 2; i &lt;= 40; i++) {</span>
+<span class="d-add">+      vi.advanceTimersByTime(50);</span>
+<span class="d-add">+      dburst(&quot;blocks&quot;, &quot;select&quot;, `select: [${i}]`);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    expect(lines()).toEqual([&quot;[blocks] select: [1]&quot;]);   // 39 events, one line</span>
+<span class="d-add">+</span>
+<span class="d-add">+    vi.advanceTimersByTime(1000);                        // …the burst goes quiet</span>
+<span class="d-add">+    expect(lines()).toHaveLength(2);</span>
+<span class="d-add">+    expect(lines()[1]).toMatch(/^\[blocks\] \+39 more in \d+ms — last: select: \[40\]$/);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;reports a stream that never goes quiet instead of hiding behind line one&quot;, () =&gt; {</span>
+<span class="d-add">+    for (let i = 0; i &lt; 400; i++) {           // 20s of an every-50ms loop</span>
+<span class="d-add">+      dburst(&quot;blocks&quot;, &quot;heat&quot;, `heat apply: ${i}`);</span>
+<span class="d-add">+      vi.advanceTimersByTime(50);</span>
+<span class="d-add">+    }</span>
+<span class="d-add">+    // One opening line, then a summary every 5s — never one line per event.</span>
+<span class="d-add">+    expect(lines().length).toBeGreaterThan(1);</span>
+<span class="d-add">+    expect(lines().length).toBeLessThan(12);</span>
+<span class="d-add">+    expect(lines().filter((l) =&gt; l.includes(&quot;more in&quot;)).length).toBeGreaterThan(0);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;keeps separate streams separate&quot;, () =&gt; {</span>
+<span class="d-add">+    dburst(&quot;blocks&quot;, &quot;select&quot;, &quot;select: [1]&quot;);</span>
+<span class="d-add">+    dburst(&quot;blocks&quot;, &quot;heat&quot;, &quot;heat apply: 1&quot;);</span>
+<span class="d-add">+    expect(lines()).toEqual([&quot;[blocks] select: [1]&quot;, &quot;[blocks] heat apply: 1&quot;]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;starts a fresh line once a burst has been summarised&quot;, () =&gt; {</span>
+<span class="d-add">+    dburst(&quot;blocks&quot;, &quot;select&quot;, &quot;a&quot;);</span>
+<span class="d-add">+    dburst(&quot;blocks&quot;, &quot;select&quot;, &quot;b&quot;);</span>
+<span class="d-add">+    vi.advanceTimersByTime(1000);</span>
+<span class="d-add">+    dburst(&quot;blocks&quot;, &quot;select&quot;, &quot;c&quot;);</span>
+<span class="d-add">+    expect(lines()).toEqual([</span>
+<span class="d-add">+      &quot;[blocks] a&quot;,</span>
+<span class="d-add">+      expect.stringMatching(/^\[blocks\] \+1 more in \d+ms — last: b$/),</span>
+<span class="d-add">+      &quot;[blocks] c&quot;,</span>
+<span class="d-add">+    ]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span>
+<span class="d-add">+</span>
+<span class="d-add">+describe(&quot;dwarn / derror&quot;, () =&gt; {</span>
+<span class="d-add">+  it(&quot;survive the channel being off — a failure is not chatter&quot;, () =&gt; {</span>
+<span class="d-add">+    dwarn(&quot;votes&quot;, &quot;topology/vote dimension mismatch&quot;);</span>
+<span class="d-add">+    derror(&quot;topo&quot;, &quot;topology decode failed&quot;);</span>
+<span class="d-add">+    expect(warn).toHaveBeenCalledWith(&quot;[votes]&quot;, &quot;topology/vote dimension mismatch&quot;);</span>
+<span class="d-add">+    expect(error).toHaveBeenCalledWith(&quot;[topo]&quot;, &quot;topology decode failed&quot;);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+});</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/utils/debugLog.ts</span>
+            <span class="stat"><span class="d-add">+90</span> / <span class="d-del">-3</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · debug plumbing</span>
+        <span class="ctx-sum">The one way the client talks to the console: channels, named debug tabs, the dumpState registry, and now burst collapsing</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">debugLog.ts</span>
+        <span class="ctx-sum">~200 LOC — channel registry, dlog/dwarn/derror, dburst, state registry, initDebug</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header docs</span><span class="ol-sum">+8 lines — documents ?debug= and the dburst rule</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">DebugChannel / ALL_CHANNELS</span><span class="ol-sum">unchanged — the eleven channels</span></li><li class="changed"><span class="ol-label">TAB_CHANNELS (new)</span><span class="ol-sum">+5 lines — what a named tab turns on, and why it is still everything</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">parseSpec</span><span class="ol-sum">unchanged — &quot;*&quot; or a comma list, unknown names dropped</span></li><li class="dim"><span class="ol-label">dlog / dwarn / derror</span><span class="ol-sum">unchanged — dwarn/derror ignore channel state by design</span></li><li class="changed"><span class="ol-label">dburst + flushBurst (new)</span><span class="ol-sum">+52 lines — first line, counted burst, one summary; 5s ceiling</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">_setDebugChannels (new)</span><span class="ol-sum">+6 lines — test hook, same convention as _resetVoteStore</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">enable / disable</span><span class="ol-sum">+2 lines — disable() now drops pending burst timers</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">debugState / debugProbe / dumpState</span><span class="ol-sum">unchanged — the dumpState registry</span></li><li class="dim"><span class="ol-label">named tabs: getTabName / applyTitleSuffix</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">initDebug</span><span class="ol-sum">+14 lines — ?debug= override, and a banner that states what is on</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>BURST_QUIET_MS = 800: a trailing-edge window, reset by each event, so a continuous stream is ONE summary rather than one per window</li><li>BURST_MAX_MS = 5000: the ceiling that keeps a never-quiet stream visible — without it a runaway loop shows one line and then nothing</li><li>The summary carries the LAST message, not the first — for a selection stream the last one is the current state</li><li>?debug= REPLACES the enabled set (it is an override, not an addition) and is not persisted — it lasts one page load</li><li>?debug=off is a named tab you want silent for one reload; parseSpec would have read it as an unknown channel</li><li>disable() clears pending burst timers, or a summary from before the disable would land after it</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/utils/debugLog.ts b/client-react/src/utils/debugLog.ts</span>
+<span class="d-meta">index ef4961e..517c95c 100644</span>
+<span class="d-meta">--- a/client-react/src/utils/debugLog.ts</span>
+<span class="d-meta">+++ b/client-react/src/utils/debugLog.ts</span>
+<span class="d-hunk">@@ -7,10 +7,14 @@</span>
+<span class="d-ctx"> // pattern &quot;\[cast\]|\[blocks\]|…&quot;) can filter reliably.</span>
+<span class="d-ctx"> //</span>
+<span class="d-ctx"> // Channels are off by default in normal use. Enable them per tab:</span>
+<span class="d-del">-//   • open the app with ?tab=&lt;name&gt;   → names the tab AND enables all channels</span>
+<span class="d-add">+//   • open the app with ?tab=&lt;name&gt;   → names the tab AND enables TAB_CHANNELS</span>
+<span class="d-add">+//   • add ?debug=cast,blocks (or ?debug=* / ?debug=off) to override that</span>
+<span class="d-ctx"> //   • or in the console: cityedit.debug.enable(&quot;cast,blocks&quot;) / .enable(&quot;*&quot;)</span>
+<span class="d-ctx"> //   • or persistently: localStorage.cityedit_debug = &quot;*&quot;</span>
+<span class="d-ctx"> //</span>
+<span class="d-add">+// Anything that can fire per hover, per delta or per frame goes through</span>
+<span class="d-add">+// dburst() instead of dlog(), so a burst costs two lines, not two hundred.</span>
+<span class="d-add">+//</span>
+<span class="d-ctx"> // A named tab gets &quot;[dbg:&lt;name&gt;]&quot; appended to its &lt;title&gt; (kept there by a</span>
+<span class="d-ctx"> // MutationObserver, since the app rewrites the title on map changes) and the</span>
+<span class="d-ctx"> // name survives reloads via sessionStorage — so &quot;the tab called eric&quot; is</span>
+<span class="d-hunk">@@ -34,6 +38,12 @@ const ALL_CHANNELS: readonly DebugChannel[] = [</span>
+<span class="d-ctx">   &quot;sticker&quot;, &quot;audience&quot;, &quot;onboard&quot;, &quot;ws&quot;,</span>
+<span class="d-ctx"> ];</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+// What a named ?tab=&lt;name&gt; turns on. Every channel is quiet enough now (the</span>
+<span class="d-add">+// per-hover / per-delta streams go through dburst) that all-on stays readable,</span>
+<span class="d-add">+// which is what a debug tab is for: you don&#x27;t yet know which subsystem is</span>
+<span class="d-add">+// lying to you. Narrow or widen per load with ?debug=&lt;spec&gt;.</span>
+<span class="d-add">+const TAB_CHANNELS: readonly DebugChannel[] = ALL_CHANNELS;</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> const STORAGE_KEY = &quot;cityedit_debug&quot;;</span>
+<span class="d-ctx"> const TAB_KEY = &quot;cityedit_tab_name&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -63,14 +73,77 @@ export function derror(channel: DebugChannel, ...args: unknown[]): void {</span>
+<span class="d-ctx">   console.error(`[${channel}]`, ...args);</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+// ── Bursty events ───────────────────────────────────────────────────────────</span>
+<span class="d-add">+// Some things fire per hover, per delta, per frame. One line each turns the</span>
+<span class="d-add">+// console into a scrollback that nobody reads, so those go through dburst:</span>
+<span class="d-add">+// the first event of a burst prints as usual, the rest are counted, and when</span>
+<span class="d-add">+// the burst goes quiet ONE summary line reports how many there were, how long</span>
+<span class="d-add">+// it took, and what the last one said. `key` separates independent streams</span>
+<span class="d-add">+// within a channel (e.g. &quot;select&quot; vs &quot;heat&quot; in `blocks`).</span>
+<span class="d-add">+</span>
+<span class="d-add">+const BURST_QUIET_MS = 800;   // this much silence ends a burst</span>
+<span class="d-add">+const BURST_MAX_MS = 5000;    // …and a burst that never stops reports anyway</span>
+<span class="d-add">+</span>
+<span class="d-add">+type Burst = {</span>
+<span class="d-add">+  channel: DebugChannel; count: number; last: string;</span>
+<span class="d-add">+  t0: number; deadline: number; timer: ReturnType&lt;typeof setTimeout&gt;;</span>
+<span class="d-add">+};</span>
+<span class="d-add">+const bursts = new Map&lt;string, Burst&gt;();</span>
+<span class="d-add">+</span>
+<span class="d-add">+function nowMs(): number {</span>
+<span class="d-add">+  return typeof performance !== &quot;undefined&quot; ? performance.now() : Date.now();</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+function flushBurst(key: string): void {</span>
+<span class="d-add">+  const b = bursts.get(key);</span>
+<span class="d-add">+  if (!b) return;</span>
+<span class="d-add">+  bursts.delete(key);</span>
+<span class="d-add">+  clearTimeout(b.timer);</span>
+<span class="d-add">+  if (b.count &gt; 0) {</span>
+<span class="d-add">+    console.log(</span>
+<span class="d-add">+      `[${b.channel}] +${b.count} more in ${Math.round(nowMs() - b.t0)}ms — last: ${b.last}`);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-add">+/** Log `message` if `channel` is on, collapsing bursts into one summary line. */</span>
+<span class="d-add">+export function dburst(channel: DebugChannel, key: string, message: string): void {</span>
+<span class="d-add">+  if (!enabled.has(channel)) return;</span>
+<span class="d-add">+  const k = `${channel}\u0000${key}`;</span>
+<span class="d-add">+  const now = nowMs();</span>
+<span class="d-add">+  let b = bursts.get(k);</span>
+<span class="d-add">+  if (!b) {</span>
+<span class="d-add">+    console.log(`[${channel}]`, message);</span>
+<span class="d-add">+    b = { channel, count: 0, last: message, t0: now, deadline: now + BURST_MAX_MS,</span>
+<span class="d-add">+          timer: 0 as unknown as ReturnType&lt;typeof setTimeout&gt; };</span>
+<span class="d-add">+    bursts.set(k, b);</span>
+<span class="d-add">+  } else {</span>
+<span class="d-add">+    b.count += 1;</span>
+<span class="d-add">+    b.last = message;</span>
+<span class="d-add">+    clearTimeout(b.timer);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+  // Trailing-edge: the summary lands when the stream stops — but a stream that</span>
+<span class="d-add">+  // never stops still reports every BURST_MAX_MS, so a runaway loop is visible</span>
+<span class="d-add">+  // rather than hidden behind its own first line.</span>
+<span class="d-add">+  b.timer = setTimeout(() =&gt; flushBurst(k), Math.max(0, Math.min(BURST_QUIET_MS, b.deadline - now)));</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> function enable(spec: string = &quot;*&quot;): string[] {</span>
+<span class="d-ctx">   for (const c of parseSpec(spec)) enabled.add(c);</span>
+<span class="d-ctx">   try { window.localStorage.setItem(STORAGE_KEY, [...enabled].join(&quot;,&quot;)); } catch { /* private mode */ }</span>
+<span class="d-ctx">   return [...enabled];</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+/** Test hook: set the enabled channels directly, bypassing URL and storage. */</span>
+<span class="d-add">+export function _setDebugChannels(spec: string): void {</span>
+<span class="d-add">+  enabled = parseSpec(spec);</span>
+<span class="d-add">+  for (const b of bursts.values()) clearTimeout(b.timer);</span>
+<span class="d-add">+  bursts.clear();</span>
+<span class="d-add">+}</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> function disable(): void {</span>
+<span class="d-ctx">   enabled = new Set();</span>
+<span class="d-add">+  for (const b of bursts.values()) clearTimeout(b.timer);</span>
+<span class="d-add">+  bursts.clear();</span>
+<span class="d-ctx">   try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* private mode */ }</span>
+<span class="d-ctx"> }</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -132,8 +205,22 @@ export function initDebug(): void {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   if (name) {</span>
+<span class="d-ctx">     applyTitleSuffix(name);</span>
+<span class="d-del">-    for (const c of ALL_CHANNELS) enabled.add(c);</span>
+<span class="d-del">-    console.log(`[dbg] tab &quot;${name}&quot; — all debug channels on. cityedit.debug / cityedit.dumpState() available.`);</span>
+<span class="d-add">+    for (const c of TAB_CHANNELS) enabled.add(c);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  // ?debug=&lt;spec&gt; is the override, and it wins: &quot;*&quot; for everything, a comma</span>
+<span class="d-add">+  // list for exactly those channels, &quot;off&quot; for none (a named tab you want</span>
+<span class="d-add">+  // silent for one reload).</span>
+<span class="d-add">+  let spec: string | null = null;</span>
+<span class="d-add">+  try { spec = new URLSearchParams(window.location.search).get(&quot;debug&quot;); } catch { /* private mode */ }</span>
+<span class="d-add">+  if (spec != null) {</span>
+<span class="d-add">+    enabled = spec.trim() === &quot;off&quot; ? new Set() : parseSpec(spec);</span>
+<span class="d-add">+  }</span>
+<span class="d-add">+</span>
+<span class="d-add">+  if (name || enabled.size &gt; 0) {</span>
+<span class="d-add">+    console.log(</span>
+<span class="d-add">+      `[dbg]${name ? ` tab &quot;${name}&quot; —` : &quot;&quot;} channels: ${[...enabled].join(&quot;,&quot;) || &quot;none&quot;}`</span>
+<span class="d-add">+      + ` (?debug=* for all, cityedit.debug.enable(&quot;blocks&quot;), cityedit.dumpState())`);</span>
+<span class="d-ctx">   }</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   (window as unknown as Record&lt;string, unknown&gt;).cityedit = {</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">docs/debugging.md</span>
+            <span class="stat"><span class="d-add">+42</span> / <span class="d-del">-4</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Docs · debugging workflow</span>
+        <span class="ctx-sum">The canonical doc CLAUDE.md points at: named tabs, channels, server tags, diagnosis cheat-sheet</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">debugging.md</span>
+        <span class="ctx-sum">~175 lines — workflow, channel table, dumpState, cheat-sheet</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">The workflow (TL;DR)</span><span class="ol-sum">+16 lines — ?debug= forms and precedence</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Channel table</span><span class="ol-sum">+3 rows — sticker / audience / onboard were undocumented</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">Bursty lines (new section)</span><span class="ol-sum">+22 lines — what +N more in Mms means and how to read it</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">cityedit.debug.* / dumpState</span><span class="ol-sum">+1 line — channels()</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Diagnosis cheat-sheet / server logs</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Documents the choice explicitly: a named tab still turns on everything, because everything is now quiet enough to read</li><li>Says where a suppressed count went — read it off the summary, or off the matching debugState key in dumpState()</li><li>States the invariant that matters most: dwarn/derror print regardless of channels, because a failure is not chatter</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/docs/debugging.md b/docs/debugging.md</span>
+<span class="d-meta">index c379501..26f16f2 100644</span>
+<span class="d-meta">--- a/docs/debugging.md</span>
+<span class="d-meta">+++ b/docs/debugging.md</span>
+<span class="d-hunk">@@ -19,6 +19,19 @@ Claude can debug the *same* tab together. Three pieces: **named debug tabs**</span>
+<span class="d-ctx">    `cityedit` console helpers. The name sticks across reloads and in-app</span>
+<span class="d-ctx">    navigation (sessionStorage), so it survives the app rewriting the URL.</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+   All channels at once stays readable because the lines that could fire per</span>
+<span class="d-add">+   hover, per delta or per frame are burst-collapsed (see *Bursty lines*</span>
+<span class="d-add">+   below). To narrow it anyway, add `debug`:</span>
+<span class="d-add">+</span>
+<span class="d-add">+   ```</span>
+<span class="d-add">+   ?tab=eric&amp;debug=cast,blocks   # only these two</span>
+<span class="d-add">+   ?tab=eric&amp;debug=off           # named tab, silent console</span>
+<span class="d-add">+   ?debug=votes                  # channels without naming the tab</span>
+<span class="d-add">+   ```</span>
+<span class="d-add">+</span>
+<span class="d-add">+   `?debug=` wins over the tab default and over `localStorage.cityedit_debug`,</span>
+<span class="d-add">+   for that page load only.</span>
+<span class="d-add">+</span>
+<span class="d-ctx"> 2. Reproduce whatever you&#x27;re testing in that tab.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> 3. Tell Claude: *&quot;check tab eric&quot;*. Claude will locate the tab by its</span>
+<span class="d-hunk">@@ -41,10 +54,34 @@ prints as `[channel] message`, so filtering is reliable in devtools</span>
+<span class="d-ctx"> | `votes` | `/api/graph-votes` loads (rev, legend), WS deltas applied, revision gaps → full refetch |</span>
+<span class="d-ctx"> | `cast` | **every press**: the planBlockVote decision (`cast`/`clear` counts, or `UNVOTE-ALL`) + the server&#x27;s response (`changed/cleared/capped/evicted`) |</span>
+<span class="d-ctx"> | `store` | local my-votes store: load-time server reset (how many stale entries dropped) |</span>
+<span class="d-del">-| `blocks` | block heat broadcasts (how many blocks lit) + block-selection sets |</span>
+<span class="d-del">-| `proposals` | route-proposal recomputes: corridor count, scores, timing |</span>
+<span class="d-del">-| `maplibre` | lifecycle: `load` fired (raster fallback unmounts), WebGL-unavailable fallback, source errors |</span>
+<span class="d-del">-| `ws` | websocket connect / disconnect / bad messages |</span>
+<span class="d-add">+| `blocks` | block heat applies (writes + blocks lit) + block-selection sets (per hover — burst-collapsed) |</span>
+<span class="d-add">+| `proposals` | route-proposal recomputes (count, top 5, timing), label broadcasts, routes that failed to calculate |</span>
+<span class="d-add">+| `maplibre` | lifecycle: `load` fired (raster fallback unmounts), WebGL-unavailable fallback, source errors, canvas/container resizes |</span>
+<span class="d-add">+| `sticker` | scanned-sticker resolution: lookup, location, pinning |</span>
+<span class="d-add">+| `audience` | proposal view counts + live co-presence |</span>
+<span class="d-add">+| `onboard` | first-run flow: visitor probe, tile pick, step transitions |</span>
+<span class="d-add">+| `ws` | websocket connect / disconnect / sync packets / bad messages |</span>
+<span class="d-add">+</span>
+<span class="d-add">+### Bursty lines: `+N more in Mms`</span>
+<span class="d-add">+</span>
+<span class="d-add">+Anything that can fire per hover, per delta or per frame goes through</span>
+<span class="d-add">+`dburst(channel, key, message)` instead of `dlog`. The first event of a burst</span>
+<span class="d-add">+prints normally, the rest are counted, and when the stream goes quiet (or every</span>
+<span class="d-add">+5s if it never does) one summary lands:</span>
+<span class="d-add">+</span>
+<span class="d-add">+```</span>
+<span class="d-add">+[blocks] select: [148339]</span>
+<span class="d-add">+[blocks] +14 more in 5081ms — last: select: [259586]</span>
+<span class="d-add">+```</span>
+<span class="d-add">+</span>
+<span class="d-add">+So a mouse sweep across twenty blocks costs two lines, and a vote storm costs</span>
+<span class="d-add">+two lines per burst — while a runaway loop still announces itself rather than</span>
+<span class="d-add">+hiding behind its own first line. If you need every event (say you are counting</span>
+<span class="d-add">+selection dispatches), read the count off the summary, or watch the</span>
+<span class="d-add">+corresponding `debugState` key with `cityedit.dumpState()`.</span>
+<span class="d-add">+</span>
+<span class="d-add">+Warnings and errors never go through any of this: `dwarn`/`derror` print</span>
+<span class="d-add">+regardless of which channels are on, because a failure is not chatter.</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> Enabling without a named tab:</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -52,6 +89,7 @@ Enabling without a named tab:</span>
+<span class="d-ctx"> cityedit.debug.enable(&quot;cast,blocks&quot;)   // specific channels</span>
+<span class="d-ctx"> cityedit.debug.enable(&quot;*&quot;)             // everything (persisted in localStorage)</span>
+<span class="d-ctx"> cityedit.debug.disable()</span>
+<span class="d-add">+cityedit.debug.channels()              // what is on right now</span>
+<span class="d-ctx"> ```</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> or set `localStorage.cityedit_debug = &quot;*&quot;` and reload.</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
