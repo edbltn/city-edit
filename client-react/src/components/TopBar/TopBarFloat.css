@@ -268,15 +268,24 @@
   min-width: 0;
   display: grid;
   grid-template-columns:
-    minmax(120px, auto)      /* Start / End         */
-    auto                     /* Selection / Votes   */
-    minmax(220px, 460px)     /* Map / Vote          */
-    /* Pinned, not auto: this column has to keep its width when the block
-       inside it is removed in the empty state, or the pills that span into it
-       would gain nothing. Two squares plus the container's own 1px edges. */
-    auto                     /* -/+ / Clear (two squares of the row) */
-    1fr                      /* slack               */
-    auto;                    /* rail                */
+    /* Gives way first: the address inside it ellipsises. */
+    minmax(120px, auto)      /* Start / End       */
+    /* min-content, NOT auto. `auto` is only a max-content PREFERENCE — under
+       space pressure the track shrinks, and because this pair carried
+       `min-width: 0` there was nothing to stop it collapsing past its own
+       words. The labels then overflowed the plate and were painted under the
+       pills next door, which is what "Sele" and "Vote" were. A min-content
+       floor makes the row PUSH instead: the legend keeps the width of
+       "Selection" and the pressure goes to the column above, which can absorb
+       it. */
+    min-content              /* Selection / Votes */
+    /* 1fr, so the pills fill the width the rest of the row does not use — they
+       are stacked and full width, not sized to their labels. It also makes the
+       empty state free: when the -/+ block is removed its track collapses and
+       this one takes the space, with no separate rule to keep in sync. */
+    1fr                      /* Map / Vote        */
+    auto                     /* -/+ / Clear       */
+    auto;                    /* rail              */
   /* AUTO, not --control-height. Forcing 44px rows made the Map/Vote stack 88
      tall while the legend pairs — one line of text plus 8px padding, twice —
      came to 74.7, so the three groups could not sit on one line. Letting the
@@ -346,7 +355,7 @@
 /* Spans both rows and sits centred: with Cast and Clear moved out, nothing
    else occupies this column's second row. */
 .topbar[data-chrome="float"] .nav-rail {
-  grid-area: 1 / 6 / 3 / 7;
+  grid-area: 1 / 5 / 3 / 6;
   align-self: center;
   justify-self: end;
 }
@@ -379,10 +388,30 @@
 .topbar[data-chrome="float"] .legend-pair {
   display: flex;
   flex-direction: column;
-  min-width: 0;
   /* Stretch, not centre: the pair spans both rows, so filling them is what
      puts its top and bottom edges on the same lines as the pills'. */
   align-self: stretch;
+  /* Nothing may leave a plate. The overflow bug above was a track-sizing
+     fault, fixed by the min-content floor — but a plate whose text can escape
+     its own edge and land on a neighbour is worth making structurally
+     impossible rather than only currently untrue. */
+  overflow: hidden;
+}
+
+/* The Start/End pair is the one that gives: it holds an address, which
+   ellipsises, so it keeps the zero floor that lets the track shrink. */
+.topbar[data-chrome="float"] .legend-pair-tools {
+  min-width: 0;
+}
+
+/* The legend pair does NOT give — it has no ellipsis to fall back on, and a
+   clipped "Selection" is not a legend. */
+.topbar[data-chrome="float"] .legend-pair-key {
+  min-width: min-content;
+}
+
+.topbar[data-chrome="float"] .legend-pair-key > * {
+  white-space: nowrap;
 }
 
 /* Cells: no plate, no shadow, no backdrop — the pair is what floats. */
@@ -713,9 +742,19 @@
        phone: every shape reads the token, so one override inside one media
        query rounded the whole band at a width nobody had screenshotted. The
        radius tokens are declared exactly once, in the block at the top. */
-    flex-direction: column;
+    /* GRID, not a flex column, and `.topbar-content` dissolves into it below.
+       The wordmark and the meta rail then share row 1 as LAID-OUT siblings.
+       They used to be a flex row plus an absolutely-positioned rail, and at
+       390 the wordmark (218px) and the rail (160px) came to 394 against a
+       390px viewport — so they overlapped by 4px, silently, because a
+       positioned element cannot push anything. Now the row measures them and
+       the 1fr column gives way instead. */
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto repeat(4, var(--float-row));
     align-items: stretch;
-    gap: var(--space-2);
+    column-gap: var(--space-2);
+    row-gap: 0;
   }
 
   /* One wordmark, not two. `.topbar h1` outranks the plain `.logo-container`
@@ -725,38 +764,55 @@
   }
 
   .topbar[data-chrome="float"] .logo-mobile-banner {
-    align-self: flex-start;
+    grid-area: 1 / 1;
+    justify-self: start;
+    align-self: center;
+    min-width: 0;
     width: fit-content;
+    max-width: 100%;
+    /* border-box, or `max-width: 100%` caps only the CONTENT and the padding
+       and border ride outside it — which is exactly how a 220px box ended up
+       inside a 206px column and met the rail 5px later. */
+    box-sizing: border-box;
     padding: 6px var(--space-3);
+    margin-bottom: var(--space-2);
     border: 1px solid var(--plate-line);
     border-radius: var(--float-radius);
+  }
+
+  /* And the mark scales rather than being cropped: it keeps its height cap,
+     but a viewBox'd SVG constrained on width redraws smaller instead of
+     losing letters, so a narrow phone shows a smaller CITY EDIT, not "CITY
+     ED". */
+  .topbar[data-chrome="float"] .logo-mobile-svg {
+    max-width: 100%;
   }
 
   /* 390px cannot hold six columns, so the same six pairs fold into two: the
      inputs and the two pickers down the left, the legend and the selection
      actions down the right. Map still sits directly under End and directly
      over Proposal, so its column keeps one left edge and one width. */
+  /* Dissolved too, so every control below is a direct item of the bar's grid
+     and can be placed on the same rows the wordmark and rail sit on. */
   .topbar[data-chrome="float"] .topbar-content {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: repeat(4, var(--control-height));
+    display: contents;
   }
 
-  .topbar[data-chrome="float"] .legend-pair-tools { grid-area: 1 / 1 / 3 / 2; }
-  .topbar[data-chrome="float"] .legend-pair-key   { grid-area: 1 / 2 / 3 / 3; }
-  .topbar[data-chrome="float"] .mode-switcher-group           { grid-area: 3 / 1; }
-  .topbar[data-chrome="float"] .vote-switcher-group           { grid-area: 4 / 1; }
-
-  .topbar[data-chrome="float"] .cast-group                    { grid-area: 3 / 2; }
-  .topbar[data-chrome="float"] .btn-clear                     { grid-area: 4 / 2; }
-  .topbar[data-chrome="float"] .calculating-indicator         { grid-area: 3 / 2 / 5 / 3; }
-
-  /* Beside the wordmark, out of the grid entirely. */
+  /* Row 1 is the wordmark and the rail. Laid out, not positioned: at any width
+     the 1fr column shrinks and the rail keeps its size, so they cannot meet. */
   .topbar[data-chrome="float"] .nav-rail {
-    position: absolute;
-    top: var(--float-gutter);
-    right: var(--float-gutter);
-    grid-area: auto;
+    position: static;
+    grid-area: 1 / 2;
+    justify-self: end;
+    align-self: center;
+    margin-bottom: var(--space-2);
   }
+
+  .topbar[data-chrome="float"] .legend-pair-tools { grid-area: 2 / 1 / 4 / 2; }
+  .topbar[data-chrome="float"] .legend-pair-key   { grid-area: 2 / 2 / 4 / 3; }
+  .topbar[data-chrome="float"] .mode-switcher-group { grid-area: 4 / 1; }
+  .topbar[data-chrome="float"] .vote-switcher-group { grid-area: 5 / 1; }
+  .topbar[data-chrome="float"] .actions-group       { grid-area: 4 / 2 / 6 / 3; }
 
   /* Stacked in one column, End sits above Map, so the pill edges fall between
      different pairs than they do on the desktop grid. */
@@ -962,28 +1018,17 @@
 
    With no selection there is nothing to cast on and nothing to clear, so the
    -/+ over Clear block is REMOVED from the layout rather than shown disabled.
-   A disabled control that cannot be enabled from where it sits is just noise,
-   and reserving its space is what left the run ending in a gap and reading
-   half-built. The Map and Vote pills take that column instead, so the run ends
-   flush where the block's right edge would have been.
+   A disabled control that cannot be enabled from where it sits is noise, and
+   reserving its space is what left the run ending in a gap.
 
-   The reflow when a selection appears is contained to columns 3 and 4: the
-   wordmark, the Start/End inputs and the legend are all to the LEFT of the
-   pills and cannot move, and the right cluster is held against the right
-   margin by the slack column, so it cannot move either. Only the two pills
-   give back the width the block needs.
-
-   `.has-selection` is already on .topbar-actions (TopBar.tsx sets it from
-   start.coords), so this rides an existing signal rather than inventing one.
+   Nothing else is needed: the Map/Vote column is 1fr, so it simply takes the
+   width the removed block was using. The pair of grid-column overrides that
+   used to do this by hand is gone — one less thing to keep in step with the
+   column list.
    ========================================================================== */
 
 .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .actions-group {
   display: none;
-}
-
-.topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .mode-switcher-group,
-.topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .vote-switcher-group {
-  grid-column: 3 / 5;
 }
 
 @media (max-width: 1080px) {
@@ -1063,64 +1108,3 @@
 }
 
 
-/* ==========================================================================
-   Map and Vote side by side — the default arrangement on a wide bar.
-
-   Stacked, each pill ran the full width of its column and looked enormous for
-   what it holds. Side by side each takes about half that, which fixes the
-   width complaint on its own.
-
-   THE BREAKPOINT IS MEASURED, not a stock 768. In this bar, at the shared type
-   size, 1ch renders at 9.00px and a pill's furniture — the "Map:"/"Vote:"
-   label, the icon, the chevron, the padding and the two gaps — is 120px. The
-   longest labels the app actually holds are "NYC Tactical Urbanism" (21ch, so
-   a 309px pill) and "Repaint this call box or utility box" (36ch, 444px). Full
-   labels for both would demand a bar nobody has, so the floor is instead the
-   width at which each pill still shows 12 characters before ellipsis — enough
-   to tell "Add pedestrian…" from "Add public…" — which is 228px each. Two of
-   those plus the gap is 468px, and the rest of the bar measures 905px
-   (Start/End 320, legend 134, the action block 74, the rail 284, gutters and
-   column gaps 93). 468 + 905 = 1373, so 1380px is where they stop fitting and
-   where they go back to stacking. Below 1080 the whole bar restacks anyway.
-   ========================================================================== */
-
-@media (min-width: 1380px) {
-  .topbar[data-chrome="float"] .topbar-content {
-    grid-template-columns:
-      minmax(120px, auto)      /* Start / End       */
-      auto                     /* Selection / Votes */
-      minmax(228px, 320px)     /* Map               */
-      minmax(228px, 460px)     /* Vote              */
-      auto                     /* -/+ / Clear       */
-      1fr                      /* slack             */
-      auto;                    /* rail              */
-  }
-
-  /* Each spans both rows and centres in them, so the two sit on one line at
-     the band's row height rather than filling its full depth. */
-  .topbar[data-chrome="float"] .mode-switcher-group {
-    grid-area: 1 / 3 / 3 / 4;
-    align-self: center;
-    height: var(--float-row);
-  }
-
-  .topbar[data-chrome="float"] .vote-switcher-group {
-    grid-area: 1 / 4 / 3 / 5;
-    align-self: center;
-    height: var(--float-row);
-  }
-
-  .topbar[data-chrome="float"] .actions-group { grid-area: 1 / 5 / 3 / 6; }
-  .topbar[data-chrome="float"] .nav-rail      { grid-area: 1 / 7 / 3 / 8; }
-
-  /* Empty state: with no selection the action block is gone, so Vote takes its
-     column and the run still ends flush. Map keeps its own width — only the
-     pill next to the gap grows into it. */
-  .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .mode-switcher-group {
-    grid-column: 3 / 4;
-  }
-
-  .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .vote-switcher-group {
-    grid-column: 4 / 6;
-  }
-}
