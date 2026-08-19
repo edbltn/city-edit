@@ -1,0 +1,392 @@
+diff --git a/client-react/src/components/TopBar/TopBar.css b/client-react/src/components/TopBar/TopBar.css
+index 552e11f..d3e8876 100644
+--- a/client-react/src/components/TopBar/TopBar.css
++++ b/client-react/src/components/TopBar/TopBar.css
+@@ -58,12 +58,32 @@
+   }
+ }
+ 
++/* BOXLESS BY DEFAULT. The wrapper exists so the floating band's bottom row can
++   be given a layout context of its own at the one width where it needs one
++   (TopBarFloat.css, the 580–1080 band). Everywhere else it generates no box at
++   all, so the banner's 2×2 grid and the floating desktop grid keep placing the
++   three controls inside it themselves — a `display: contents` element's
++   children take part in its parent's layout in document order, so adding this
++   wrapper moved nothing. */
++.picker-row {
++  display: contents;
++}
++
+ /* The rail shares its grid column with the Cast/Clear group below it, and the
+    column is as wide as whichever is wider. Pinning the rail to the column's end
+    keeps its right edge flush with the legend's and with Clear's, whichever way
+-   that comparison happens to fall (it currently ties almost exactly). */
++   that comparison happens to fall (it currently ties almost exactly).
++
++   Its CELL is explicit now, where auto-placement used to supply it: the rail is
++   the first child of .topbar-actions (it has to sit outside .picker-row, which
++   can only wrap adjacent siblings), so flow placement would put it at (1,1) and
++   push Map, Vote and the action block each one cell along. Stating the cell
++   makes the arrangement independent of the source order instead. Row 1, column
++   2 is where flow placement had it. The floating chrome overrides this with its
++   own grid-area at both of its widths. */
+ .topbar-actions > .nav-rail {
+   justify-self: end;
++  grid-area: 1 / 2;
+ }
+ 
+ /* Loading state pulse animation for route fields */
+diff --git a/client-react/src/components/TopBar/TopBar.tsx b/client-react/src/components/TopBar/TopBar.tsx
+index 6c55ed9..28bb9f1 100644
+--- a/client-react/src/components/TopBar/TopBar.tsx
++++ b/client-react/src/components/TopBar/TopBar.tsx
+@@ -98,11 +98,25 @@ export const TopBar = memo(function TopBar() {
+       ? "click map to set endpoint"
+       : "click here to set endpoint";
+ 
++  // LIT MEANS "THIS ROW HOLDS A POINT", derived from the point itself on every
++  // render. It used to mean "this tool is armed" — `activeTool` — and that is
++  // why the bar could show a highlight over an empty map: `activeTool` rests at
++  // "start", so "nothing selected" and "Start armed" are the same state and the
++  // row was lit through both. Clearing looked like the bug because clearPoints
++  // resets the flag to "start", which is the lit value; so did deleting the last
++  // waypoint, and so did arriving on the page. Nothing was going stale — the
++  // flag simply never answered the question the colour was asking.
++  //
++  // Derived state cannot drift out of step with what it describes: there is no
++  // path that removes a point without this recomputing, because it IS the point.
++  // Which tool the next map click feeds is still real and still tracked; it is
++  // just not what this colour is for. The row says what it holds, and the text
++  // inside it ("click map to set start") says what it wants.
+   const startToolClass = ["legend-item", "legend-item-coords", "legend-tool"];
+-  if (!isPointOnly && activeTool === "start") startToolClass.push("active");
++  if (start.coords) startToolClass.push("active");
+ 
+   const endToolClass = ["legend-item", "legend-item-coords", "legend-tool"];
+-  if (activeTool === "end") endToolClass.push("active");
++  if (end.coords) endToolClass.push("active");
+ 
+   const startCoordsClass = ["legend-coords"];
+   if (!start.coords) startCoordsClass.push("empty");
+@@ -242,72 +256,93 @@ export const TopBar = memo(function TopBar() {
+         )}
+ 
+         <div className={`topbar-actions${start.coords ? " has-selection" : ""}`}>
+-          <div className="mode-switcher-group">
+-            <span className="mode-prefix-label">Map:</span>
+-            <ModeSwitcher />
+-          </div>
+-
+           {/* One grid cell: .topbar-actions is a strict 2×2 grid (4-across in
+               landscape), so all the meta links share the one rail. How-it-Works
+               lives here too — it's something to read, not an action on the
+-              current selection, which is what the second row is for. */}
++              current selection, which is what the second row is for.
++
++              FIRST CHILD ON PURPOSE. It is the only one of these four that
++              does NOT belong to the band's bottom row — it sits up on the
++              wordmark's line — so it has to stand outside .picker-row below,
++              and a wrapper can only enclose adjacent siblings. Its cell is
++              stated explicitly in TopBar.css rather than left to
++              auto-placement, which would now hand it (1,1). */}
+           <NavRail onHowItWorks={() => setShowHowItWorks(true)} />
+ 
+-          {/* Always visible: this control is now the map's LEGEND as well as
+-              the cast-target picker (see VoteTypeSelector) — it says which
+-              proposal types are drawn and lets you toggle them — so it can no
+-              longer be gated on having a selection to vote on. */}
+-          <div className="vote-switcher-group" data-coach="votetype">
+-            <span className="mode-prefix-label">Vote:</span>
+-            <VoteTypeSelector />
+-          </div>
++          {/* THE BAND'S BOTTOM ROW, as one element. Map, Vote and the -/+ over
++              Clear block are one row's worth of controls, and at the width
++              where they sit side by side that row needs a layout context of
++              its own: sharing the bar's column tracks with the Start/End block
++              and the legend above meant the block inherited a track sized for
++              the LEGEND (251px for 117px of content) and the pills could not
++              reach it.
+ 
+-          {/* Row 2, right cell: acts on the current selection only, so it is
+-              empty until there is one. How-it-Works used to sit here purely to
+-              keep the row from collapsing — the fixed grid-template-rows does
+-              that on its own. */}
+-          <div className="actions-group">
+-            <div className={`calculating-indicator ${isLoading && start.coords && end.coords ? "active" : ""}`}>
+-              <div className="spinner"></div>
+-              <span>Calculating...</span>
++              The wrapper is BOXLESS (`display: contents`) at every other
++              width, so the banner's 2×2 grid and the floating desktop grid go
++              on placing these three controls exactly as they did before it
++              existed. Only the 580–1080 band gives it a box. */}
++          <div className="picker-row">
++            <div className="mode-switcher-group">
++              <span className="mode-prefix-label">Map:</span>
++              <ModeSwitcher />
+             </div>
+ 
+-            <div
+-              className={`cast-group ${canVote && !isLoading ? "" : "hidden-reserve"}`}
+-              data-coach="cast"
+-              role="group"
+-              aria-label="Cast a vote for or against"
+-            >
+-              <span className="cast-prefix-label">Cast:</span>
+-              <button
+-                type="button"
+-                className={`btn-cast btn-cast-down${isDirectionCast(-1) ? " is-cast" : ""}`}
+-                onClick={() => castVote(-1)}
+-                aria-pressed={isDirectionCast(-1)}
+-                title={isDirectionCast(-1) ? "Remove your vote against" : "Vote against"}
+-                tabIndex={canVote && !isLoading ? undefined : -1}
++            {/* Always visible: this control is now the map's LEGEND as well as
++                the cast-target picker (see VoteTypeSelector) — it says which
++                proposal types are drawn and lets you toggle them — so it can no
++                longer be gated on having a selection to vote on. */}
++            <div className="vote-switcher-group" data-coach="votetype">
++              <span className="mode-prefix-label">Vote:</span>
++              <VoteTypeSelector />
++            </div>
++
++            {/* Row 2, right cell: acts on the current selection only, so it is
++                empty until there is one. How-it-Works used to sit here purely to
++                keep the row from collapsing — the fixed grid-template-rows does
++                that on its own. */}
++            <div className="actions-group">
++              <div className={`calculating-indicator ${isLoading && start.coords && end.coords ? "active" : ""}`}>
++                <div className="spinner"></div>
++                <span>Calculating...</span>
++              </div>
++
++              <div
++                className={`cast-group ${canVote && !isLoading ? "" : "hidden-reserve"}`}
++                data-coach="cast"
++                role="group"
++                aria-label="Cast a vote for or against"
+               >
+-                −
+-              </button>
++                <span className="cast-prefix-label">Cast:</span>
++                <button
++                  type="button"
++                  className={`btn-cast btn-cast-down${isDirectionCast(-1) ? " is-cast" : ""}`}
++                  onClick={() => castVote(-1)}
++                  aria-pressed={isDirectionCast(-1)}
++                  title={isDirectionCast(-1) ? "Remove your vote against" : "Vote against"}
++                  tabIndex={canVote && !isLoading ? undefined : -1}
++                >
++                  −
++                </button>
++                <button
++                  type="button"
++                  className={`btn-cast btn-cast-up${isDirectionCast(1) ? " is-cast" : ""}`}
++                  onClick={() => castVote(1)}
++                  aria-pressed={isDirectionCast(1)}
++                  title={isDirectionCast(1) ? "Remove your vote for" : "Vote for"}
++                  tabIndex={canVote && !isLoading ? undefined : -1}
++                >
++                  +
++                </button>
++              </div>
++
+               <button
+-                type="button"
+-                className={`btn-cast btn-cast-up${isDirectionCast(1) ? " is-cast" : ""}`}
+-                onClick={() => castVote(1)}
+-                aria-pressed={isDirectionCast(1)}
+-                title={isDirectionCast(1) ? "Remove your vote for" : "Vote for"}
+-                tabIndex={canVote && !isLoading ? undefined : -1}
++                className={`btn-header btn-clear ${start.coords && !isLoading ? "" : "hidden-reserve"}`}
++                onClick={clearPoints}
++                tabIndex={start.coords && !isLoading ? undefined : -1}
+               >
+-                +
++                Clear
+               </button>
+             </div>
+-
+-            <button
+-              className={`btn-header btn-clear ${start.coords && !isLoading ? "" : "hidden-reserve"}`}
+-              onClick={clearPoints}
+-              tabIndex={start.coords && !isLoading ? undefined : -1}
+-            >
+-              Clear
+-            </button>
+           </div>
+         </div>
+       </div>
+diff --git a/client-react/src/components/TopBar/TopBarFloat.css b/client-react/src/components/TopBar/TopBarFloat.css
+index 0bd003f..c70f594 100644
+--- a/client-react/src/components/TopBar/TopBarFloat.css
++++ b/client-react/src/components/TopBar/TopBarFloat.css
+@@ -430,16 +430,24 @@
+   justify-self: end;
+ }
+ 
+-/* It was absolutely positioned inside .actions-group, whose box `display:
+-   contents` has just removed. Parked in the same cell as the controls it
+-   replaces — it is `visibility: hidden` until routing starts, and by then both
+-   of those are .hidden-reserve'd, so they never show at once. */
++/* OUT OF FLOW, which is how globals has always had it. This sheet used to
++   force it `position: static` and hand it a grid area of its own — written in
++   the round when .actions-group was `display: contents` and so had no box to
++   position against. .actions-group is a real box again (and `position:
++   relative`, from globals), so the override bought nothing and cost the action
++   block a 134px hidden item sitting in its flow: THAT is the empty plate that
++   opened before the minus at half width. An indicator that stands in for the
++   controls must not also reserve room beside them.
++
++   It covers the block exactly — the controls it replaces are .hidden-reserve'd
++   by the time it shows, so the two never appear at once — and takes the
++   block's own height rather than --control-height, which is taller than a
++   floating row. */
+ .topbar[data-chrome="float"] .calculating-indicator {
+-  position: static;
+-  grid-area: 1 / 4 / 3 / 5;
+-  align-self: center;
++  position: absolute;
++  inset: 0;
++  height: auto;
+   justify-content: center;
+-  height: var(--control-height);
+   box-sizing: border-box;
+   border-radius: var(--float-pill);
+   padding: 0 var(--space-3);
+@@ -1351,30 +1359,69 @@
+      landed on 560 and would have put the band's floor where each pill only
+      held ten characters.
+ 
+-   Three columns here, not two: the pickers take one each and the -/+ over
+-   Clear block keeps its own, so the row stays one row tall.
++   The bar's three columns belong to the TOP row here — Start/End across one
++   and two, the legend in three — and to the wordmark's line above it. The
++   picker row underneath spans all three as a single item and divides itself,
++   so it neither reads those tracks nor writes to them.
+    ========================================================================== */
+ 
+ @media (min-width: 580px) and (max-width: 1080px) {
+   .topbar[data-chrome="float"] {
+-    /* max-content, NOT auto. An `auto` track can be handed free space, and
+-       that is exactly how the block came to be 251px wide for 117px of
+-       content. Only the two 1fr tracks may grow. */
++    /* max-content, NOT auto: an `auto` track can be handed free space, and a
++       track that grows for no reason is what handed the action block 251px for
++       117px of content back when it lived in one. Only the two 1fr tracks may
++       grow. Track 3 is the legend's own width now. */
+     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) max-content;
+   }
+ 
+   /* Column 1 only — the same cell collision as the stacked arrangement had. */
+   .topbar[data-chrome="float"] .logo-mobile-banner { grid-area: 1 / 1 / 2 / 2; }
+-  /* Spans 2-3 so track 3 measures the -/+ block alone. */
++  /* Spans 2-3, so the rail is measured against the whole right side rather
++     than forcing track 3 to its own 174px. */
+   .topbar[data-chrome="float"] .nav-rail           { grid-area: 1 / 2 / 2 / 4; }
+ 
+   .topbar[data-chrome="float"] .legend-pair-tools  { grid-area: 2 / 1 / 4 / 3; }
+   .topbar[data-chrome="float"] .legend-pair-key    { grid-area: 2 / 3 / 4 / 4; }
+ 
+-  /* One row, side by side. They still sit BELOW the Start/End block and the
++  /* THE BOTTOM ROW IS ITS OWN LAYOUT CONTEXT, and that is the whole fix.
++
++     Two things have to be true at once here, and every previous attempt got
++     one by losing the other:
++
++       the -/+ over Clear block is sized by its own content, AND
++       the Start/End block and the legend do not move when it appears.
++
++     They kept fighting because all six controls were items of ONE grid, where
++     a column track is shared by every row. The block sat in track 3 — and so
++     did the legend, directly above it, which is the widest thing in the band.
++     The track measured the LEGEND (251px), the block was handed all of it, and
++     `justify-content: flex-end` from globals packed its 117px of content
++     against the right end: 134px of empty plate, then the minus. Pinning the
++     track (so the top row would stop reflowing) is what made that permanent.
++
++     One grid item spanning every column, flexed inside, breaks the tie. The
++     row's own three widths are settled in a context nothing above it can see,
++     and its contents cannot reach back out: it spans flexible tracks, so it is
++     ignored when the intrinsic tracks are sized, and `min-width: 0` leaves it
++     nothing to push with either way. The top row above keeps the placement it
++     already had, untouched. */
++  .topbar[data-chrome="float"] .picker-row {
++    display: flex;
++    grid-area: 5 / 1 / 6 / 4;
++    min-width: 0;
++    align-items: stretch;
++    gap: var(--float-gap);
++  }
++
++  /* Side by side, and EQUAL: `1 1 0` divides the row's free space rather than
++     its content's leftovers, so the two pills come out the same width whatever
++     is written in them. They still sit BELOW the Start/End block and the
+      legend — only these two share a row, and only with each other. */
+-  .topbar[data-chrome="float"] .mode-switcher-group { grid-area: 5 / 1 / 6 / 2; }
+-  .topbar[data-chrome="float"] .vote-switcher-group { grid-area: 5 / 2 / 6 / 3; }
++  .topbar[data-chrome="float"] .mode-switcher-group,
++  .topbar[data-chrome="float"] .vote-switcher-group {
++    flex: 1 1 0;
++    min-width: 0;
++  }
+ 
+   /* The action block follows the pickers. They share a row here, so it is a
+      single row too — minus, plus, Clear, side by side — and the group's bottom
+@@ -1385,17 +1432,22 @@
+      are the same decision about how much width this bar has. Outside the band
+      both revert together. */
+   .topbar[data-chrome="float"] .actions-group {
+-    grid-area: 5 / 3 / 6 / 4;
+     display: flex;
+     align-items: stretch;
+-    /* Content-sized and pinned right, and its children packed from the start —
+-       globals justifies this element to flex-end, which is what opened the
+-       empty plate on the left once the block was stretched. */
+-    justify-self: end;
++    /* CONTENT-SIZED, and it is the flex line that pins it right — it is the
++       last item in a row whose other two divide everything else, so it ends on
++       the row's right edge by construction rather than by being pushed there.
++       `0 0 auto` refuses both halves of the old fault: it never grows into
++       space it has no content for, and it never shrinks the squares. */
++    flex: 0 0 auto;
++    /* Its children packed from the start, because globals justifies this
++       element to flex-end — harmless once the box is exactly its content, but
++       that keyword is what turned the inherited width into an empty plate on
++       the left, so it does not get to stay. */
+     justify-content: flex-start;
+-    /* Content-sized: two squares plus whatever Clear needs. border-box so the
+-       block's outer height IS one row — content-box left it 2px taller than
+-       the pills beside it and the group's bottom edge came out ragged. */
++    /* Two squares plus whatever Clear needs, and nothing else. border-box so
++       the block's outer height IS one row — content-box left it 2px taller
++       than the pills beside it and the group's bottom edge came out ragged. */
+     box-sizing: border-box;
+     width: max-content;
+     height: var(--float-row);
+@@ -1429,14 +1481,21 @@
+     border-left: 1px solid var(--plate-line);
+   }
+ 
+-  /* Both start the picker row now, so both take the vertical gap. */
++  /* NOTHING TO CAST: the block leaves the row outright, and its gap leaves
++     with it, so the two pills divide the whole width. This is the same single
++     rule as everywhere else — the pills always run to the left edge of the
++     block — evaluated where the block has no left edge to run to.
+ 
++     `display: none` is what the stacked arrangement above cannot use: there
++     the block reserves a column track precisely so removing it cannot drag the
++     rows above along. Here it can, because the row is not made of tracks any
++     more. A hidden-but-reserved block would leave exactly the hole this whole
++     round was about, and one that no width could close.
+ 
+-  /* The empty-state span belongs to the stacked arrangement; here each pill
+-     already has its own column and the block's column collapses on its own. */
+-  .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .mode-switcher-group,
+-  .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .vote-switcher-group {
+-    grid-column: auto;
++     The empty-state column span belongs to the stacked arrangement too; the
++     pills are flex items here and take no notice of it. */
++  .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .actions-group {
++    display: none;
+   }
+ }
+ 

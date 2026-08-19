@@ -29,6 +29,24 @@
   <div class="kicker">City Edit</div>
   <h1>Change log</h1>
 
+  <a class="entry" href="./2026-08-19-halfwidth-floating-bar.html">
+    <div class="date">2026-08-19</div>
+    <h2>Half width: the empty plate before the minus</h2>
+    <p>The &minus;/+ over Clear block was never wide. A <strong>hidden &ldquo;Calculating&hellip;&rdquo;
+    indicator was standing beside it</strong> &mdash; left in the block&rsquo;s flow by a
+    <code>position: static</code> override written for a structure that lasted exactly one commit &mdash;
+    and its 134px is both the empty expanse before the minus AND, through the shared column track, why
+    the legend above was stretched to match. Three earlier rounds went looking for the width on the
+    buttons and on the track; the buttons measured 29.4 &times; 29.4 the whole time. With it gone, the
+    bottom row gets a <strong>layout context of its own</strong>, which is what finally lets both
+    requirements hold at once: the block sized by its content, and the rows above not moving when it
+    appears. The empty state can then DROP the block rather than reserve it, so the two dropdowns take
+    the full width and yield exactly what the block needs &mdash; one rule, not two states. Full, third
+    and quarter width come out identical to the digit. Plus the bar&rsquo;s Start/End highlight, which
+    read a mode flag whose resting value was the lit one, now <strong>derives from the point
+    itself</strong>.</p>
+  </a>
+
   <a class="entry" href="./2026-08-19-proposal-stacking.html">
     <div class="date">2026-08-19</div>
     <h2>Stacking: pins before words, and latitude before votes</h2>
