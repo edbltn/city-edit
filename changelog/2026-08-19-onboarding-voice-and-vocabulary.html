@@ -1,0 +1,834 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The wall asks for a need, not for a volunteer — 2026-08-19</title>
+<style>
+  :root {
+    --paper: #fbfbf8; --ink: #15140f; --muted: #6b6760; --hairline: rgba(0,0,0,0.10);
+    --accent: #b4541e; --add-bg: #e6ffec; --add-fg: #06402b; --del-bg: #ffeef0; --del-fg: #82071e;
+    --code-bg: #f1efe9; --font-ui: "Source Sans 3", system-ui, -apple-system, sans-serif;
+    --font-ed: "Source Serif 4", Georgia, serif; --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); line-height: 1.6; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 24px 96px; }
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 20px; margin-bottom: 8px; }
+  .kicker { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+  h1 { font-family: var(--font-ed); font-size: 34px; line-height: 1.15; margin: 8px 0 6px; }
+  .dateline { color: var(--muted); font-size: 14px; }
+  nav.toc { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 8px; }
+  nav.toc a { font-size: 13px; text-decoration: none; color: var(--ink); border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 5px 12px; background: #fff; }
+  nav.toc a:hover { border-color: var(--accent); color: var(--accent); }
+  .lede { font-family: var(--font-ed); font-size: 18px; color: #2c2a24; margin: 20px 0 28px; }
+  .card { background: #fff; border: 1px solid var(--hairline); border-radius: 14px; padding: 24px 26px;
+    margin: 20px 0; box-shadow: 0 1px 0 rgba(0,0,0,0.02); }
+  .tag { display: inline-block; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 8px; margin-bottom: 10px; }
+  h2 { font-family: var(--font-ed); font-size: 24px; margin: 4px 0 14px; }
+  h3 { font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent);
+    margin: 20px 0 6px; }
+  ul { margin: 6px 0 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  ul.files li { font-family: var(--font-mono); font-size: 12.5px; color: #33312b; }
+  code { font-family: var(--font-mono); font-size: 0.88em; background: var(--code-bg);
+    padding: 1px 5px; border-radius: 4px; }
+  p { margin: 6px 0; }
+  .twocol { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 680px) { .twocol { grid-template-columns: 1fr; } h1 { font-size: 27px; } }
+  details { border: 1px solid var(--hairline); border-radius: 10px; margin: 10px 0; background: #fff; overflow: hidden; }
+  summary { cursor: pointer; padding: 10px 14px; font-family: var(--font-mono); font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center; gap: 12px; user-select: none; }
+  summary:hover { background: #faf8f3; }
+  .fname { color: var(--ink); } .stat { font-size: 12px; color: var(--muted); }
+  pre.diff { margin: 0; padding: 14px 16px; overflow-x: auto; background: #fcfbf7;
+    border-top: 1px solid var(--hairline); font-family: var(--font-mono); font-size: 12px; line-height: 1.5; }
+  pre.diff span { display: block; white-space: pre; }
+
+  /* Hierarchical context map (System ▸ Module ▸ File ▸ blocks) */
+  .ctx { padding: 14px 16px; background: #f7f5ef; border-top: 1px solid var(--hairline); }
+  .ctx-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; padding: 4px 0; }
+  .ctx-mod { padding-left: 18px; } .ctx-file { padding-left: 36px; }
+  .ctx-tier { position: relative; }
+  .ctx-mod::before, .ctx-file::before { content: "└"; position: absolute; left: 4px; color: #bdb8ac; }
+  .ctx-file::before { left: 22px; }
+  .ctx-k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 2px 6px; }
+  .ctx-mod .ctx-k, .ctx-file .ctx-k { background: #8a857a; }
+  .ctx-v { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--ink); }
+  .ctx-sum { font-size: 12.5px; color: var(--muted); }
+  .pills { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+  .pill { font-size: 11px; color: #8a857a; background: #fff; border: 1px solid var(--hairline);
+    border-radius: 999px; padding: 1px 9px; }
+  .pill.on { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .ctx-map { margin-top: 12px; padding-left: 36px; }
+  .ctx-map-title { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+    margin-bottom: 6px; display: flex; gap: 12px; align-items: center; }
+  .legend { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--muted); display: inline-flex; align-items: center; }
+  .sw-ch, .sw-dim { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .sw-ch { background: var(--accent); } .sw-dim { background: #d6d1c5; }
+  ul.ctx-outline { list-style: none; margin: 0; padding: 0; border-left: 2px solid #e3ded2; }
+  ul.ctx-outline li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+    margin: 0; padding: 4px 0 4px 12px; position: relative; }
+  ul.ctx-outline li.changed { border-left: 3px solid var(--accent); margin-left: -2px; padding-left: 11px; background: #fff6ef; }
+  ul.ctx-outline li.dim { opacity: 0.62; }
+  .ol-label { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  li.changed .ol-label { font-weight: 700; color: var(--accent); }
+  .ol-sum { font-size: 12px; color: var(--muted); }
+  .ol-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: #fff;
+    background: var(--accent); border-radius: 4px; padding: 1px 6px; }
+  ol.ctx-blocks { margin: 0; padding-left: 20px; }
+  ol.ctx-blocks li { font-family: var(--font-mono); font-size: 12px; color: #33312b; margin: 4px 0; }
+
+  .d-add { background: var(--add-bg); color: var(--add-fg); }
+  .d-del { background: var(--del-bg); color: var(--del-fg); }
+  .d-hunk { color: #5a3ec8; } .d-meta { color: var(--muted); } .d-ctx { color: #33312b; }
+  .checklist li, .verify li { margin: 8px 0; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 13px; border-top: 1px solid var(--hairline); padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <div class="kicker">City Edit · Change log</div>
+    <h1>The wall asks for a need, not for a volunteer</h1>
+    <div class="dateline">2026-08-19 · branch <code>main</code></div>
+  </header>
+
+  <nav class="toc"><a href="#voice">A vote type is a need, not a shift somebody signs up for</a>
+<a href="#suppress">The mark goes down on a decision, not on a sighting</a>
+<a href="#vocab">Ten vote types leave nyc-tactical</a>
+<a href="#copy">The arrow, everywhere it was visible</a>
+    <a href="#verify">Verification</a><a href="#checklist">Checklist</a><a href="#diff">Full diff</a>
+  </nav>
+
+  <p class="lede">Three notes from the owner on the first-run wall, and one of them reverses a decision this flow was built around. The tiles stop translating a vote type into a job the reader would do and name the NEED instead — &quot;This unused patch of land needs flowers…&quot;, not &quot;I&#39;d put flowers where this bed is bare dirt…&quot; — across nyc-tactical and four other maps&#39; walls. The local &quot;don&#39;t ask again&quot; mark stops being written when the wall APPEARS and waits for the visitor to decide: a first vote, or &quot;just take me to the map&quot;. Ten vote types leave nyc-tactical&#39;s vocabulary with their tiles; none of them carried a single vote, here or in prod, and <strong>prod is untouched pending sign-off</strong>.</p>
+
+  
+    <section class="card" id="voice">
+      <div class="tag">COPY · THE MAIN NOTE</div>
+      <h2>A vote type is a need, not a shift somebody signs up for</h2>
+      <h3>Symptom</h3>
+      <p>Every tile on the opening wall translated its vote type into an ACTION THE READER WOULD TAKE: &quot;I&#39;d put flowers where this bed is bare dirt…&quot;, &quot;I&#39;d send our run this way…&quot;, &quot;I&#39;d chalk the crosswalk this corner should have…&quot;. The first screen of the app opened by asking a stranger to volunteer for a shift.</p>
+      <h3>Root cause</h3>
+      <ul><li>The phrasebook&#39;s stated voice rule was <strong>FIRST PERSON on every line, without exception</strong> — &quot;every line carries an I, a my, an us or a me&quot;. For a complaint (&quot;I trip on this sidewalk every single time…&quot;) that is exactly right. For a vote type that names a <em>deed</em> — flower-bomb, chalk, adopt, repaint — the only first-person sentence available is the one where the speaker does the deed, so the rule itself manufactured the offer of labour</li>
+<li>The derived tier had the same shape hard-coded for the volunteering verbs: <code>run / organize / chalk / adopt / clear / sweep / shovel / water / repaint</code> all produced <code>I could &lt;do it&gt; here…</code>, so every custom map inherited the defect too</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The rule is inverted and stated first in the file: <strong>a need, never an offer of labour</strong>. &quot;This unused patch of land needs flowers…&quot; is the same vote type, the same cast, and a sentence somebody actually thinks. Anything shaped <code>I&#39;d &lt;verb&gt;…</code> is now named in the header as the smell to check before adding a line</li>
+<li>First person is demoted to a preference: personal where the need is personal (&quot;My street is too hard to cross…&quot;), plain statement where the need belongs to the street (&quot;Cars drive too fast here…&quot;). <strong>11 nyc-tactical tiles</strong> rewritten to the owner&#39;s own copy</li>
+<li>The same sweep applied to the other maps&#39; walls: <strong>10 further labels</strong> — <code>Add tree</code>, <code>Plant trees</code>, <code>Create a tree pit</code>, <code>Create a community garden</code>, <code>Street redesign</code>, <code>Improve school crossing</code>, <code>Water the street trees along here</code>, <code>Weed and mulch this median</code>, <code>Add greenway connection</code>, <code>Highway</code></li>
+<li>The derived branch says <code>Somebody needs to &lt;x&gt; here…</code> instead of <code>I could &lt;x&gt; here…</code>, so a map authored after this file obeys the rule without anybody writing a line for it</li>
+<li><code>I&#39;d ride this route if it had a lane…</code> and <code>I&#39;d walk this whole way under trees…</code> are deliberately LEFT: using the thing being asked for is a need, not labour. The test below draws that line explicitly rather than banning the <code>I&#39;d</code> opening wholesale</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/onboarding/phrasebook.ts</li>
+<li>client-react/src/onboarding/phrasebook.test.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="suppress">
+      <div class="tag">FIRST RUN · REVERSES A PRIOR DECISION</div>
+      <h2>The mark goes down on a decision, not on a sighting</h2>
+      <h3>Symptom</h3>
+      <p>The local &quot;don&#39;t show me again&quot; suppressant was written THE MOMENT THE WALL APPEARED. Being shown a welcome screen and walking away from it counted as having been onboarded.</p>
+      <h3>Root cause</h3>
+      <ul><li>That was a deliberate earlier choice, for a real reason: a reload is a second map open, so without an early write the visitor who refreshes gets the wall twice. It bought reload-safety by spending the visitor&#39;s one first run on a screen they had not read</li>
+<li>It also made the wall un-resumable in the honest sense — the flow could conclude &quot;done&quot; about somebody who had made no choice at all</li></ul>
+      <h3>What changed</h3>
+      <ul><li>The wall-shown effect is <strong>deleted</strong>. Exactly two writes remain: the <code>done</code> step (a first vote landed) and <code>handleDismiss</code> (&quot;just take me to the map&quot;, the coach&#39;s ×, Escape) — the two things that mean the visitor decided</li>
+<li><strong>Reload mid-flow resumes.</strong> The pick goes into the canonical Selection, which writes it to the URL (<code>?vt=</code>), so <code>picked</code> is true on the first render after a reload and the step derives to start / end / cast. Verified live: reloading on <code>?vt=Adopt+and+tend+this+tree+bed</code> came back to the coach reading &quot;A tree bed near me needs love… / Tap the map on the spot you mean.&quot;, no wall</li>
+<li><strong>Reload ON the wall brings the wall back</strong>, which is now the intended answer — nothing has been decided yet. It survives because the visitor probe&#39;s answer is cached in sessionStorage for the length of the visit, so the reload never re-asks the server (which would say &quot;visited&quot; and hide it)</li>
+<li>The residual is documented at the effect rather than papered over: <strong>close the tab and return in a new session and there is no wall</strong>, because <code>/api/visitor</code> recorded the first open and sessionStorage is gone. Only the LOCAL mark moved — making the whole thing wait for a decision means the endpoint recording on the cast instead of on the open, a different change to a different layer</li>
+<li>The three doc comments that asserted the old rule — <code>firstRun.ts</code>&#39;s header, its <code>SUPPRESS_KEY</code> note, and <code>state.ts</code>&#39;s MAP OPEN trigger — are corrected, because each was load-bearing for anyone reading the flow</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/Onboarding/Onboarding.tsx</li>
+<li>client-react/src/onboarding/firstRun.ts</li>
+<li>client-react/src/onboarding/state.ts</li></ul>
+    </section>
+    
+
+    <section class="card" id="vocab">
+      <div class="tag">VOCABULARY</div>
+      <h2>Ten vote types leave nyc-tactical</h2>
+      <h3>Symptom</h3>
+      <p>The wall carried tiles for a snow-only observation, three that recruit other people&#39;s children, a family of group rides / runs / tours, a community fridge and a snowbank crossing.</p>
+      <h3>Root cause</h3>
+      <ul><li>The wall is built from the map&#39;s REAL vote types (<code>tiles.ts</code> reads <code>/api/maps/&lt;slug&gt;</code>), so a tile cannot be removed without removing the type — which is the correct coupling: a slip that cannot cast is worse than no slip</li>
+<li>Seasonal types (<code>Chalk the sneckdown outline</code>, <code>Shovel out this crossing</code>) read as broken for the nine months they do not apply</li></ul>
+      <h3>What changed</h3>
+      <ul><li>Removed locally with <code>server/manage_vote_types.py remove</code> — the CLI, not raw SQL, so the read-back check runs and the target database is printed on every call: <strong>25 → 15 types</strong></li>
+<li>The 11 phrasebook entries for the retired labels are deleted outright rather than left orphaned</li>
+<li><strong>Nothing was destroyed.</strong> All ten carry ZERO votes, in local and in prod alike — so no <code>rebuild_redis_for_map</code> pass was needed and no vote data was at risk. The count is in the sign-off table below because the owner asked to see it before agreeing, not because it turned out to be non-zero</li>
+<li><strong>Prod is untouched</strong>, per the brief. Eight of the ten are already absent there (the 2026-08-14 24→18 trim took them); the two prod still authors are <code>Host a community fridge</code> and <code>Shovel out this crossing</code></li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/onboarding/phrasebook.ts</li>
+<li>(local DB) maps.custom_vote_types for nyc-tactical</li></ul>
+    </section>
+    
+
+    <section class="card" id="copy">
+      <div class="tag">COPY · SWEEP</div>
+      <h2>The arrow, everywhere it was visible</h2>
+      <h3>Symptom</h3>
+      <p>&quot;or just look at the map →&quot; on the wall, and &quot;What needs fixing? →&quot; in How it Works.</p>
+      <h3>Root cause</h3>
+      <ul><li>A sweep of <code>→</code> across <code>client-react/src</code>, <code>public/</code> and <code>index.html</code> returns <strong>~90 hits</strong>, but all but two are inside code comments and CSS notes, where the character is prose (&quot;label → sentence&quot;, &quot;data-x-edge → remove&quot;) and never reaches a screen</li>
+<li>HTML-entity and escape forms (<code>&amp;rarr;</code>, <code>\2192</code>, <code>u2192</code>) and CSS <code>content:</code> arrows were checked separately — none exist</li></ul>
+      <h3>What changed</h3>
+      <ul><li><code>or just look at the map →</code> → <strong>or just take me to the map</strong></li>
+<li><code>What needs fixing? →</code> → <strong>What needs fixing?</strong></li>
+<li>Neither file is the other agent&#39;s: the map-chrome files currently dirty in the tree (<code>GraphLayer.tsx</code>, <code>MapLibreBackground/*</code>) contain no user-visible arrow, only two comment arrows, and were not staged or touched</li></ul>
+      <h3>Files touched</h3>
+      <ul class="files"><li>client-react/src/components/Onboarding/OpenerWall.tsx</li>
+<li>client-react/src/components/HowItWorksModal/HowItWorksModal.tsx</li></ul>
+    </section>
+    
+
+  <section class="card verify" id="verify">
+    <div class="tag">Verification</div>
+    <h2>What was run</h2>
+    <ul><li><code>npx vitest run</code> — <strong>662 passed, 1 skipped, 40 files</strong>. <code>npx tsc -b</code> clean (Vite dev never type-checks, so this is the pre-flight that matters).</li>
+<li>The wall on <code>localhost:3000/m/nyc-tactical</code>, reset with the owner&#39;s three storage lines, renders <strong>15 tiles</strong>: the 11 rewrites plus the 4 the owner marked good, in the order the brief listed them. No arrow; the footer reads &quot;or just take me to the map&quot;.</li>
+<li>With the wall on screen and nothing chosen: <code>localStorage[&quot;cityedit.onboarded&quot;]</code> is <strong>null</strong>. It was &quot;1&quot; at this point before.</li>
+<li>Reloaded on the bare wall → the wall came back, still unsuppressed. Picked &quot;A tree bed near me needs love…&quot;, reloaded again → <strong>the coach resumed at the start step with that sentence, no wall</strong>.</li>
+<li>Clicked &quot;or just take me to the map&quot; → local and session marks both flip to &quot;1&quot; and the wall closes.</li>
+<li><code>nyc-trees</code>&#39;s wall re-read tile by tile to confirm the generalized rewrites landed and nothing else moved.</li>
+<li>Prod was READ ONLY, over the IAP tunnel on local <strong>:5433</strong> (never 5432 — that shadows local dev and silently dials prod). Tunnel closed afterwards. No prod write, no backup taken, because nothing was written.</li></ul>
+  </section>
+
+  <section class="card checklist" id="checklist">
+    <div class="tag">For you</div>
+    <h2>Manual checklist</h2>
+    <ul><li>Reset with the three storage lines and open <code>http://localhost:3000/m/nyc-tactical?tab=onboard</code> — read the 15 tiles and confirm none of them sounds like an offer to do a job.</li>
+<li>Reload while the wall is up: it should come back. Then pick a tile and reload again: you should land back in the coach mid-flow, NOT on the wall.</li>
+<li>Click &quot;or just take me to the map&quot;, then reload: no wall. That is the mark being written on the decision.</li>
+<li>Open How it Works → &quot;Not sure where to start?&quot; and confirm the button reads &quot;What needs fixing?&quot; with no arrow — and that pressing it reopens the wall.</li>
+<li>Open <code>/m/nyc-trees</code> and <code>/m/sac-proposals</code> walls and check the generalized rewrites read as needs (&quot;This corner needs a tree…&quot;, &quot;This whole junction needs starting over…&quot;).</li>
+<li>Read the prod sign-off table in the chat and say yes or no to the two prod vote types. Nothing has been written to prod.</li></ul>
+  </section>
+
+  <section id="diff">
+    <h2 style="font-family:var(--font-ed);font-size:24px;margin:32px 0 10px;">Full diff</h2>
+    <p style="color:var(--muted);font-size:14px;margin-top:0;">Click any file to expand. Green is added, red removed.</p>
+    
+        <details>
+          <summary><span class="fname">client-react/src/components/HowItWorksModal/HowItWorksModal.tsx</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · How it Works</span>
+        <span class="ctx-sum">The explainer modal, and the one door back into the first-run flow for anyone the counting identity called a returning visitor</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">HowItWorksModal.tsx</span>
+        <span class="ctx-sum">~300 LOC — the modal, its sections, the reopen-the-wall button</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">modal shell / sections</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">&amp;quot;Not sure where to start?&amp;quot; · requestOnboarding button</span><span class="ol-sum">the arrow</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">&amp;quot;How to Use&amp;quot; steps / the rest</span><span class="ol-sum">unchanged</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>&amp;quot;What needs fixing? →&amp;quot; becomes &amp;quot;What needs fixing?&amp;quot; — the second and last place the arrow reached a screen</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/HowItWorksModal/HowItWorksModal.tsx b/client-react/src/components/HowItWorksModal/HowItWorksModal.tsx</span>
+<span class="d-meta">index a3eff71..d182121 100644</span>
+<span class="d-meta">--- a/client-react/src/components/HowItWorksModal/HowItWorksModal.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/HowItWorksModal/HowItWorksModal.tsx</span>
+<span class="d-hunk">@@ -120,7 +120,7 @@ export const HowItWorksModal = memo(function HowItWorksModal({ isOpen, onClose }</span>
+<span class="d-ctx">                 onClose();</span>
+<span class="d-ctx">               }}</span>
+<span class="d-ctx">             &gt;</span>
+<span class="d-del">-              What needs fixing? →</span>
+<span class="d-add">+              What needs fixing?</span>
+<span class="d-ctx">             &lt;/button&gt;</span>
+<span class="d-ctx">           &lt;/section&gt;</span>
+<span class="d-ctx"> </span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/Onboarding/Onboarding.tsx</span>
+            <span class="stat"><span class="d-add">+41</span> / <span class="d-del">-18</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run flow</span>
+        <span class="ctx-sum">The coach: derives its step from the canonical Selection, opens the wall, and owns when the local suppressant is written</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">Onboarding.tsx</span>
+        <span class="ctx-sum">366 → 386 LOC — the flow component, its derived step, its effects, the ask() copy</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="changed"><span class="ol-label">header · two ways in</span><span class="ol-sum">REWRITTEN — the map-open branch now says a decision ends it, not a sighting</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">Onboarding() / OnboardingFlow()</span><span class="ol-sum">unchanged — remount keyed on the request counter</span></li><li class="changed"><span class="ol-label">wasSuppressed lazy initializer</span><span class="ol-sum">comment corrected — the write it guards against is now the CAST&amp;#39;s, not the wall&amp;#39;s</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">the derived step (facts → onboardingStep)</span><span class="ol-sum">unchanged — nothing here was state to begin with</span></li><li class="dim"><span class="ol-label">effect: publish active / arm the end tool</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">effect: suppress when the WALL is shown</span><span class="ol-sum">DELETED — replaced by a note on what a reload now does</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">effect: suppress when the flow is DONE</span><span class="ol-sum">kept — one of the two surviving writes</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">handlePick</span><span class="ol-sum">unchanged — straight into the canonical selection, and therefore the URL</span></li><li class="changed"><span class="ol-label">handleDismiss</span><span class="ol-sum">the other surviving write, with the reason stated</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">render: wall / coach / cast controls</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">ask()</span><span class="ol-sum">unchanged — what the coach asks at each step</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Header: WHAT ENDS IT IS A DECISION, NOT A SIGHTING — the two things that count, and why a wall shown and ignored must not spend somebody&amp;#39;s one first run</li><li>The deleted effect is replaced by a note that walks the reload cases: picked → resumes from the URL; on the wall → the wall returns, carried by the sessionStorage answer</li><li>… and states the residual plainly: a new session gets no wall because /api/visitor recorded the open. Only the LOCAL mark moved</li><li>handleDismiss gains its reason: &amp;quot;just take me to the map&amp;quot;, the × and Escape all land here, and all three are the visitor saying they are done being asked</li><li>The dlog moves with it — &amp;quot;dismissed — not offering it again&amp;quot; is now where the write actually happens</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/Onboarding/Onboarding.tsx b/client-react/src/components/Onboarding/Onboarding.tsx</span>
+<span class="d-meta">index 436bbd7..be95112 100644</span>
+<span class="d-meta">--- a/client-react/src/components/Onboarding/Onboarding.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/Onboarding/Onboarding.tsx</span>
+<span class="d-hunk">@@ -26,8 +26,15 @@ import &quot;./Onboarding.css&quot;;</span>
+<span class="d-ctx"> //   · The map OPEN itself, the first time anybody at this counting identity has</span>
+<span class="d-ctx"> //     opened one → the wall opens over the map, and picking a sentence starts</span>
+<span class="d-ctx"> //     the flow at its first blank. Once ever, on any map, and never behind a</span>
+<span class="d-del">-//     menu: the suppressant goes down the moment the wall is on screen, so a</span>
+<span class="d-del">-//     reload does not repeat it and the second map does not either.</span>
+<span class="d-add">+//     menu.</span>
+<span class="d-add">+//</span>
+<span class="d-add">+//     WHAT ENDS IT IS A DECISION, NOT A SIGHTING. The suppressant used to go</span>
+<span class="d-add">+//     down the moment the wall was on screen; it now waits for the visitor to</span>
+<span class="d-add">+//     do one of the two things that mean they are done with it — cast their</span>
+<span class="d-add">+//     first vote, or say &quot;just take me to the map&quot;. Seeing a wall and walking</span>
+<span class="d-add">+//     away is not being onboarded, and marking it as such spent somebody&#x27;s one</span>
+<span class="d-add">+//     first run on a screen they never read. What that costs is spelled out at</span>
+<span class="d-add">+//     the effect below, because a reload is the case it changes.</span>
+<span class="d-ctx"> //   · The visit came from a scan of a sticker nobody has voted from yet → the</span>
+<span class="d-ctx"> //     sentence was chosen by the object in their hand and travelled here in the</span>
+<span class="d-ctx"> //     URL (`?vt=`), so the wall is skipped and the flow starts already picked.</span>
+<span class="d-hunk">@@ -94,8 +101,8 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">   // and a flow the user just asked for by hand.</span>
+<span class="d-ctx">   //</span>
+<span class="d-ctx">   // Read ONCE, in a lazy initializer, because the flow writes the suppressant to</span>
+<span class="d-del">-  // itself the moment the wall appears: a live isSuppressed() here would see that</span>
+<span class="d-del">-  // write on the next render and take the wall back off the screen.</span>
+<span class="d-add">+  // itself when it finishes: a live isSuppressed() here would see the write the</span>
+<span class="d-add">+  // first cast makes and tear the closing line off the screen before it is read.</span>
+<span class="d-ctx">   const [wasSuppressed] = useState(() =&gt; !openedByHand &amp;&amp; isSuppressed());</span>
+<span class="d-ctx">   const [visitedBefore, setVisitedBefore] = useState&lt;boolean | null&gt;(() =&gt; {</span>
+<span class="d-ctx">     if (openedByHand) return false;</span>
+<span class="d-hunk">@@ -184,20 +191,32 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">     if (active &amp;&amp; step === &quot;end&quot;) setActiveTool(&quot;end&quot;);</span>
+<span class="d-ctx">   }, [active, step, setActiveTool]);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // Shown once, ever. The mark goes down the moment the WALL is on screen, not</span>
+<span class="d-del">-  // when the flow is finished with: a reload is a second map open, and a wall</span>
+<span class="d-del">-  // that only suppresses itself on dismissal or on a cast greets anybody who</span>
+<span class="d-del">-  // refreshes before they have chosen anything. `wasSuppressed` is frozen above</span>
+<span class="d-del">-  // precisely so this write cannot pull the wall back off the screen.</span>
+<span class="d-del">-  useEffect(() =&gt; {</span>
+<span class="d-del">-    if (!active || step !== &quot;wall&quot;) return;</span>
+<span class="d-del">-    dlog(&quot;onboard&quot;, &quot;wall shown — not offering it again&quot;);</span>
+<span class="d-del">-    suppress();</span>
+<span class="d-del">-  }, [active, step]);</span>
+<span class="d-add">+  // NOTHING SUPPRESSES HERE. The mark goes down in exactly two places — the</span>
+<span class="d-add">+  // `done` effect below (a vote was cast) and `handleDismiss` (&quot;just take me to</span>
+<span class="d-add">+  // the map&quot;, the coach&#x27;s ×, Escape). Showing the wall writes nothing.</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  // What that means for a RELOAD, which is the case it changes:</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  //   · Reloaded with a sentence already picked → the flow resumes where it was</span>
+<span class="d-add">+  //     and no wall appears. The pick is in the canonical selection, so it is in</span>
+<span class="d-add">+  //     the URL (`?vt=`), so `picked` is true on the first render after the</span>
+<span class="d-add">+  //     reload and the step derives to start/end/cast. This is the common case</span>
+<span class="d-add">+  //     and it needs nothing from local storage at all.</span>
+<span class="d-add">+  //   · Reloaded ON the wall, nothing picked → the wall comes back, which is now</span>
+<span class="d-add">+  //     the intended answer: they have not decided anything yet. It comes back</span>
+<span class="d-add">+  //     because the visitor probe&#x27;s answer is cached in sessionStorage for the</span>
+<span class="d-add">+  //     length of the visit (firstRun.ts, ANSWER_KEY) — the reload does not</span>
+<span class="d-add">+  //     re-ask the server, which would say &quot;visited&quot; and hide it.</span>
+<span class="d-add">+  //</span>
+<span class="d-add">+  // The residual, stated rather than papered over: close the tab and come back</span>
+<span class="d-add">+  // later and there is no wall, because /api/visitor recorded the first open and</span>
+<span class="d-add">+  // sessionStorage is gone. Only the LOCAL mark moved; the server still counts a</span>
+<span class="d-add">+  // sighting as a visit. Making the whole thing wait for a decision would mean</span>
+<span class="d-add">+  // the endpoint recording on the cast instead of on the open, which is a</span>
+<span class="d-add">+  // different change to a different layer.</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  // A cast finishes the flow. Suppress again (harmless, and the wall may have</span>
+<span class="d-del">-  // been skipped entirely on a sticker scan), then let the closing line stand</span>
+<span class="d-del">-  // for a few seconds and leave.</span>
+<span class="d-add">+  // A cast finishes the flow. Suppress — this and the dismissal are the only two</span>
+<span class="d-add">+  // writes — then let the closing line stand for a few seconds and leave.</span>
+<span class="d-ctx">   useEffect(() =&gt; {</span>
+<span class="d-ctx">     if (!active || step !== &quot;done&quot;) return;</span>
+<span class="d-ctx">     dlog(&quot;onboard&quot;, &quot;first vote landed — flow complete&quot;);</span>
+<span class="d-hunk">@@ -217,8 +236,12 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {</span>
+<span class="d-ctx">     setVoteType(tile.voteType);</span>
+<span class="d-ctx">   }, [setVoteType]);</span>
+<span class="d-ctx"> </span>
+<span class="d-add">+  // The other half of &quot;a decision, not a sighting&quot;: &quot;just take me to the map&quot;,</span>
+<span class="d-add">+  // the coach&#x27;s ×, and Escape all land here, and all of them are the visitor</span>
+<span class="d-add">+  // saying they are done being asked. That is worth marking; being shown the</span>
+<span class="d-add">+  // wall is not.</span>
+<span class="d-ctx">   const handleDismiss = useCallback(() =&gt; {</span>
+<span class="d-del">-    dlog(&quot;onboard&quot;, &quot;dismissed&quot;);</span>
+<span class="d-add">+    dlog(&quot;onboard&quot;, &quot;dismissed — not offering it again&quot;);</span>
+<span class="d-ctx">     suppress();</span>
+<span class="d-ctx">     setDismissed(true);</span>
+<span class="d-ctx">   }, []);</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/components/Onboarding/OpenerWall.tsx</span>
+            <span class="stat"><span class="d-add">+1</span> / <span class="d-del">-1</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · the opening wall</span>
+        <span class="ctx-sum">The portalled full-screen tag-flow of pills, one per vote type. Escape closes it; so does the line at the bottom.</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">OpenerWall.tsx</span>
+        <span class="ctx-sum">124 LOC — the header note, TileMark, the pill flow, the skip footer</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">header · every pill is a real vote type</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">Props / STAGGER</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">TileMark</span><span class="ol-sum">unchanged — themed icon, or the unthemed-proposal sparkle</span></li><li class="dim"><span class="ol-label">OpenerWall · escape + body-overflow effects</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">OpenerWall · pills</span><span class="ol-sum">unchanged — the tiles themselves come from tiles.ts</span></li><li class="changed"><span class="ol-label">OpenerWall · skip footer</span><span class="ol-sum">the copy and the arrow</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>&amp;quot;or just look at the map →&amp;quot; becomes &amp;quot;or just take me to the map&amp;quot; — the owner&amp;#39;s wording, and the arrow gone</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/components/Onboarding/OpenerWall.tsx b/client-react/src/components/Onboarding/OpenerWall.tsx</span>
+<span class="d-meta">index cd6da2d..d8feb43 100644</span>
+<span class="d-meta">--- a/client-react/src/components/Onboarding/OpenerWall.tsx</span>
+<span class="d-meta">+++ b/client-react/src/components/Onboarding/OpenerWall.tsx</span>
+<span class="d-hunk">@@ -114,7 +114,7 @@ export function OpenerWall({ map, tiles, onPick, onDismiss }: Props) {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">         &lt;footer className=&quot;opener-foot&quot;&gt;</span>
+<span class="d-ctx">           &lt;button type=&quot;button&quot; className=&quot;opener-skip&quot; onClick={onDismiss}&gt;</span>
+<span class="d-del">-            or just look at the map →</span>
+<span class="d-add">+            or just take me to the map</span>
+<span class="d-ctx">           &lt;/button&gt;</span>
+<span class="d-ctx">         &lt;/footer&gt;</span>
+<span class="d-ctx">       &lt;/div&gt;</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/onboarding/firstRun.ts</span>
+            <span class="stat"><span class="d-add">+8</span> / <span class="d-del">-5</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill on">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · &amp;quot;is this your first time here?&amp;quot;</span>
+        <span class="ctx-sum">The visitor probe (/api/visitor, keyed on counting_identity) plus the local suppressant. localStorage can only ever STOP the flow, never start it.</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">firstRun.ts</span>
+        <span class="ctx-sum">173 → 175 LOC — the long why-not-localStorage header, the store helpers, the single-flight probe</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">header · why not a localStorage flag</span><span class="ol-sum">unchanged — the six-UUIDs-in-three-minutes iPhone</span></li><li class="changed"><span class="ol-label">header · what the recording must not do</span><span class="ol-sum">the SUPPRESSANT bullet REWRITTEN — written on the decision, not the sighting</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">header · what happens when the key changes</span><span class="ol-sum">unchanged — the four cases and the trade they encode</span></li><li class="changed"><span class="ol-label">SUPPRESS_KEY</span><span class="ol-sum">doc corrected — a first cast, or &amp;quot;just take me to the map&amp;quot;</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">ANSWER_KEY</span><span class="ol-sum">unchanged — and now load-bearing for the reload case</span></li><li class="dim"><span class="ol-label">isSuppressed / suppress / unsuppress</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">hasVisitedBefore / probeVisitor</span><span class="ol-sum">unchanged — one in-flight probe, fails CLOSED</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The bullet that said THE SUPPRESSANT IS WRITTEN WHEN THE WALL IS SHOWN now says it is written when the visitor DECIDES, and names what carries a reload instead: the sessionStorage answer below it</li><li>SUPPRESS_KEY&amp;#39;s own doc no longer says &amp;quot;the moment the wall is shown&amp;quot;</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/onboarding/firstRun.ts b/client-react/src/onboarding/firstRun.ts</span>
+<span class="d-meta">index 3a8391a..5730827 100644</span>
+<span class="d-meta">--- a/client-react/src/onboarding/firstRun.ts</span>
+<span class="d-meta">+++ b/client-react/src/onboarding/firstRun.ts</span>
+<span class="d-hunk">@@ -38,9 +38,11 @@</span>
+<span class="d-ctx"> //   · THE CURRENT LOAD MUST NOT COUNT. The server reads before it writes and</span>
+<span class="d-ctx"> //     returns the answer from BEFORE this open, or nobody would ever see a wall:</span>
+<span class="d-ctx"> //     every visitor&#x27;s first probe would find their own visit already recorded.</span>
+<span class="d-del">-//   · THE SUPPRESSANT IS WRITTEN WHEN THE WALL IS SHOWN, not when it is finished</span>
+<span class="d-del">-//     with (components/Onboarding/Onboarding.tsx). A reload is a second open, and</span>
+<span class="d-del">-//     without that write the visitor who reloads gets it twice.</span>
+<span class="d-add">+//   · THE SUPPRESSANT IS WRITTEN WHEN THE VISITOR DECIDES, not when the wall is</span>
+<span class="d-add">+//     shown (components/Onboarding/Onboarding.tsx): their first cast, or &quot;just</span>
+<span class="d-add">+//     take me to the map&quot;. It used to go down on the sighting, which spent a</span>
+<span class="d-add">+//     first run on a screen nobody read. What now carries a reload is the</span>
+<span class="d-add">+//     sessionStorage answer below, not the mark — see that effect&#x27;s note.</span>
+<span class="d-ctx"> //</span>
+<span class="d-ctx"> // (The [MAPLOAD] beacon already reports map opens, and it is not what answers</span>
+<span class="d-ctx"> // this: it is a log line for a monitoring metric, with nothing queryable behind</span>
+<span class="d-hunk">@@ -76,8 +78,9 @@ import { CONFIG } from &quot;../config&quot;;</span>
+<span class="d-ctx"> import { dlog, dwarn } from &quot;../utils/debugLog&quot;;</span>
+<span class="d-ctx"> import { getVoterId } from &quot;../utils/voterIdentity&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-/** Written the moment the wall is shown, and again when the flow ends.</span>
+<span class="d-del">- *  Suppresses only. */</span>
+<span class="d-add">+/** Written when the visitor decides they are done with the flow — a first vote</span>
+<span class="d-add">+ *  cast, or &quot;just take me to the map&quot;. Never on the sighting alone. Suppresses</span>
+<span class="d-add">+ *  only. */</span>
+<span class="d-ctx"> const SUPPRESS_KEY = &quot;cityedit.onboarded&quot;;</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> /** The server&#x27;s answer, held for the length of the visit. A scan is TWO document</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/onboarding/phrasebook.test.ts</span>
+            <span class="stat"><span class="d-add">+26</span> / <span class="d-del">-9</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · onboarding vocabulary (guard)</span>
+        <span class="ctx-sum">The tests that keep the voice honest as labels are added — coverage of every preset label, plus the shape rules</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">phrasebook.test.ts</span>
+        <span class="ctx-sum">75 → 88 LOC — preset coverage, the voice rules, the derivation rules</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">PRESET_LABELS</span><span class="ol-sum">unchanged — the union of the three shipped vote sets</span></li><li class="dim"><span class="ol-label">describe(coverage)</span><span class="ol-sum">unchanged — still passes: no preset lost its curated line</span></li><li class="changed"><span class="ol-label">it(leaves every sentence unfinished)</span><span class="ol-sum">REPLACED by &amp;quot;leaves every sentence open&amp;quot; — bans a terminal . ! ?</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">it(keeps every sentence short)</span><span class="ol-sum">unchanged — 78-character cap</span></li><li class="changed"><span class="ol-label">it(speaks in the first person)</span><span class="ol-sum">REPLACED by two tests: never volunteers, never second person</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">it(never speaks in the imperative)</span><span class="ol-sum">unchanged — no sentence opens with the label&amp;#39;s own verb</span></li><li class="changed"><span class="ol-label">describe(derivation)</span><span class="ol-sum">the volunteering case now expects a need</span><span class="ol-tag">changed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>&amp;quot;leaves every sentence open&amp;quot;: /[.!?]$/ must not match — the trailing … is the norm but two of the owner&amp;#39;s lines are complete thoughts and stop bare</li><li>&amp;quot;never volunteers the reader for a job&amp;quot;: bans an I&amp;#39;d/I would/I could/I can opening followed by a LABOUR verb (chalk, paint, plant, water, weed, shovel, adopt, install, host, run, lead, …)</li><li>The same regex deliberately omits ride and walk, so &amp;quot;I&amp;#39;d ride this route if it had a lane…&amp;quot; survives — using the thing asked for is a need</li><li>&amp;quot;never speaks to the reader about their own street&amp;quot;: the you/your half of the old first-person test, kept as its own case</li><li>The derivation expectation moves from &amp;quot;I could run a paint day here…&amp;quot; to &amp;quot;Somebody needs to run a paint day here…&amp;quot;</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/onboarding/phrasebook.test.ts b/client-react/src/onboarding/phrasebook.test.ts</span>
+<span class="d-meta">index 31e3042..ac30fbd 100644</span>
+<span class="d-meta">--- a/client-react/src/onboarding/phrasebook.test.ts</span>
+<span class="d-meta">+++ b/client-react/src/onboarding/phrasebook.test.ts</span>
+<span class="d-hunk">@@ -23,20 +23,34 @@ describe(&quot;coverage&quot;, () =&gt; {</span>
+<span class="d-ctx"> describe(&quot;the voice&quot;, () =&gt; {</span>
+<span class="d-ctx">   const all = Object.values(CURATED);</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  it(&quot;leaves every sentence unfinished&quot;, () =&gt; {</span>
+<span class="d-del">-    expect(all.filter((s) =&gt; !s.endsWith(&quot;…&quot;))).toEqual([]);</span>
+<span class="d-add">+  it(&quot;leaves every sentence open&quot;, () =&gt; {</span>
+<span class="d-add">+    // Usually a trailing &quot;…&quot;, finished by pointing at the map. A line that is</span>
+<span class="d-add">+    // already a whole thought (&quot;There is too much litter in this area&quot;) may stop</span>
+<span class="d-add">+    // without one — but nothing closes with a full stop, which is the shape of a</span>
+<span class="d-add">+    // caption rather than something somebody said.</span>
+<span class="d-add">+    expect(all.filter((s) =&gt; /[.!?]$/.test(s))).toEqual([]);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   it(&quot;keeps every sentence short enough for a phone&quot;, () =&gt; {</span>
+<span class="d-ctx">     expect(all.filter((s) =&gt; s.length &gt; 78)).toEqual([]);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  it(&quot;speaks in the first person, every line&quot;, () =&gt; {</span>
+<span class="d-del">-    // The rule the wall lives or dies by: an impersonal caption (&quot;Walking this</span>
+<span class="d-del">-    // stretch is miserable&quot;) and a second-person instruction (&quot;You cross this on</span>
+<span class="d-del">-    // faith&quot;) both describe somebody else&#x27;s street.</span>
+<span class="d-add">+  it(&quot;never volunteers the reader for a job&quot;, () =&gt; {</span>
+<span class="d-add">+    // THE rule. A tile names what is wrong, never a shift the reader is being</span>
+<span class="d-add">+    // signed up for: &quot;I&#x27;d put flowers where this bed is bare dirt…&quot; reads as an</span>
+<span class="d-add">+    // offer of labour, &quot;This unused patch of land needs flowers…&quot; is the same</span>
+<span class="d-add">+    // vote type as a need. Only the labour verbs are banned in the &quot;I&#x27;d …&quot;</span>
+<span class="d-add">+    // opening — &quot;I&#x27;d ride this route if it had a lane…&quot; is a use of the thing</span>
+<span class="d-add">+    // being asked for, which is a need and stays.</span>
+<span class="d-add">+    const offer =</span>
+<span class="d-add">+      /^I(?:&#x27;d| would| could| can)\s+(chalk|paint|repaint|put|plant|water|weed|shovel|sweep|clear|tend|adopt|install|host|start|run|organi[sz]e|lead|swap|help|look after|give|send|write|grow|build|make)\b/i;</span>
+<span class="d-add">+    expect(all.filter((s) =&gt; offer.test(s))).toEqual([]);</span>
+<span class="d-add">+  });</span>
+<span class="d-add">+</span>
+<span class="d-add">+  it(&quot;never speaks to the reader about their own street&quot;, () =&gt; {</span>
+<span class="d-add">+    // A second-person instruction (&quot;You cross this on faith&quot;) describes somebody</span>
+<span class="d-add">+    // else&#x27;s street back at them.</span>
+<span class="d-ctx">     expect(all.filter((s) =&gt; /\b(you|your|yours|yourself)\b/i.test(s))).toEqual([]);</span>
+<span class="d-del">-    expect(all.filter((s) =&gt; !/\b(I|my|me|us|we|our)\b/i.test(s))).toEqual([]);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   it(&quot;never speaks in the imperative of a work order&quot;, () =&gt; {</span>
+<span class="d-hunk">@@ -61,8 +75,11 @@ describe(&quot;derivation, for labels written after this file&quot;, () =&gt; {</span>
+<span class="d-ctx">       .toBe(&quot;I&#x27;ve been waiting for someone to fix the drainage grate here…&quot;);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-del">-  it(&quot;turns a volunteering label into an offer, without doubling the place&quot;, () =&gt; {</span>
+<span class="d-del">-    expect(openerFor(&quot;Run a paint day along here&quot;)).toBe(&quot;I could run a paint day here…&quot;);</span>
+<span class="d-add">+  it(&quot;turns a volunteering label into a need, without doubling the place&quot;, () =&gt; {</span>
+<span class="d-add">+    // Not &quot;I could run a paint day here…&quot;: the derived tier obeys the same</span>
+<span class="d-add">+    // no-offer-of-labour rule the curated one does.</span>
+<span class="d-add">+    expect(openerFor(&quot;Run a paint day along here&quot;))</span>
+<span class="d-add">+      .toBe(&quot;Somebody needs to run a paint day here…&quot;);</span>
+<span class="d-ctx">   });</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   it(&quot;keeps a stranger&#x27;s own words rather than inventing grammar&quot;, () =&gt; {</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/onboarding/phrasebook.ts</span>
+            <span class="stat"><span class="d-add">+45</span> / <span class="d-del">-37</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · onboarding vocabulary</span>
+        <span class="ctx-sum">The one-way translation from a vote type&amp;#39;s work-order label to the sentence a person would say. Owns the voice; owns nothing about which sentences a map shows.</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">phrasebook.ts</span>
+        <span class="ctx-sum">266 → 275 LOC — the voice rules, the CURATED map, the article/place-tail helpers, the derived verb rules</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">header · two tiers, no third</span><span class="ol-sum">unchanged — why every slip must name a real vote type</span></li><li class="changed"><span class="ol-label">header · rules of the voice</span><span class="ol-sum">REWRITTEN — need-not-offer is now rule one; first person demoted to a preference; the ellipsis relaxed</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Walking / Danger / Cycling / Transit</span><span class="ol-sum">1 line — Street redesign</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Access</span><span class="ol-sum">1 line — Improve school crossing</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Green</span><span class="ol-sum">4 lines — Add tree, Plant trees, Create a tree pit, Create a community garden</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Public space</span><span class="ol-sum">1 line — Add greenway connection</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · Tactical</span><span class="ol-sum">11 rewritten, 10 DELETED, 2 more rewritten (water trees, weed median)</span><span class="ol-tag">changed</span></li><li class="changed"><span class="ol-label">CURATED · odds and ends</span><span class="ol-sum">1 line — Highway</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">withArticle / stripPlaceTail</span><span class="ol-sum">unchanged — grammar helpers for the derived tier</span></li><li class="changed"><span class="ol-label">derive()</span><span class="ol-sum">the volunteering-verb branch — &amp;quot;I could …&amp;quot; becomes &amp;quot;Somebody needs to …&amp;quot;</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">openerFor / isCurated</span><span class="ol-sum">unchanged — curated first, derived otherwise</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>Voice rules: NEED NEVER AN OFFER OF LABOUR is stated first, with the flowers pair as the worked example, and &amp;quot;anything shaped I&amp;#39;d &lt;verb&gt; … is the smell&amp;quot; as the check</li><li>Voice rules: first person becomes a preference, and the note says WHY — the absolute rule is what pushed lines into I&amp;#39;d shapes</li><li>Voice rules: a line that is already a whole thought may stop without the trailing …, but nothing closes with a full stop</li><li>11 nyc-tactical entries rewritten to the owner&amp;#39;s copy, in wall order (ghost crosswalk → hydrant spray cap)</li><li>10 entries deleted with their vote types: sneckdown, bike bus, walking school bus, hopscotch, commuter bike train, group ride, group run, walking tour, community fridge, shovel-out crossing</li><li>10 entries on the other maps rewritten to needs — tree, tree pit, community garden, junction redesign, school crossing, street trees, median, greenway connection, highway</li><li>derive(): the run/organize/chalk/adopt/clear/sweep/shovel/water/repaint branch returns &amp;quot;Somebody needs to …&amp;quot;, with a comment saying this is the branch the rule matters most on</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/onboarding/phrasebook.ts b/client-react/src/onboarding/phrasebook.ts</span>
+<span class="d-meta">index 62045ab..da69560 100644</span>
+<span class="d-meta">--- a/client-react/src/onboarding/phrasebook.ts</span>
+<span class="d-meta">+++ b/client-react/src/onboarding/phrasebook.ts</span>
+<span class="d-hunk">@@ -32,14 +32,28 @@</span>
+<span class="d-ctx"> // tiles.ts.</span>
+<span class="d-ctx"> //</span>
+<span class="d-ctx"> // Rules of the voice, so later additions match:</span>
+<span class="d-del">-//   · FIRST PERSON, present tense, spoken aloud. Every line carries an &quot;I&quot;, a</span>
+<span class="d-del">-//     &quot;my&quot;, an &quot;us&quot; or a &quot;me&quot;. Never &quot;you&quot; and never the impersonal report</span>
+<span class="d-del">-//     (&quot;Walking this stretch is miserable&quot;): the wall is asking what is wrong</span>
+<span class="d-del">-//     with THIS person&#x27;s street, and a sentence with nobody in it is a caption.</span>
+<span class="d-add">+//   · A NEED, NEVER AN OFFER OF LABOUR. This is the rule the wall lives or dies</span>
+<span class="d-add">+//     by, and the one it got wrong first. &quot;I&#x27;d put flowers where this bed is</span>
+<span class="d-add">+//     bare dirt…&quot; translates a vote type into a JOB THE READER WOULD DO, and a</span>
+<span class="d-add">+//     first screen that opens by asking a stranger to volunteer is asking the</span>
+<span class="d-add">+//     wrong person for the wrong thing: they came to say what is broken, not to</span>
+<span class="d-add">+//     sign up for a shift. &quot;This unused patch of land needs flowers…&quot; is the</span>
+<span class="d-add">+//     same vote type as a need, and it is what somebody actually thinks.</span>
+<span class="d-add">+//     Anything shaped &quot;I&#x27;d &lt;verb&gt; …&quot; is the smell; check it before adding one.</span>
+<span class="d-add">+//   · SPOKEN ALOUD, present tense. First person where the need is personal (&quot;My</span>
+<span class="d-add">+//     street is too hard to cross…&quot;), plain statement where it is the street&#x27;s</span>
+<span class="d-add">+//     rather than the speaker&#x27;s (&quot;Cars drive too fast here…&quot;). It used to be</span>
+<span class="d-add">+//     first person on every line without exception; that rule is what pushed</span>
+<span class="d-add">+//     lines into &quot;I&#x27;d …&quot; shapes to satisfy it, so it is now a preference, not a</span>
+<span class="d-add">+//     requirement. Never &quot;you&quot;: a second-person instruction describes somebody</span>
+<span class="d-add">+//     else&#x27;s street.</span>
+<span class="d-ctx"> //   · A complaint is allowed to be a complaint. The vote it produces is the</span>
+<span class="d-ctx"> //     REMEDY (a + for the fix), which is the whole reason a complaint-shaped</span>
+<span class="d-ctx"> //     opener can drive a support-shaped data model.</span>
+<span class="d-del">-//   · It ends in &quot;…&quot; because the sentence is finished by pointing at the map.</span>
+<span class="d-add">+//   · It is left OPEN — usually a trailing &quot;…&quot;, because the sentence is finished</span>
+<span class="d-add">+//     by pointing at the map. A line that is already a complete thought on its</span>
+<span class="d-add">+//     own (&quot;There is too much litter in this area&quot;) may stop without one, but</span>
+<span class="d-add">+//     nothing ever closes with a full stop.</span>
+<span class="d-ctx"> //   · Never more than two lines at a phone&#x27;s width.</span>
+<span class="d-ctx"> // ==========================================================================</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -73,7 +87,7 @@ export const CURATED: Record&lt;string, string&gt; = {</span>
+<span class="d-ctx">   &quot;Lower speed limit&quot;: &quot;I watch cars do 45 down this 25 street…&quot;,</span>
+<span class="d-ctx">   &quot;Add traffic calming&quot;: &quot;I flinch at how fast cars take this stretch…&quot;,</span>
+<span class="d-ctx">   &quot;Add curb extension&quot;: &quot;I step into traffic to see past the parked cars…&quot;,</span>
+<span class="d-del">-  &quot;Street redesign&quot;: &quot;I&#x27;d start this whole junction over…&quot;,</span>
+<span class="d-add">+  &quot;Street redesign&quot;: &quot;This whole junction needs starting over…&quot;,</span>
+<span class="d-ctx">   &quot;Repave street&quot;: &quot;I rattle through potholes all down this street…&quot;,</span>
+<span class="d-ctx">   &quot;Add speed bump&quot;: &quot;I need something here to slow the traffic down…&quot;,</span>
+<span class="d-ctx"> </span>
+<span class="d-hunk">@@ -113,12 +127,12 @@ export const CURATED: Record&lt;string, string&gt; = {</span>
+<span class="d-ctx">   &quot;Add audible pedestrian signal&quot;: &quot;I can&#x27;t hear when it&#x27;s safe to cross here…&quot;,</span>
+<span class="d-ctx">   &quot;Add accessible parking space&quot;: &quot;I can&#x27;t park anywhere near enough to get in…&quot;,</span>
+<span class="d-ctx">   &quot;Elevator for reduced mobility&quot;: &quot;I can&#x27;t get up here without taking the stairs…&quot;,</span>
+<span class="d-del">-  &quot;Improve school crossing&quot;: &quot;My kids cross here twice a day, unprotected…&quot;,</span>
+<span class="d-add">+  &quot;Improve school crossing&quot;: &quot;This school crossing has nothing protecting it…&quot;,</span>
+<span class="d-ctx">   &quot;Improve bridge crossing&quot;: &quot;Crossing this bridge on foot frightens me…&quot;,</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // ── Green ──────────────────────────────────────────────────────────────</span>
+<span class="d-del">-  &quot;Add tree&quot;: &quot;I&#x27;d put a tree on this corner…&quot;,</span>
+<span class="d-del">-  &quot;Plant trees&quot;: &quot;I&#x27;d put a tree on this corner…&quot;,</span>
+<span class="d-add">+  &quot;Add tree&quot;: &quot;This corner needs a tree…&quot;,</span>
+<span class="d-add">+  &quot;Plant trees&quot;: &quot;This corner needs a tree…&quot;,</span>
+<span class="d-ctx">   &quot;More trees&quot;: &quot;I can&#x27;t find a scrap of shade along here…&quot;,</span>
+<span class="d-ctx">   &quot;Add tree-lined street&quot;: &quot;I bake walking down this street in July…&quot;,</span>
+<span class="d-ctx">   &quot;Create green corridor&quot;: &quot;I&#x27;d have this green the whole way…&quot;,</span>
+<span class="d-hunk">@@ -127,10 +141,10 @@ export const CURATED: Record&lt;string, string&gt; = {</span>
+<span class="d-ctx">   &quot;De-pave / restore soil&quot;: &quot;I can&#x27;t see what this asphalt does for any of us…&quot;,</span>
+<span class="d-ctx">   &quot;Add bioswale corridor&quot;: &quot;I wade down this street every time it rains…&quot;,</span>
+<span class="d-ctx">   &quot;Add a bioswale&quot;: &quot;I watch the water pool here with nowhere to go…&quot;,</span>
+<span class="d-del">-  &quot;Create a tree pit&quot;: &quot;I&#x27;d plant a tree here if someone made the hole…&quot;,</span>
+<span class="d-add">+  &quot;Create a tree pit&quot;: &quot;There&#x27;s nowhere to plant a tree here — the pavement&#x27;s solid…&quot;,</span>
+<span class="d-ctx">   &quot;Add planter boxes&quot;: &quot;I want something living on this dead frontage…&quot;,</span>
+<span class="d-ctx">   &quot;Plant native shrubs&quot;: &quot;I&#x27;ve never seen anything grow here but litter…&quot;,</span>
+<span class="d-del">-  &quot;Create a community garden&quot;: &quot;I&#x27;d help grow food for the block on this lot…&quot;,</span>
+<span class="d-add">+  &quot;Create a community garden&quot;: &quot;This lot could be feeding the block…&quot;,</span>
+<span class="d-ctx">   &quot;Restore soil&quot;: &quot;I couldn&#x27;t dig into this ground if I tried…&quot;,</span>
+<span class="d-ctx">   &quot;Protect existing tree&quot;: &quot;I don&#x27;t think this tree survives what&#x27;s coming…&quot;,</span>
+<span class="d-ctx">   &quot;Tree needs pruning&quot;: &quot;I duck these branches every time I pass…&quot;,</span>
+<span class="d-hunk">@@ -139,45 +153,35 @@ export const CURATED: Record&lt;string, string&gt; = {</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // ── Public space ───────────────────────────────────────────────────────</span>
+<span class="d-ctx">   &quot;Better lighting&quot;: &quot;I find it far too dark here at night…&quot;,</span>
+<span class="d-del">-  &quot;Add greenway connection&quot;: &quot;I&#x27;d link these two parks right through here…&quot;,</span>
+<span class="d-add">+  &quot;Add greenway connection&quot;: &quot;Nothing connects these two parks…&quot;,</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // ── Tactical: things anyone can go out and do ──────────────────────────</span>
+<span class="d-ctx">   &quot;Chalk the desire line&quot;: &quot;I already cut across here, and so does everyone…&quot;,</span>
+<span class="d-del">-  &quot;Chalk walk-time wayfinding&quot;: &quot;Nobody tells me how close everything really is…&quot;,</span>
+<span class="d-del">-  &quot;Chalk a ghost crosswalk&quot;: &quot;I&#x27;d chalk the crosswalk this corner should have…&quot;,</span>
+<span class="d-del">-  &quot;Chalk the sneckdown outline&quot;: &quot;The snow showed me how little of this cars use…&quot;,</span>
+<span class="d-del">-  &quot;Chalk a slow-zone message&quot;: &quot;I&#x27;d write a word to drivers on this pavement…&quot;,</span>
+<span class="d-del">-  &quot;Chalk hopscotch or a play space&quot;: &quot;My kids have nowhere to play on this block…&quot;,</span>
+<span class="d-del">-  &quot;Run a bike bus&quot;: &quot;I&#x27;d ride to school with the kids along here…&quot;,</span>
+<span class="d-del">-  &quot;Run a walking school bus&quot;: &quot;I&#x27;d walk the kids to school this way…&quot;,</span>
+<span class="d-del">-  &quot;Run a commuter bike train&quot;: &quot;I&#x27;d rather not ride this commute alone…&quot;,</span>
+<span class="d-del">-  &quot;Organize a group ride&quot;: &quot;I&#x27;d rather ride this route with company…&quot;,</span>
+<span class="d-del">-  &quot;Route a group run here&quot;: &quot;I&#x27;d send our run this way…&quot;,</span>
+<span class="d-del">-  &quot;Lead a walking tour&quot;: &quot;I know a story along this street worth telling…&quot;,</span>
+<span class="d-del">-  &quot;Pick up trash along here&quot;: &quot;I walk through knee-deep litter here…&quot;,</span>
+<span class="d-add">+  &quot;Chalk walk-time wayfinding&quot;: &quot;People get lost easily here…&quot;,</span>
+<span class="d-add">+  &quot;Chalk a ghost crosswalk&quot;: &quot;My street is too hard to cross…&quot;,</span>
+<span class="d-add">+  &quot;Chalk a slow-zone message&quot;: &quot;Cars drive too fast here…&quot;,</span>
+<span class="d-add">+  &quot;Pick up trash along here&quot;: &quot;There is too much litter in this area&quot;,</span>
+<span class="d-ctx">   &quot;Run a litter pickup here&quot;: &quot;I watch everyone&#x27;s garbage collect on this spot…&quot;,</span>
+<span class="d-ctx">   &quot;Clear this catch basin&quot;: &quot;I&#x27;ve seen this drain choke and the corner flood…&quot;,</span>
+<span class="d-ctx">   &quot;Clear the catch basins along this stretch&quot;: &quot;I&#x27;ve found every drain along here blocked…&quot;,</span>
+<span class="d-del">-  &quot;Shovel out this crossing&quot;: &quot;I climb a snowbank at this crossing all winter…&quot;,</span>
+<span class="d-ctx">   &quot;Shovel this sidewalk stretch&quot;: &quot;I&#x27;ve never seen anyone shovel this stretch…&quot;,</span>
+<span class="d-del">-  &quot;Adopt and tend this tree bed&quot;: &quot;I&#x27;d look after this tree bed myself…&quot;,</span>
+<span class="d-del">-  &quot;Flower-bomb this tree bed&quot;: &quot;I&#x27;d put flowers where this bed is bare dirt…&quot;,</span>
+<span class="d-del">-  &quot;Plant a pollinator bed&quot;: &quot;I&#x27;d give the bees something to live on here…&quot;,</span>
+<span class="d-del">-  &quot;Install a Little Free Library&quot;: &quot;I&#x27;d put a little library on this corner…&quot;,</span>
+<span class="d-del">-  &quot;Host a community fridge&quot;: &quot;I know people around here who could use a fridge…&quot;,</span>
+<span class="d-del">-  &quot;Start a seed library&quot;: &quot;I&#x27;d swap seeds with the block right here…&quot;,</span>
+<span class="d-add">+  &quot;Adopt and tend this tree bed&quot;: &quot;A tree bed near me needs love…&quot;,</span>
+<span class="d-add">+  &quot;Flower-bomb this tree bed&quot;: &quot;This unused patch of land needs flowers…&quot;,</span>
+<span class="d-add">+  &quot;Plant a pollinator bed&quot;: &quot;This area needs more flowers…&quot;,</span>
+<span class="d-add">+  &quot;Install a Little Free Library&quot;: &quot;This corner could do with a little library&quot;,</span>
+<span class="d-add">+  &quot;Start a seed library&quot;: &quot;Let&#x27;s install a seed bank here…&quot;,</span>
+<span class="d-ctx">   &quot;Activate the plaza furniture&quot;: &quot;Nothing in this plaza invites me to stay…&quot;,</span>
+<span class="d-del">-  &quot;Repaint this call box or utility box&quot;: &quot;I&#x27;d paint over this grey scar on the corner…&quot;,</span>
+<span class="d-del">-  &quot;Get a hydrant spray cap&quot;: &quot;I&#x27;ve nowhere to cool off around here in August…&quot;,</span>
+<span class="d-add">+  &quot;Repaint this call box or utility box&quot;: &quot;This curb needs a fresh paint job…&quot;,</span>
+<span class="d-add">+  &quot;Get a hydrant spray cap&quot;: &quot;There is nowhere to cool down here in August…&quot;,</span>
+<span class="d-ctx">   &quot;Cut back the overgrowth along here&quot;: &quot;I duck the whole way along this stretch…&quot;,</span>
+<span class="d-del">-  &quot;Water the street trees along here&quot;: &quot;I&#x27;d water these trees — they&#x27;re dying of thirst…&quot;,</span>
+<span class="d-del">-  &quot;Weed and mulch this median&quot;: &quot;I&#x27;d clear the weeds off this median myself…&quot;,</span>
+<span class="d-add">+  &quot;Water the street trees along here&quot;: &quot;These street trees are dying of thirst…&quot;,</span>
+<span class="d-add">+  &quot;Weed and mulch this median&quot;: &quot;This median has disappeared under weeds…&quot;,</span>
+<span class="d-ctx">   &quot;Add footbridge&quot;: &quot;I can&#x27;t get over this on foot…&quot;,</span>
+<span class="d-ctx">   &quot;Add pedestrian bridge crossing&quot;: &quot;I can&#x27;t get over this on foot…&quot;,</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx">   // ── Odds and ends from older lists ─────────────────────────────────────</span>
+<span class="d-ctx">   &quot;Add lane&quot;: &quot;I don&#x27;t have enough road space here…&quot;,</span>
+<span class="d-del">-  &quot;Highway&quot;: &quot;I&#x27;d send the traffic this way instead…&quot;,</span>
+<span class="d-add">+  &quot;Highway&quot;: &quot;I&#x27;d rather the traffic went this way…&quot;,</span>
+<span class="d-ctx"> };</span>
+<span class="d-ctx"> </span>
+<span class="d-ctx"> const ARTICLED = /^(a|an|the|this|these|my|your|our)\s/i;</span>
+<span class="d-hunk">@@ -246,7 +250,11 @@ function derive(label: string): string {</span>
+<span class="d-ctx">     case &quot;shovel&quot;:</span>
+<span class="d-ctx">     case &quot;water&quot;:</span>
+<span class="d-ctx">     case &quot;repaint&quot;:</span>
+<span class="d-del">-      return `I could ${stripPlaceTail(trimmed.toLowerCase())} here…`;</span>
+<span class="d-add">+      // The labels most likely to be read as a chore, so this is the branch the</span>
+<span class="d-add">+      // no-offer rule matters most on: &quot;I could run a paint day here…&quot; hands the</span>
+<span class="d-add">+      // reader a task on the first screen. Naming the need without naming who</span>
+<span class="d-add">+      // does the work keeps the derived line beside the curated ones.</span>
+<span class="d-add">+      return `Somebody needs to ${stripPlaceTail(trimmed.toLowerCase())} here…`;</span>
+<span class="d-ctx">     default:</span>
+<span class="d-ctx">       // Never invent grammar we can&#x27;t guarantee: keep the author&#x27;s own words</span>
+<span class="d-ctx">       // and let the map supply the rest of the sentence.</span></pre>
+        </details>
+        
+        <details>
+          <summary><span class="fname">client-react/src/onboarding/state.ts</span>
+            <span class="stat"><span class="d-add">+6</span> / <span class="d-del">-3</span></span>
+          </summary>
+          
+    <div class="ctx">
+      <div class="ctx-tier ctx-sys">
+        <span class="ctx-k">System</span>
+        <span class="ctx-v">City Edit</span>
+        <span class="pills"><span class="pill ">nginx</span><span class="pill ">Flask API</span><span class="pill ">OSRM</span><span class="pill ">Redis</span><span class="pill on">React / Leaflet client</span></span>
+      </div>
+      <div class="ctx-tier ctx-mod">
+        <span class="ctx-k">Module</span>
+        <span class="ctx-v">Client · first-run step, derived</span>
+        <span class="ctx-sum">A pure projection of the canonical Selection onto a step, plus the two triggers that decide who sees the flow at all</span>
+      </div>
+      <div class="ctx-tier ctx-file">
+        <span class="ctx-k">File</span>
+        <span class="ctx-v">state.ts</span>
+        <span class="ctx-sum">114 → 117 LOC — OnboardingFacts, requiresEnd/endIsOptional, onboardingStep, shouldOnboard</span>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">File map — where this diff sits <span class="legend"><span class="sw-ch"></span>changed&nbsp;&nbsp;<span class="sw-dim"></span>context</span></div>
+        <ul class="ctx-outline"><li class="dim"><span class="ol-label">header · derived, never stored</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">OnboardingFacts / requiresEnd / endIsOptional</span><span class="ol-sum">unchanged</span></li><li class="dim"><span class="ol-label">onboardingStep</span><span class="ol-sum">unchanged — hasVoted → done, !picked → wall, …</span></li><li class="dim"><span class="ol-label">TriggerFacts</span><span class="ol-sum">unchanged</span></li><li class="changed"><span class="ol-label">shouldOnboard · MAP OPEN doc</span><span class="ol-sum">REWRITTEN — what makes it once-ever is the SERVER&amp;#39;s record, not the local mark</span><span class="ol-tag">changed</span></li><li class="dim"><span class="ol-label">shouldOnboard · body</span><span class="ol-sum">unchanged — dismissed → no, sticker → yes, else !visited &amp;amp;&amp;amp; !suppressed</span></li></ul>
+      </div>
+      <div class="ctx-map">
+        <div class="ctx-map-title">Changed blocks (top → bottom)</div>
+        <ol class="ctx-blocks"><li>The MAP OPEN trigger&amp;#39;s note said the suppressant written when the wall appears is what makes the flow once-ever rather than once-per-map. That is no longer true — the server&amp;#39;s record of the open is, and the local mark waits for a decision</li></ol>
+      </div>
+    </div>
+    
+          <pre class="diff"><span class="d-meta">diff --git a/client-react/src/onboarding/state.ts b/client-react/src/onboarding/state.ts</span>
+<span class="d-meta">index fc2a2e3..eaf1969 100644</span>
+<span class="d-meta">--- a/client-react/src/onboarding/state.ts</span>
+<span class="d-meta">+++ b/client-react/src/onboarding/state.ts</span>
+<span class="d-hunk">@@ -96,9 +96,12 @@ export interface TriggerFacts {</span>
+<span class="d-ctx">  *</span>
+<span class="d-ctx">  *   MAP OPEN    Nobody at this counting identity has opened a map before this</span>
+<span class="d-ctx">  *               one, and this browser hasn&#x27;t been told to stop asking. It fires</span>
+<span class="d-del">- *               on the open itself, for any map — not from behind a menu — and</span>
+<span class="d-del">- *               the suppressant written when the wall appears is what makes it</span>
+<span class="d-del">- *               once ever rather than once per map.</span>
+<span class="d-add">+ *               on the open itself, for any map — not from behind a menu. What</span>
+<span class="d-add">+ *               makes it once ever rather than once per map is the server&#x27;s</span>
+<span class="d-add">+ *               record of the open (firstRun.ts); the local suppressant is</span>
+<span class="d-add">+ *               written only once the visitor has DECIDED — cast a first vote,</span>
+<span class="d-add">+ *               or asked to be taken to the map — so a wall that was shown and</span>
+<span class="d-add">+ *               ignored does not count as having been onboarded.</span>
+<span class="d-ctx">  *</span>
+<span class="d-ctx">  *   UNLINKED QR A scan of a sticker that is still unbound. That visit is being</span>
+<span class="d-ctx">  *               asked to do something extra — its first vote is what pins the</span></pre>
+        </details>
+        
+  </section>
+
+  <footer>
+    Generated from <code>changelog/changes.diff</code> by <code>changelog/build_report.py</code>.
+    Regenerate after further edits with <code>git diff … &gt; changelog/changes.diff &amp;&amp; python changelog/build_report.py</code>.
+  </footer>
+</div>
+</body>
+</html>
