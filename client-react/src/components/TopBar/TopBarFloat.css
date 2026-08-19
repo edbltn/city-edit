@@ -1243,6 +1243,23 @@
   z-index: var(--z-autocomplete);
 }
 
+/* Same trap once more, for the nav cluster's hover labels. The label already
+   carries --z-transient, the top rung — but .nav-group is itself a stacking
+   context at --z-chrome, so that 1200 is sealed inside a 600 box (ladder rule
+   4). The moment a menu opens, its own group rises to --z-dropdown and paints
+   over the whole cluster, label included; no number on the label can escape
+   its parent. So the GROUP is what has to move, exactly as it does for an open
+   menu and for the typing address field above.
+
+   Scoped to :hover on purpose: at rest the cluster stays at --z-chrome and an
+   open menu still covers it, which is what the map-menu report asked for. It
+   only outranks the menu while the pointer is on the button whose name is
+   showing — and a label is pointer-events:none and transient, so it can never
+   trap the menu underneath it. */
+.topbar[data-chrome="float"] .nav-group:has(.nav-btn:hover) {
+  z-index: var(--z-transient);
+}
+
 /* The cluster's hover labels live on --z-transient, the top of the ladder. A
    rung cannot lift them out of a stacking context, so this group must not be
    one: it is the single plate in the bar that forgoes the backdrop blur, which
