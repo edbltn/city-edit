@@ -32,14 +32,28 @@
 // tiles.ts.
 //
 // Rules of the voice, so later additions match:
-//   · FIRST PERSON, present tense, spoken aloud. Every line carries an "I", a
-//     "my", an "us" or a "me". Never "you" and never the impersonal report
-//     ("Walking this stretch is miserable"): the wall is asking what is wrong
-//     with THIS person's street, and a sentence with nobody in it is a caption.
+//   · A NEED, NEVER AN OFFER OF LABOUR. This is the rule the wall lives or dies
+//     by, and the one it got wrong first. "I'd put flowers where this bed is
+//     bare dirt…" translates a vote type into a JOB THE READER WOULD DO, and a
+//     first screen that opens by asking a stranger to volunteer is asking the
+//     wrong person for the wrong thing: they came to say what is broken, not to
+//     sign up for a shift. "This unused patch of land needs flowers…" is the
+//     same vote type as a need, and it is what somebody actually thinks.
+//     Anything shaped "I'd <verb> …" is the smell; check it before adding one.
+//   · SPOKEN ALOUD, present tense. First person where the need is personal ("My
+//     street is too hard to cross…"), plain statement where it is the street's
+//     rather than the speaker's ("Cars drive too fast here…"). It used to be
+//     first person on every line without exception; that rule is what pushed
+//     lines into "I'd …" shapes to satisfy it, so it is now a preference, not a
+//     requirement. Never "you": a second-person instruction describes somebody
+//     else's street.
 //   · A complaint is allowed to be a complaint. The vote it produces is the
 //     REMEDY (a + for the fix), which is the whole reason a complaint-shaped
 //     opener can drive a support-shaped data model.
-//   · It ends in "…" because the sentence is finished by pointing at the map.
+//   · It is left OPEN — usually a trailing "…", because the sentence is finished
+//     by pointing at the map. A line that is already a complete thought on its
+//     own ("There is too much litter in this area") may stop without one, but
+//     nothing ever closes with a full stop.
 //   · Never more than two lines at a phone's width.
 // ==========================================================================
 
@@ -73,7 +87,7 @@ export const CURATED: Record<string, string> = {
   "Lower speed limit": "I watch cars do 45 down this 25 street…",
   "Add traffic calming": "I flinch at how fast cars take this stretch…",
   "Add curb extension": "I step into traffic to see past the parked cars…",
-  "Street redesign": "I'd start this whole junction over…",
+  "Street redesign": "This whole junction needs starting over…",
   "Repave street": "I rattle through potholes all down this street…",
   "Add speed bump": "I need something here to slow the traffic down…",
 
@@ -113,12 +127,12 @@ export const CURATED: Record<string, string> = {
   "Add audible pedestrian signal": "I can't hear when it's safe to cross here…",
   "Add accessible parking space": "I can't park anywhere near enough to get in…",
   "Elevator for reduced mobility": "I can't get up here without taking the stairs…",
-  "Improve school crossing": "My kids cross here twice a day, unprotected…",
+  "Improve school crossing": "This school crossing has nothing protecting it…",
   "Improve bridge crossing": "Crossing this bridge on foot frightens me…",
 
   // ── Green ──────────────────────────────────────────────────────────────
-  "Add tree": "I'd put a tree on this corner…",
-  "Plant trees": "I'd put a tree on this corner…",
+  "Add tree": "This corner needs a tree…",
+  "Plant trees": "This corner needs a tree…",
   "More trees": "I can't find a scrap of shade along here…",
   "Add tree-lined street": "I bake walking down this street in July…",
   "Create green corridor": "I'd have this green the whole way…",
@@ -127,10 +141,10 @@ export const CURATED: Record<string, string> = {
   "De-pave / restore soil": "I can't see what this asphalt does for any of us…",
   "Add bioswale corridor": "I wade down this street every time it rains…",
   "Add a bioswale": "I watch the water pool here with nowhere to go…",
-  "Create a tree pit": "I'd plant a tree here if someone made the hole…",
+  "Create a tree pit": "There's nowhere to plant a tree here — the pavement's solid…",
   "Add planter boxes": "I want something living on this dead frontage…",
   "Plant native shrubs": "I've never seen anything grow here but litter…",
-  "Create a community garden": "I'd help grow food for the block on this lot…",
+  "Create a community garden": "This lot could be feeding the block…",
   "Restore soil": "I couldn't dig into this ground if I tried…",
   "Protect existing tree": "I don't think this tree survives what's coming…",
   "Tree needs pruning": "I duck these branches every time I pass…",
@@ -139,45 +153,35 @@ export const CURATED: Record<string, string> = {
 
   // ── Public space ───────────────────────────────────────────────────────
   "Better lighting": "I find it far too dark here at night…",
-  "Add greenway connection": "I'd link these two parks right through here…",
+  "Add greenway connection": "Nothing connects these two parks…",
 
   // ── Tactical: things anyone can go out and do ──────────────────────────
   "Chalk the desire line": "I already cut across here, and so does everyone…",
-  "Chalk walk-time wayfinding": "Nobody tells me how close everything really is…",
-  "Chalk a ghost crosswalk": "I'd chalk the crosswalk this corner should have…",
-  "Chalk the sneckdown outline": "The snow showed me how little of this cars use…",
-  "Chalk a slow-zone message": "I'd write a word to drivers on this pavement…",
-  "Chalk hopscotch or a play space": "My kids have nowhere to play on this block…",
-  "Run a bike bus": "I'd ride to school with the kids along here…",
-  "Run a walking school bus": "I'd walk the kids to school this way…",
-  "Run a commuter bike train": "I'd rather not ride this commute alone…",
-  "Organize a group ride": "I'd rather ride this route with company…",
-  "Route a group run here": "I'd send our run this way…",
-  "Lead a walking tour": "I know a story along this street worth telling…",
-  "Pick up trash along here": "I walk through knee-deep litter here…",
+  "Chalk walk-time wayfinding": "People get lost easily here…",
+  "Chalk a ghost crosswalk": "My street is too hard to cross…",
+  "Chalk a slow-zone message": "Cars drive too fast here…",
+  "Pick up trash along here": "There is too much litter in this area",
   "Run a litter pickup here": "I watch everyone's garbage collect on this spot…",
   "Clear this catch basin": "I've seen this drain choke and the corner flood…",
   "Clear the catch basins along this stretch": "I've found every drain along here blocked…",
-  "Shovel out this crossing": "I climb a snowbank at this crossing all winter…",
   "Shovel this sidewalk stretch": "I've never seen anyone shovel this stretch…",
-  "Adopt and tend this tree bed": "I'd look after this tree bed myself…",
-  "Flower-bomb this tree bed": "I'd put flowers where this bed is bare dirt…",
-  "Plant a pollinator bed": "I'd give the bees something to live on here…",
-  "Install a Little Free Library": "I'd put a little library on this corner…",
-  "Host a community fridge": "I know people around here who could use a fridge…",
-  "Start a seed library": "I'd swap seeds with the block right here…",
+  "Adopt and tend this tree bed": "A tree bed near me needs love…",
+  "Flower-bomb this tree bed": "This unused patch of land needs flowers…",
+  "Plant a pollinator bed": "This area needs more flowers…",
+  "Install a Little Free Library": "This corner could do with a little library",
+  "Start a seed library": "Let's install a seed bank here…",
   "Activate the plaza furniture": "Nothing in this plaza invites me to stay…",
-  "Repaint this call box or utility box": "I'd paint over this grey scar on the corner…",
-  "Get a hydrant spray cap": "I've nowhere to cool off around here in August…",
+  "Repaint this call box or utility box": "This curb needs a fresh paint job…",
+  "Get a hydrant spray cap": "There is nowhere to cool down here in August…",
   "Cut back the overgrowth along here": "I duck the whole way along this stretch…",
-  "Water the street trees along here": "I'd water these trees — they're dying of thirst…",
-  "Weed and mulch this median": "I'd clear the weeds off this median myself…",
+  "Water the street trees along here": "These street trees are dying of thirst…",
+  "Weed and mulch this median": "This median has disappeared under weeds…",
   "Add footbridge": "I can't get over this on foot…",
   "Add pedestrian bridge crossing": "I can't get over this on foot…",
 
   // ── Odds and ends from older lists ─────────────────────────────────────
   "Add lane": "I don't have enough road space here…",
-  "Highway": "I'd send the traffic this way instead…",
+  "Highway": "I'd rather the traffic went this way…",
 };
 
 const ARTICLED = /^(a|an|the|this|these|my|your|our)\s/i;
@@ -246,7 +250,11 @@ function derive(label: string): string {
     case "shovel":
     case "water":
     case "repaint":
-      return `I could ${stripPlaceTail(trimmed.toLowerCase())} here…`;
+      // The labels most likely to be read as a chore, so this is the branch the
+      // no-offer rule matters most on: "I could run a paint day here…" hands the
+      // reader a task on the first screen. Naming the need without naming who
+      // does the work keeps the derived line beside the curated ones.
+      return `Somebody needs to ${stripPlaceTail(trimmed.toLowerCase())} here…`;
     default:
       // Never invent grammar we can't guarantee: keep the author's own words
       // and let the map supply the rest of the sentence.

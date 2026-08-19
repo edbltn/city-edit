@@ -120,7 +120,7 @@ export const HowItWorksModal = memo(function HowItWorksModal({ isOpen, onClose }
                 onClose();
               }}
             >
-              What needs fixing? →
+              What needs fixing?
             </button>
           </section>
 

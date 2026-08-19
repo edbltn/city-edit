@@ -38,9 +38,11 @@
 //   · THE CURRENT LOAD MUST NOT COUNT. The server reads before it writes and
 //     returns the answer from BEFORE this open, or nobody would ever see a wall:
 //     every visitor's first probe would find their own visit already recorded.
-//   · THE SUPPRESSANT IS WRITTEN WHEN THE WALL IS SHOWN, not when it is finished
-//     with (components/Onboarding/Onboarding.tsx). A reload is a second open, and
-//     without that write the visitor who reloads gets it twice.
+//   · THE SUPPRESSANT IS WRITTEN WHEN THE VISITOR DECIDES, not when the wall is
+//     shown (components/Onboarding/Onboarding.tsx): their first cast, or "just
+//     take me to the map". It used to go down on the sighting, which spent a
+//     first run on a screen nobody read. What now carries a reload is the
+//     sessionStorage answer below, not the mark — see that effect's note.
 //
 // (The [MAPLOAD] beacon already reports map opens, and it is not what answers
 // this: it is a log line for a monitoring metric, with nothing queryable behind
@@ -76,8 +78,9 @@ import { CONFIG } from "../config";
 import { dlog, dwarn } from "../utils/debugLog";
 import { getVoterId } from "../utils/voterIdentity";
 
-/** Written the moment the wall is shown, and again when the flow ends.
- *  Suppresses only. */
+/** Written when the visitor decides they are done with the flow — a first vote
+ *  cast, or "just take me to the map". Never on the sighting alone. Suppresses
+ *  only. */
 const SUPPRESS_KEY = "cityedit.onboarded";
 
 /** The server's answer, held for the length of the visit. A scan is TWO document

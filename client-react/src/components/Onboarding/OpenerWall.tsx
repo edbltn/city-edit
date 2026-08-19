@@ -114,7 +114,7 @@ export function OpenerWall({ map, tiles, onPick, onDismiss }: Props) {
 
         <footer className="opener-foot">
           <button type="button" className="opener-skip" onClick={onDismiss}>
-            or just look at the map →
+            or just take me to the map
           </button>
         </footer>
       </div>

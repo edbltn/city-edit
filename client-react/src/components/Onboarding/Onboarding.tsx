@@ -26,8 +26,15 @@ import "./Onboarding.css";
 //   · The map OPEN itself, the first time anybody at this counting identity has
 //     opened one → the wall opens over the map, and picking a sentence starts
 //     the flow at its first blank. Once ever, on any map, and never behind a
-//     menu: the suppressant goes down the moment the wall is on screen, so a
-//     reload does not repeat it and the second map does not either.
+//     menu.
+//
+//     WHAT ENDS IT IS A DECISION, NOT A SIGHTING. The suppressant used to go
+//     down the moment the wall was on screen; it now waits for the visitor to
+//     do one of the two things that mean they are done with it — cast their
+//     first vote, or say "just take me to the map". Seeing a wall and walking
+//     away is not being onboarded, and marking it as such spent somebody's one
+//     first run on a screen they never read. What that costs is spelled out at
+//     the effect below, because a reload is the case it changes.
 //   · The visit came from a scan of a sticker nobody has voted from yet → the
 //     sentence was chosen by the object in their hand and travelled here in the
 //     URL (`?vt=`), so the wall is skipped and the flow starts already picked.
@@ -94,8 +101,8 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   // and a flow the user just asked for by hand.
   //
   // Read ONCE, in a lazy initializer, because the flow writes the suppressant to
-  // itself the moment the wall appears: a live isSuppressed() here would see that
-  // write on the next render and take the wall back off the screen.
+  // itself when it finishes: a live isSuppressed() here would see the write the
+  // first cast makes and tear the closing line off the screen before it is read.
   const [wasSuppressed] = useState(() => !openedByHand && isSuppressed());
   const [visitedBefore, setVisitedBefore] = useState<boolean | null>(() => {
     if (openedByHand) return false;
@@ -184,20 +191,32 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
     if (active && step === "end") setActiveTool("end");
   }, [active, step, setActiveTool]);
 
-  // Shown once, ever. The mark goes down the moment the WALL is on screen, not
-  // when the flow is finished with: a reload is a second map open, and a wall
-  // that only suppresses itself on dismissal or on a cast greets anybody who
-  // refreshes before they have chosen anything. `wasSuppressed` is frozen above
-  // precisely so this write cannot pull the wall back off the screen.
-  useEffect(() => {
-    if (!active || step !== "wall") return;
-    dlog("onboard", "wall shown — not offering it again");
-    suppress();
-  }, [active, step]);
+  // NOTHING SUPPRESSES HERE. The mark goes down in exactly two places — the
+  // `done` effect below (a vote was cast) and `handleDismiss` ("just take me to
+  // the map", the coach's ×, Escape). Showing the wall writes nothing.
+  //
+  // What that means for a RELOAD, which is the case it changes:
+  //
+  //   · Reloaded with a sentence already picked → the flow resumes where it was
+  //     and no wall appears. The pick is in the canonical selection, so it is in
+  //     the URL (`?vt=`), so `picked` is true on the first render after the
+  //     reload and the step derives to start/end/cast. This is the common case
+  //     and it needs nothing from local storage at all.
+  //   · Reloaded ON the wall, nothing picked → the wall comes back, which is now
+  //     the intended answer: they have not decided anything yet. It comes back
+  //     because the visitor probe's answer is cached in sessionStorage for the
+  //     length of the visit (firstRun.ts, ANSWER_KEY) — the reload does not
+  //     re-ask the server, which would say "visited" and hide it.
+  //
+  // The residual, stated rather than papered over: close the tab and come back
+  // later and there is no wall, because /api/visitor recorded the first open and
+  // sessionStorage is gone. Only the LOCAL mark moved; the server still counts a
+  // sighting as a visit. Making the whole thing wait for a decision would mean
+  // the endpoint recording on the cast instead of on the open, which is a
+  // different change to a different layer.
 
-  // A cast finishes the flow. Suppress again (harmless, and the wall may have
-  // been skipped entirely on a sticker scan), then let the closing line stand
-  // for a few seconds and leave.
+  // A cast finishes the flow. Suppress — this and the dismissal are the only two
+  // writes — then let the closing line stand for a few seconds and leave.
   useEffect(() => {
     if (!active || step !== "done") return;
     dlog("onboard", "first vote landed — flow complete");
@@ -217,8 +236,12 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
     setVoteType(tile.voteType);
   }, [setVoteType]);
 
+  // The other half of "a decision, not a sighting": "just take me to the map",
+  // the coach's ×, and Escape all land here, and all of them are the visitor
+  // saying they are done being asked. That is worth marking; being shown the
+  // wall is not.
   const handleDismiss = useCallback(() => {
-    dlog("onboard", "dismissed");
+    dlog("onboard", "dismissed — not offering it again");
     suppress();
     setDismissed(true);
   }, []);

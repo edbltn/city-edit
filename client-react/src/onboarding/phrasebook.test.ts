@@ -23,20 +23,34 @@ describe("coverage", () => {
 describe("the voice", () => {
   const all = Object.values(CURATED);
 
-  it("leaves every sentence unfinished", () => {
-    expect(all.filter((s) => !s.endsWith("…"))).toEqual([]);
+  it("leaves every sentence open", () => {
+    // Usually a trailing "…", finished by pointing at the map. A line that is
+    // already a whole thought ("There is too much litter in this area") may stop
+    // without one — but nothing closes with a full stop, which is the shape of a
+    // caption rather than something somebody said.
+    expect(all.filter((s) => /[.!?]$/.test(s))).toEqual([]);
   });
 
   it("keeps every sentence short enough for a phone", () => {
     expect(all.filter((s) => s.length > 78)).toEqual([]);
   });
 
-  it("speaks in the first person, every line", () => {
-    // The rule the wall lives or dies by: an impersonal caption ("Walking this
-    // stretch is miserable") and a second-person instruction ("You cross this on
-    // faith") both describe somebody else's street.
+  it("never volunteers the reader for a job", () => {
+    // THE rule. A tile names what is wrong, never a shift the reader is being
+    // signed up for: "I'd put flowers where this bed is bare dirt…" reads as an
+    // offer of labour, "This unused patch of land needs flowers…" is the same
+    // vote type as a need. Only the labour verbs are banned in the "I'd …"
+    // opening — "I'd ride this route if it had a lane…" is a use of the thing
+    // being asked for, which is a need and stays.
+    const offer =
+      /^I(?:'d| would| could| can)\s+(chalk|paint|repaint|put|plant|water|weed|shovel|sweep|clear|tend|adopt|install|host|start|run|organi[sz]e|lead|swap|help|look after|give|send|write|grow|build|make)\b/i;
+    expect(all.filter((s) => offer.test(s))).toEqual([]);
+  });
+
+  it("never speaks to the reader about their own street", () => {
+    // A second-person instruction ("You cross this on faith") describes somebody
+    // else's street back at them.
     expect(all.filter((s) => /\b(you|your|yours|yourself)\b/i.test(s))).toEqual([]);
-    expect(all.filter((s) => !/\b(I|my|me|us|we|our)\b/i.test(s))).toEqual([]);
   });
 
   it("never speaks in the imperative of a work order", () => {
@@ -61,8 +75,11 @@ describe("derivation, for labels written after this file", () => {
       .toBe("I've been waiting for someone to fix the drainage grate here…");
   });
 
-  it("turns a volunteering label into an offer, without doubling the place", () => {
-    expect(openerFor("Run a paint day along here")).toBe("I could run a paint day here…");
+  it("turns a volunteering label into a need, without doubling the place", () => {
+    // Not "I could run a paint day here…": the derived tier obeys the same
+    // no-offer-of-labour rule the curated one does.
+    expect(openerFor("Run a paint day along here"))
+      .toBe("Somebody needs to run a paint day here…");
   });
 
   it("keeps a stranger's own words rather than inventing grammar", () => {

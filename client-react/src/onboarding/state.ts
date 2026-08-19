@@ -96,9 +96,12 @@ export interface TriggerFacts {
  *
  *   MAP OPEN    Nobody at this counting identity has opened a map before this
  *               one, and this browser hasn't been told to stop asking. It fires
- *               on the open itself, for any map — not from behind a menu — and
- *               the suppressant written when the wall appears is what makes it
- *               once ever rather than once per map.
+ *               on the open itself, for any map — not from behind a menu. What
+ *               makes it once ever rather than once per map is the server's
+ *               record of the open (firstRun.ts); the local suppressant is
+ *               written only once the visitor has DECIDED — cast a first vote,
+ *               or asked to be taken to the map — so a wall that was shown and
+ *               ignored does not count as having been onboarded.
  *
  *   UNLINKED QR A scan of a sticker that is still unbound. That visit is being
  *               asked to do something extra — its first vote is what pins the
