@@ -81,9 +81,6 @@ import "./Onboarding.css";
 //     map. An arrow tip pointing at nothing is worse than the strip it replaced.
 // ==========================================================================
 
-/** How long the closing line stays up after the first vote lands. */
-const DONE_LINGER_MS = 7000;
-
 /**
  * The flow, remounted whenever somebody asks for it back.
  *
@@ -136,6 +133,8 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   const [dismissed, setDismissed] = useState(false);
   const [endSkipped, setEndSkipped] = useState(false);
   const [finished, setFinished] = useState(false);
+  // The flow has reported. See the one-way-door effect for what it is for.
+  const [reachedDone, setReachedDone] = useState(false);
   // A hand-opened flow reopens the WALL even though a sentence (and possibly a
   // whole selection) is already in play, because choosing a different sentence
   // is the reason to ask for it. Cleared by the pick.
@@ -261,14 +260,46 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   }, [active, target, anchored]);
 
   // A cast finishes the flow. Suppress — this and the dismissal are the only two
-  // writes — then let the closing line stand for a few seconds and leave.
+  // writes — and then the closing line STAYS.
+  //
+  // It used to be pulled off the screen by a seven-second timer. Nothing about a
+  // report needs a stopwatch, and the half of that line worth reading is the
+  // half that arrives second: the first vote somebody ever casts is exactly when
+  // they want to know it can be taken back, and seven seconds is not long enough
+  // to place a vote, look at what it did to the map, and then read.
+  //
+  // What replaces the timer is the fact the line reports. The step is DERIVED
+  // from `hasVoted` (onboarding/state.ts), so the closing line stands while — and
+  // only while — the vote it describes is standing. Press the same button again
+  // and `hasVoted` goes false on that press's own tick; move the selection
+  // somewhere else and it goes false too. Either way the step leaves `done` and
+  // the door below shuts. There is no reachable state in which this line is on
+  // screen claiming a vote is on the map that isn't.
   useEffect(() => {
     if (!active || step !== "done") return;
     dlog("onboard", "first vote landed — flow complete");
     suppress();
-    const t = setTimeout(() => setFinished(true), DONE_LINGER_MS);
-    return () => clearTimeout(t);
   }, [active, step]);
+
+  useEffect(() => {
+    if (active && step === "done") setReachedDone(true);
+  }, [active, step]);
+
+  // THE ONE-WAY DOOR: leaving `done` ends the flow, it never walks back to an
+  // instruction. Deriving the step is what makes this necessary as well as easy.
+  // Take the vote back, or hit Clear, and the same derivation that correctly
+  // retires the closing line would then hand back `cast` or `start` — so
+  // somebody who has already voted gets told to tap the map again, with the
+  // chrome greyed out around it and an arrow pointing at a control they have
+  // used. The timer used to hide that by having usually fired first. Ending
+  // instead is the honest version: they have voted, so the first run is over,
+  // whatever they do to the vote afterwards.
+  useEffect(() => {
+    if (reachedDone && step !== "done") {
+      dlog("onboard", "closing line retired — the vote it reported is gone");
+      setFinished(true);
+    }
+  }, [reachedDone, step]);
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
@@ -417,7 +448,14 @@ function ask(
       return `${question} + for yes, − for no.`;
     }
     case "done":
-      return "Cast. It's on the map — and it's yours to take back any time.";
+      // The second sentence is a PROMISE ABOUT A CONTROL, so it was checked
+      // against the control before it was written. Pressing +/− when every
+      // touched block already holds your vote in that direction plans
+      // `targetDir: 0` — an unvote — and the button already says so in its own
+      // title ("Remove your vote for"). See planBlockVote/voteButtonState in
+      // utils/castVote.ts and their tests. "The button" is unambiguous here
+      // because the coach was pointing at that exact pair one step ago.
+      return "Cast! It's on the map. Hit the button again if you need to take back your vote.";
     default:
       return "";
   }
