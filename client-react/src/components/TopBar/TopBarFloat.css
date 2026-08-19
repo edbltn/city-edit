@@ -73,6 +73,15 @@
   --float-radius: 0;
   --float-pill: 0;
 
+  /* ONE row height for the band, and everything vertical derives from it: the
+     two picker rows, the two legend cells beside them, and the square cells of
+     the action block. It is computed from --control-font-size rather than
+     declared in px, so it follows the shared type scale instead of pinning a
+     number beside it, and it is shorter than --control-height (44) — which is
+     what was making the Map/Vote stack taller than the pairs next to it.
+     1.4x the type leaves room for descenders and clears the 20px icons. */
+  --float-row: calc(1.4 * var(--control-font-size) + 2 * var(--space-2));
+
   position: absolute;
   top: 0;
   left: 0;
@@ -265,11 +274,18 @@
     /* Pinned, not auto: this column has to keep its width when the block
        inside it is removed in the empty state, or the pills that span into it
        would gain nothing. Two squares plus the container's own 1px edges. */
-    calc(2 * var(--control-height) + 2px)   /* -/+ / Clear */
+    auto                     /* -/+ / Clear (two squares of the row) */
     1fr                      /* slack               */
     auto;                    /* rail                */
-  grid-template-rows: var(--control-height) var(--control-height);
-  align-items: center;
+  /* AUTO, not --control-height. Forcing 44px rows made the Map/Vote stack 88
+     tall while the legend pairs — one line of text plus 8px padding, twice —
+     came to 74.7, so the three groups could not sit on one line. Letting the
+     rows take their content's height makes them agree by construction: every
+     cell in the band is one line at --control-font-size with --space-2 above
+     and below, so a row is that, and two rows are the pair. No px anywhere,
+     and it follows the type scale if that moves. */
+  grid-template-rows: var(--float-row) var(--float-row);
+  align-items: stretch;
   /* Was --space-2; the pills read as crowded against their neighbours at 8. */
   column-gap: var(--space-3);
   row-gap: 0;
@@ -307,16 +323,21 @@
      implicit columns auto-placement had created meant the two cells rendered
      ~170px OUTSIDE the box to its left. One column, stretched, no ambiguity. */
   grid-template-columns: 1fr;
-  grid-template-rows: var(--control-height) var(--control-height);
+  /* Halves of the two rows it spans, so its cells match the band's row. */
+  grid-template-rows: 1fr 1fr;
   justify-content: stretch;
   align-content: stretch;
   justify-items: stretch;
   /* content-box so the two 44px cells are exactly the content width and the
      container's own 1px edge sits outside them */
   box-sizing: content-box;
-  width: calc(2 * var(--control-height));
+  /* Two squares of the band's row, so the block matches the rows it spans on
+     both axes. (`aspect-ratio` on the cells was circular here — the column is
+     content-sized, so the width depended on a height that depended on it, and
+     Chrome resolved the whole block to zero.) */
+  width: calc(2 * var(--float-row));
   justify-self: start;
-  align-self: center;
+  align-self: stretch;
   padding: 0;
   gap: 0;
   overflow: hidden;
@@ -359,7 +380,9 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  align-self: center;
+  /* Stretch, not centre: the pair spans both rows, so filling them is what
+     puts its top and bottom edges on the same lines as the pills'. */
+  align-self: stretch;
 }
 
 /* Cells: no plate, no shadow, no backdrop — the pair is what floats. */
@@ -460,9 +483,12 @@
 .topbar[data-chrome="float"] .vote-switcher-group {
   gap: var(--space-2);
   min-width: 0;
-  height: var(--control-height);
+  /* Fills its row, so the two pills stack to exactly the height of the pair
+     beside them. The generous horizontal indent is untouched — this is
+     shorter, not smaller. */
+  height: 100%;
   box-sizing: border-box;
-  padding: var(--space-2) var(--space-4);
+  padding: 0 var(--space-4);
 }
 
 /* The group is the pill, so the trigger inside it is bare — one box, not two —
@@ -486,8 +512,11 @@
   background: transparent;
   width: 100%;
   min-width: 0;
-  padding-left: 0;
-  padding-right: 0;
+  /* globals gives .mode-btn its own `padding: 8px ...`, which stacked on top of
+     the group's and made the Map row 54px against the Vote row's 38. The group
+     owns the inset now; the trigger just fills it. */
+  height: 100%;
+  padding: 0;
 }
 
 .topbar[data-chrome="float"] .mode-btn:hover,
@@ -513,6 +542,7 @@
 .topbar[data-chrome="float"] .vote-type-control {
   width: 100%;
   min-width: 0;
+  height: 100%;
   border: 0;
   padding: 0;
   background: transparent;
@@ -526,7 +556,14 @@
 
 .topbar[data-chrome="float"] .mode-switcher-group:hover,
 .topbar[data-chrome="float"] .vote-switcher-group:hover {
-  background: color-mix(in srgb, var(--plate-tint) 84%, transparent);
+  /* --hover-bg is the app's hover surface; every other hovering control in the
+     bar and in the modals already uses it. This pill had a bespoke lightened
+     plate instead, which is exactly why hovering it looked unlike hovering its
+     neighbours. Layered over the plate rather than replacing it, so the
+     translucency and blur survive. */
+  background:
+    linear-gradient(var(--hover-bg), var(--hover-bg)),
+    var(--plate-bg);
 }
 
 
@@ -574,8 +611,9 @@
 
 .topbar[data-chrome="float"] .btn-cast {
   flex: 0 0 auto;
-  width: var(--control-height);
+  /* Square: one row wide, one row tall. */
   height: 100%;
+  width: var(--float-row);
   box-sizing: border-box;
   padding: 0;
   margin: 0;
@@ -845,7 +883,7 @@
 @media (hover: hover) {
   .topbar[data-chrome="float"] .btn-cast-up:hover:not(:disabled):not(.is-cast) {
     background:
-      linear-gradient(rgba(0, 196, 212, 0.22), rgba(0, 196, 212, 0.22)),
+      linear-gradient(var(--color-start-light), var(--color-start-light)),
       var(--plate-bg);
   }
 }
@@ -853,7 +891,7 @@
 @media (hover: hover) {
   .topbar[data-chrome="float"] .btn-cast-down:hover:not(:disabled):not(.is-cast) {
     background:
-      linear-gradient(rgba(220, 52, 59, 0.22), rgba(220, 52, 59, 0.22)),
+      linear-gradient(var(--color-end-light), var(--color-end-light)),
       var(--plate-bg);
   }
 }
@@ -879,7 +917,11 @@
 .topbar[data-chrome="float"] .btn-cast:focus-visible,
 .topbar[data-chrome="float"] .btn-header:focus-visible {
   outline: 1px solid var(--ink-strong);
-  outline-offset: -3px;
+  /* -1px puts the ring ON the control's edge. At -3px it sat three pixels
+     inside, and since these controls have no border of their own, that inset
+     ring read AS the edge — half of why the search field looked narrower than
+     the panel below it. */
+  outline-offset: -1px;
 }
 
 
@@ -948,5 +990,137 @@
   .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .mode-switcher-group,
   .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .vote-switcher-group {
     grid-column: 1 / 3;
+  }
+}
+
+
+/* ==========================================================================
+   Open overlays — rungs, and edges shared with the control that owns them.
+
+   RUNGS. Every plate in this bar carries `backdrop-filter`, which makes each
+   one a stacking context, so a dropdown's own --z-dropdown was sealed inside
+   the pill that opened it and paint order among the pills fell back to DOM
+   order: mode-group (index 115), nav-group (352), vote-group (378). That is
+   precisely the two reported symptoms — the icon cluster over the map menu,
+   and the vote menu over the cluster's hover label. A rung has to be on the
+   BOX that is the stacking context, so it is put there.
+
+   EDGES. A control and the panel it opens are one thing and must share both.
+   They had drifted because each was sized independently: the vote panel at
+   `width: max-content` (9px past its control) and the map panel at a
+   JS-measured 566px (234px past its 333px control, which is how it reached
+   under the icon cluster). Both take the control's width now.
+   ========================================================================== */
+
+/* Resting chrome — named explicitly so nothing depends on document order. */
+.topbar[data-chrome="float"] .logo-container,
+.topbar[data-chrome="float"] .logo-mobile-banner,
+.topbar[data-chrome="float"] .legend-pair,
+.topbar[data-chrome="float"] .mode-switcher-group,
+.topbar[data-chrome="float"] .vote-switcher-group,
+.topbar[data-chrome="float"] .actions-group,
+.topbar[data-chrome="float"] .nav-group {
+  position: relative;
+  z-index: var(--z-chrome);
+}
+
+/* The group holding an OPEN menu rises to the open-overlay rung. */
+.topbar[data-chrome="float"] .mode-switcher-group:has(.mode-selector.active),
+.topbar[data-chrome="float"] .vote-switcher-group:has(.vote-type-selector.active) {
+  z-index: var(--z-dropdown);
+}
+
+/* The address search is an overlay too, one rung higher because it opens
+   INSIDE a field that may already be raised. Same trap: the pair is the
+   stacking context, so the pair is what has to move. */
+.topbar[data-chrome="float"] .legend-pair:has(.legend-tool.typing) {
+  z-index: var(--z-autocomplete);
+}
+
+/* The cluster's hover labels live on --z-transient, the top of the ladder. A
+   rung cannot lift them out of a stacking context, so this group must not be
+   one: it is the single plate in the bar that forgoes the backdrop blur, which
+   is the price of its labels clearing an open menu. It keeps the same
+   translucency, edge and shadow, so it still reads as one of the plates. The
+   buttons stay at --z-chrome — an open menu is still above them, which is what
+   the map-menu report asked for. */
+.topbar[data-chrome="float"] .nav-group {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* One control, one set of edges. */
+.topbar[data-chrome="float"] .mode-dropdown,
+.topbar[data-chrome="float"] .vote-type-dropdown {
+  left: 0;
+  right: auto;
+  width: 100%;
+  /* border-box, or `width: 100%` is the CONTENT width and the panel's own 1px
+     edges push it 2px past the control on the right. */
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: none;
+}
+
+
+/* ==========================================================================
+   Map and Vote side by side — the default arrangement on a wide bar.
+
+   Stacked, each pill ran the full width of its column and looked enormous for
+   what it holds. Side by side each takes about half that, which fixes the
+   width complaint on its own.
+
+   THE BREAKPOINT IS MEASURED, not a stock 768. In this bar, at the shared type
+   size, 1ch renders at 9.00px and a pill's furniture — the "Map:"/"Vote:"
+   label, the icon, the chevron, the padding and the two gaps — is 120px. The
+   longest labels the app actually holds are "NYC Tactical Urbanism" (21ch, so
+   a 309px pill) and "Repaint this call box or utility box" (36ch, 444px). Full
+   labels for both would demand a bar nobody has, so the floor is instead the
+   width at which each pill still shows 12 characters before ellipsis — enough
+   to tell "Add pedestrian…" from "Add public…" — which is 228px each. Two of
+   those plus the gap is 468px, and the rest of the bar measures 905px
+   (Start/End 320, legend 134, the action block 74, the rail 284, gutters and
+   column gaps 93). 468 + 905 = 1373, so 1380px is where they stop fitting and
+   where they go back to stacking. Below 1080 the whole bar restacks anyway.
+   ========================================================================== */
+
+@media (min-width: 1380px) {
+  .topbar[data-chrome="float"] .topbar-content {
+    grid-template-columns:
+      minmax(120px, auto)      /* Start / End       */
+      auto                     /* Selection / Votes */
+      minmax(228px, 320px)     /* Map               */
+      minmax(228px, 460px)     /* Vote              */
+      auto                     /* -/+ / Clear       */
+      1fr                      /* slack             */
+      auto;                    /* rail              */
+  }
+
+  /* Each spans both rows and centres in them, so the two sit on one line at
+     the band's row height rather than filling its full depth. */
+  .topbar[data-chrome="float"] .mode-switcher-group {
+    grid-area: 1 / 3 / 3 / 4;
+    align-self: center;
+    height: var(--float-row);
+  }
+
+  .topbar[data-chrome="float"] .vote-switcher-group {
+    grid-area: 1 / 4 / 3 / 5;
+    align-self: center;
+    height: var(--float-row);
+  }
+
+  .topbar[data-chrome="float"] .actions-group { grid-area: 1 / 5 / 3 / 6; }
+  .topbar[data-chrome="float"] .nav-rail      { grid-area: 1 / 7 / 3 / 8; }
+
+  /* Empty state: with no selection the action block is gone, so Vote takes its
+     column and the run still ends flush. Map keeps its own width — only the
+     pill next to the gap grows into it. */
+  .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .mode-switcher-group {
+    grid-column: 3 / 4;
+  }
+
+  .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .vote-switcher-group {
+    grid-column: 4 / 6;
   }
 }

@@ -31,6 +31,7 @@ const LADDER = [
   "--z-splash",
   "--z-modal",
   "--z-pac-container",
+  "--z-transient",
   "--z-ribbon",
   "--z-crash",
 ];
@@ -86,6 +87,25 @@ describe("z-index ladder", () => {
     // the proposal the reader opened.
     expect(rungValue("--z-map-card")).toBeGreaterThan(rungValue("--z-map-notice"));
     expect(rungValue("--z-crash")).toBe(Math.max(...LADDER.map(rungValue)));
+  });
+
+  it("orders the bar: resting chrome, then open overlays, then transient feedback", () => {
+    // The three failures that put this here, in one screenshot batch: the icon
+    // cluster painted over an open map menu, and an open vote menu painted over
+    // the cluster's hover label. An open overlay outranks every resting
+    // control; a tooltip outranks the overlay it is anchored inside.
+    expect(rungValue("--z-dropdown")).toBeGreaterThan(rungValue("--z-chrome"));
+    expect(rungValue("--z-transient")).toBeGreaterThan(rungValue("--z-dropdown"));
+  });
+
+  it("puts transient feedback above dialogs, but NOT the bottom strips", () => {
+    // A tooltip can be anchored to a control inside a modal, so it has to clear
+    // the modal. It can afford to: it is pointer-events:none and it leaves.
+    expect(rungValue("--z-transient")).toBeGreaterThan(rungValue("--z-modal"));
+    // The bottom strips are transient too but occupy a region of the map for
+    // seconds and CAN cover a proposal card — the bug this ladder exists for.
+    // They stay below the cards; this is the guard that keeps them there.
+    expect(rungValue("--z-map-notice")).toBeLessThan(rungValue("--z-map-card"));
   });
 
   it("is the only place a z-index comes from", () => {

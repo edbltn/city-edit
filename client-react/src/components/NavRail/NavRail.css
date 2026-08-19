@@ -114,7 +114,12 @@
     position: absolute;
     top: calc(100% + 7px);
     left: 50%;
-    z-index: var(--z-dropdown);
+    /* TRANSIENT rung, above open overlays. At --z-dropdown this label shared a
+       rung with the vote menu and lost to it on DOM order — the menu clipped
+       its left edge. A hover label is anchored to a control that may itself be
+       raised, so it belongs at the top of the ladder; it can afford to be
+       there because it is pointer-events:none and it leaves. */
+    z-index: var(--z-transient);
     padding: 3px 7px;
     font-family: var(--font-main);
     font-size: var(--font-size-2xs);

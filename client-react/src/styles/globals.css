@@ -40,6 +40,19 @@
   --font-secondary: 13px;
   --font-caption: 11px;
 
+  /* ==========================================================================
+     Weight scale — the same idea as the size scale above, for the same reason.
+     The app had 400/500/600/700 written as literals in 34 places and a token
+     for none of them, so no weight could be adjusted without hunting numbers.
+     --weight-body is the default. --weight-medium is the step that makes small
+     text hold up on the LIGHT theme, where there is less contrast to carry it,
+     and it is what the vote list uses.
+     ========================================================================== */
+  --weight-body: 400;
+  --weight-medium: 500;
+  --weight-strong: 600;
+  --weight-heavy: 700;
+
   /* ---- Glyph sizes ---------------------------------------------------------
      A character used as an ICON — the legend's diamonds, the cast +/-, a close
      x, the ASCII spinner. These are sized by `font-size` but they are not text
@@ -118,7 +131,22 @@
      2. Rungs are 100 apart. A variant that must sit just above its own siblings
         writes `calc(var(--rung) + 1)`; a whole new tier gets a NAME here, not a
         bigger number at the call site.
-     3. A token is only a promise between SIBLINGS IN ONE STACKING CONTEXT. An
+     3. TRANSIENT feedback sits at the top, above dialogs. A tooltip is
+        attached to a control that may itself already be raised — a menu item,
+        a button inside an open dropdown, a control in a modal — so anchoring
+        it any lower means finding a new thing it hides behind every time
+        something else is raised. It can afford the top rung because it is
+        transient and `pointer-events: none`: unlike a panel or a dialog, it
+        cannot trap anything underneath it.
+
+        This does NOT include the bottom strips (event banner, error toast,
+        co-presence). Those are transient too, but they occupy a fixed region
+        of the map for seconds at a time and CAN cover a proposal card, which
+        is the exact bug this ladder was written for (see --z-map-notice, and
+        the `--z-map-card > --z-map-notice` invariant in zScale.test.ts). They
+        stay where e185e51 put them, deliberately below the cards.
+
+     4. A token is only a promise between SIBLINGS IN ONE STACKING CONTEXT. An
         element sealed inside a context can never outrank anything outside it,
         whatever number it carries. The map is the sealed box in this app:
         `#map` and `.leaflet-container` each create a context deliberately —
@@ -129,6 +157,15 @@
         it. The proposal cards learned this the hard way: numbered 1100–1400 but
         mounted in the Leaflet container, they were sealed at the map's own
         rung and the 990 event banner painted straight over them.
+
+        The floating chrome learned it again, from the other side. Every plate
+        in the bar carries `backdrop-filter`, and that makes each one a
+        stacking context — so a dropdown's --z-dropdown was sealed inside the
+        pill that opened it, and paint order among the pills fell back to DOM
+        order. That is the whole reason the icon cluster covered the map menu
+        and the vote menu covered the cluster's tooltip: the rungs were right
+        and were being applied to elements that could not act on them. When a
+        rung has to win outside its own box, put it on the BOX.
      ========================================================================== */
   --z-map: 1;                     /* the map: canvas, tiles, panes, markers */
   --z-map-overlay: 100;           /* map furniture: hover tooltip, selection history, ghost pin */
@@ -142,8 +179,9 @@
   --z-splash: 900;                /* the bootstrap loader (and the gate's backdrop) */
   --z-modal: 1000;                /* full-screen dialogs and their backdrops */
   --z-pac-container: 1100;        /* Google's places list, opened inside a dialog */
-  --z-ribbon: 1200;               /* the staging watermark */
-  --z-crash: 1300;                /* the error boundary — above everything, always */
+  --z-transient: 1200;            /* tooltips and hover labels — see below */
+  --z-ribbon: 1300;               /* the staging watermark */
+  --z-crash: 1400;                /* the error boundary — above everything, always */
 
   /* Layout */
   --topbar-height: auto;
@@ -183,6 +221,11 @@
   --color-start: #00C4D4;
   --color-end: #DC343B;
   --color-start-light: rgba(0, 196, 212, 0.15);
+  /* The matching wash for --color-end. It existed only as a literal, and a
+     DIFFERENT red from --color-end at that (224,90,96 vs the marker's
+     220,52,59), so the against-hover did not match the against-marker. Derived
+     now, so the pair can only ever move together. */
+  --color-end-light: color-mix(in srgb, var(--color-end) 15%, transparent);
 
   /* Waypoint marker outline — a contrast ring that separates the kite from the
      heatmap glow. Dark on dark basemaps; overridden to light below. */
@@ -843,12 +886,12 @@ body {
 .btn-cast-up { border-radius: 0 2px 2px 0; margin-left: -1px; color: var(--color-start); }
 
 .btn-cast-up:hover:not(:disabled) {
-  background: rgba(0, 196, 212, 0.15);
+  background: var(--color-start-light);
   border-color: var(--color-start);
 }
 
 .btn-cast-down:hover:not(:disabled) {
-  background: rgba(224, 90, 96, 0.15);
+  background: var(--color-end-light);
   border-color: var(--color-end);
 }
 

@@ -74,7 +74,7 @@
   background: transparent;
   font-family: var(--font-main);
   font-size: var(--control-font-size);
-  font-weight: 400;
+  font-weight: var(--weight-body);
   letter-spacing: 0;
   color: var(--ink);
   cursor: pointer;
@@ -104,7 +104,7 @@
   padding-right: var(--space-2);
   font-family: var(--font-main);
   font-size: var(--control-font-size);
-  font-weight: 400;
+  font-weight: var(--weight-body);
   letter-spacing: 0;
   color: var(--ink);
   pointer-events: none;
@@ -215,6 +215,8 @@
 
 .vt-section-title {
   opacity: 0.55;
+  /* section headers carry the list; strongest step */
+  font-weight: var(--weight-strong);
 }
 
 /* How much of this group is drawn. Lower-case on purpose — the heading is
@@ -226,6 +228,8 @@
   text-transform: none;
   font-variant-numeric: tabular-nums;
   opacity: 0.42;
+  /* small and muted — needs the extra weight most */
+  font-weight: var(--weight-medium);
 }
 
 .vt-section-count.is-filtered {
@@ -243,7 +247,7 @@
   padding: var(--space-2) var(--space-3) var(--space-2) calc(var(--space-3) - 3px);
   border-left: 3px solid transparent;
   font-size: var(--control-font-size);
-  font-weight: 400;
+  font-weight: var(--weight-body);
   letter-spacing: 0;
   color: var(--ink);
   cursor: pointer;
@@ -261,6 +265,8 @@
 
 .vote-type-option.is-casting .vote-type-label {
   color: var(--ink-strong);
+  /* the vote names, the thing people actually read */
+  font-weight: var(--weight-medium);
 }
 
 /* Toggled off: still legible (you have to be able to find it again), but
@@ -269,6 +275,8 @@
 .vote-type-option.is-hidden .vote-type-label,
 .vote-type-option.is-hidden .vt-net {
   opacity: 0.38;
+  /* numerals at caption size, weakest on light */
+  font-weight: var(--weight-medium);
 }
 
 .vote-type-option.is-hidden .vote-type-label {

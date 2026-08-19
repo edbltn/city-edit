@@ -6,6 +6,7 @@ import { getMapSlug, getCurrentMap } from "../../map/runtime";
 import { CONFIG } from "../../config";
 import { CheckIcon } from "../CheckIcon";
 import "./ModeSwitcher.css";
+import { chromeMode } from "../../utils/chromeMode";
 
 interface MapItem {
   slug: string;
@@ -177,7 +178,14 @@ export const ModeSwitcher = memo(function ModeSwitcher() {
       <div
         className="mode-dropdown"
         role="listbox"
-        style={dropdownWidth ? { width: dropdownWidth } : undefined}
+        // The measured width is what makes the panel wider than the control it
+        // hangs from — 566px against a 333px pill, which is how it ended up
+        // reaching under the icon cluster. The floating chrome sizes the panel
+        // from the control instead (one control, one set of edges), so the
+        // measurement is simply not applied there; the banner keeps it.
+        style={
+          dropdownWidth && chromeMode() === "banner" ? { width: dropdownWidth } : undefined
+        }
       >
         <input
           ref={inputRef}
