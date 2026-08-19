@@ -35,6 +35,7 @@ import {
   formatProposalCount, proposalLabelText, proposalRevealZoom,
 } from "../MapLibreBackground/proposalLabelStyle";
 import { makeVoteTypeIcon } from "./voteTypeIcon";
+import { pointPinZIndexOffset, routePinZIndexOffset } from "./pinStacking";
 import { suggestionGlyphForLabel } from "../../utils/suggestionIcon";
 import {
   candidatesForGraph, selectTopProposalsFrom, topLabelForEdges,
@@ -4554,30 +4555,15 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           key={w.edgeIdx}
           position={[posLat, posLng]}
           icon={icon}
-          // Stacking: a state BAND (far-apart bases) plus the proposal's net
-          // votes as the in-band offset, so where pins overlap the more-supported
-          // one sits on top — but explode/waypoint/selected still lift a pin into
-          // a higher band regardless of votes. Bands are 100k apart and votes are
-          // capped at 50k, so the vote offset can never bleed one band into the
-          // next. Highest band first (route diamonds slot in between — see
-          // routeIndicatorMarkers):
-          //   500000+  fanned-out (spread override) — the exploded cluster is the
-          //            disambiguation UI, so it reads as one group on top of
-          //            EVERYTHING, route diamonds included.
-          //   400000+  a route diamond covered by the selection (routeIndicator).
-          //   300000+  a route diamond, uncovered (routeIndicator).
-          //   200000+  a MATCHED waypoint (start/end/mid). It carries the [×]
-          //            badge, so it must sit above any overlapping non-matched
-          //            sibling — else the upper icon conceals its badge.
-          //   100000+  the selected (open-modal) proposal.
-          //     1000+  everything else, ordered by votes.
-          zIndexOffset={
-            (override ? 500000
-             : role !== null ? 200000
-             : w.edgeIdx === selectedEdgeIdx ? 100000
-             : 1000)
-            + Math.min(50000, Math.max(0, w.count))
-          }
+          // Stacking: a state BAND and nothing else. Inside a band Leaflet's own
+          // ordering takes over, which is by latitude — the southern (nearer)
+          // pin paints on top. The bands, and why there is no in-band term any
+          // more, are in pinStacking.ts.
+          zIndexOffset={pointPinZIndexOffset({
+            fanned: !!override,
+            matchedWaypoint: role !== null,
+            selected: w.edgeIdx === selectedEdgeIdx,
+          })}
           onActivate={activateIndicator}
           onDeactivate={deactivateIndicator}
           onClick={handleClick}
@@ -4869,11 +4855,11 @@ export function GraphLayer({ onSnap, pinnedPoint, startPoint, endPoint, ghostWay
           icon={icon}
           // Route diamonds sit ABOVE every settled point icon (matched/selected/
           // browse) so a corridor is never buried under point pins; covered ones
-          // outrank uncovered; the fanned-out spread (500000+) alone stays above
-          // them (it's the explicit disambiguation gesture) — a fanned diamond
-          // joins that top band with the fanned squares. Bands documented at
-          // the point-icon zIndexOffset.
-          zIndexOffset={(override ? 500000 : covered ? 400000 : 300000) + Math.min(48000, Math.max(0, p.score))}
+          // outrank uncovered; the fanned-out spread alone stays above them
+          // (it's the explicit disambiguation gesture) — a fanned diamond joins
+          // that top band with the fanned squares. Within a band, latitude
+          // orders them, exactly as it does the squares. See pinStacking.ts.
+          zIndexOffset={routePinZIndexOffset({ fanned: !!override, covered })}
           onActivate={activate}
           onDeactivate={deactivate}
           onClick={() => {
