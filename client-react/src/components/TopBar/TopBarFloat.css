@@ -82,6 +82,26 @@
      1.4x the type leaves room for descenders and clears the 20px icons. */
   --float-row: calc(1.4 * var(--control-font-size) + 2 * var(--space-2));
 
+  /* The widest the Map/Vote column ever needs to be, derived from the content
+     rather than picked. The longest strings the app actually holds are
+     "NYC Tactical Urbanism" (21 chars) and "Repaint this call box or utility
+     box" (36); with the 5-char "Vote:" label that is 41 characters, and Red
+     Hat Mono advances at 0.6em (measured: 9.00px at 15px, exactly 0.6). Add
+     the icon, the chevron, the horizontal indent and the two internal gaps and
+     the widest pill is 444px at the current scale. Past that a pill is holding
+     nothing but empty space, so it stops.
+
+     It is a MAXIMUM only — the track below is minmax(0, this), so on a narrow
+     screen it yields all the way to zero and the label ellipsises. A cap that
+     turns into a floor is how right-edge clipping comes back. */
+  --pill-cap: calc(
+    41 * 0.6 * var(--control-font-size)
+    + 20px                       /* the state's icon  */
+    + 7px                        /* the chevron       */
+    + 2 * var(--space-4)         /* horizontal indent */
+    + 2 * var(--space-2)         /* the two gaps      */
+  );
+
   position: absolute;
   top: 0;
   left: 0;
@@ -279,13 +299,19 @@
        "Selection" and the pressure goes to the column above, which can absorb
        it. */
     min-content              /* Selection / Votes */
-    /* 1fr, so the pills fill the width the rest of the row does not use — they
-       are stacked and full width, not sized to their labels. It also makes the
-       empty state free: when the -/+ block is removed its track collapses and
-       this one takes the space, with no separate rule to keep in sync. */
-    1fr                      /* Map / Vote        */
-    auto                     /* -/+ / Clear       */
-    auto;                    /* rail              */
+    /* Capped, not 1fr. Full width meant "as wide as the row allows", which on
+       a 1900px screen left two thirds of the pill empty and ran it up to the
+       icon cluster. It fills its own column and the column stops at the width
+       its longest content needs. */
+    minmax(0, var(--pill-cap))   /* Map / Vote    */
+    /* PINNED, not auto: this track has to hold its width even when the block
+       inside it is display:none, because the empty state spans the pills
+       across it. That is what makes the run's right edge identical in both
+       states — switching selection changes what is in the row, not how wide
+       the row is. Two squares of the row plus the container's own edges. */
+    calc(2 * var(--float-row) + 2px)   /* -/+ / Clear */
+    1fr                          /* slack         */
+    auto;                        /* rail          */
   /* AUTO, not --control-height. Forcing 44px rows made the Map/Vote stack 88
      tall while the legend pairs — one line of text plus 8px padding, twice —
      came to 74.7, so the three groups could not sit on one line. Letting the
@@ -355,7 +381,7 @@
 /* Spans both rows and sits centred: with Cast and Clear moved out, nothing
    else occupies this column's second row. */
 .topbar[data-chrome="float"] .nav-rail {
-  grid-area: 1 / 5 / 3 / 6;
+  grid-area: 1 / 6 / 3 / 7;
   align-self: center;
   justify-self: end;
 }
@@ -1021,14 +1047,19 @@
    A disabled control that cannot be enabled from where it sits is noise, and
    reserving its space is what left the run ending in a gap.
 
-   Nothing else is needed: the Map/Vote column is 1fr, so it simply takes the
-   width the removed block was using. The pair of grid-column overrides that
-   used to do this by hand is gone — one less thing to keep in step with the
-   column list.
+   The pills then span across the slot the block was holding, so the run ends
+   in exactly the same place either way. The block's track keeps its width
+   whether or not the block is in it, which is the half that makes the right
+   edge stable rather than merely similar.
    ========================================================================== */
 
 .topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .actions-group {
   display: none;
+}
+
+.topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .mode-switcher-group,
+.topbar[data-chrome="float"] .topbar-actions:not(.has-selection) .vote-switcher-group {
+  grid-column: 3 / 5;
 }
 
 @media (max-width: 1080px) {
