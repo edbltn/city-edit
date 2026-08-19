@@ -362,3 +362,235 @@
     transition: none;
   }
 }
+
+/* ==========================================================================
+   The coach — a callout on the control, and everything else greyed
+   ==========================================================================
+   Three pieces, and the order they paint in is the whole design:
+
+     .coach-scrim     covers the map at the cast step, one rung UNDER the chrome
+     [greying rules]  fade every control in the bar except the one in question
+     .coach-callout   the box with the tip, portalled to <body>
+
+   Why the greying is per-control rather than one overlay: opacity on an
+   ancestor creates a group, and nothing inside a faded group can be brought
+   back to full — so "fade the topbar, keep the Start field lit" is not
+   expressible that way. Each control is faded on its own and the one carrying
+   the step's `data-coach` value is excluded by `:not()`. That also means this
+   file names controls owned by TopBar, which is a real coupling and is why the
+   attributes exist rather than a pile of :nth-child selectors.
+   ========================================================================== */
+
+.coach-scrim {
+  position: fixed;
+  inset: 0;
+  /* One below the chrome: over the map, its furniture, the bottom strips and any
+     open proposal card (100–500), under the bar (600). A named rung would have
+     to sit between two that are exactly 100 apart, which the ladder has no room
+     for and zScale.test.ts enforces — so this is a VARIANT of the rung it hangs
+     off, spelled the way globals.css documents variants. */
+  z-index: calc(var(--z-chrome) - 1);
+  background: color-mix(in srgb, var(--paper) 62%, transparent);
+  /* The map is the only thing under here with colour of its own, and greying it
+     is the point: by the cast step the points are placed and the map has nothing
+     left to say. */
+  backdrop-filter: grayscale(1) saturate(0.2);
+  -webkit-backdrop-filter: grayscale(1) saturate(0.2);
+  animation: coach-scrim-in 220ms ease both;
+}
+
+@keyframes coach-scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── Greying the bar ─────────────────────────────────────────────────────
+   One list of controls, three copies of the rule — one per step — each
+   excluding its own target. Written out rather than generated because the
+   exclusion is the only difference and a reader can see it. */
+body[data-coach-focus] :is(
+  .logo-container,
+  .logo-mobile-banner,
+  .legend-pair-tools > *,
+  .legend-pair-key,
+  .mode-switcher-group,
+  .vote-switcher-group,
+  .nav-rail,
+  .actions-group > *
+) {
+  filter: grayscale(1);
+  opacity: 0.34;
+  transition: opacity 200ms ease, filter 200ms ease;
+}
+
+/* Lit: full colour, and lifted clear of the scrim's fade so the cast pair reads
+   as the live control rather than as one more thing behind glass. Not
+   `pointer-events` — nothing in the bar is ever disabled by the coach. Somebody
+   who wants to move a point they have already placed, or change the vote type
+   before casting, is doing something reasonable, and a first run that traps
+   them teaches the app is a wizard. Only the map is actually taken away, and
+   only once there is nothing left to do on it. */
+body[data-coach-focus="start"] [data-coach="start"],
+body[data-coach-focus="end"] [data-coach="end"],
+body[data-coach-focus="cast"] [data-coach="cast"] {
+  filter: none;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-coach-focus] :is(
+    .logo-container,
+    .logo-mobile-banner,
+    .legend-pair-tools > *,
+    .legend-pair-key,
+    .mode-switcher-group,
+    .vote-switcher-group,
+    .nav-rail,
+    .actions-group > *
+  ) {
+    transition: none;
+  }
+
+  .coach-scrim,
+  .coach-callout {
+    animation: none;
+  }
+}
+
+/* ── The callout ─────────────────────────────────────────────────────────
+   Position and max-width come from calloutPlacement.ts as inline styles; this
+   owns the surface, the type and the tip. Square, hairline, paper — the same
+   object as every other plate in the app, just small and pointed. */
+.coach-callout {
+  position: fixed;
+  /* Tooltips and hover labels: the ladder's own name for this. It clears the
+     bar, every dropdown opened from it, and the autocomplete — all of which a
+     callout anchored to the Start field can be standing next to. */
+  z-index: var(--z-transient);
+
+  box-sizing: border-box;
+  padding: var(--space-3) 26px var(--space-3) var(--space-3);
+  border: 1px solid var(--ink-strong);
+  border-radius: 0;
+
+  font-family: var(--font-main);
+  color: var(--ink-strong);
+  /* Opaque, unlike the bar's plates. A translucent box over a greyed map reads
+     as another piece of chrome; this one has to read as being said TO you. */
+  background: var(--paper);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
+  animation: coach-callout-in 200ms ease both;
+}
+
+/* Rendered before it has been measured: it must be in the document to have a
+   size, and it must not be seen at (0,0) while it gets one. */
+.coach-callout--measuring {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Opacity only, deliberately: NO transform. The box is positioned from a
+   measured rect, and a transform is included in the rect the next measurement
+   reads — so an entrance that slides would feed its own offset back into the
+   placement, and a frame where the animation is stalled (an occluded window
+   throttles them to a stop) would leave the box parked at the offset with the
+   tip 3px off its control. A fade cannot lie about where something is. */
+@keyframes coach-callout-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* WRAPS, where the bottom strip's copy of this ellipsised. The strip ran the
+   width of the screen and a truncated tail cost nothing; a 300px callout cuts
+   the sentence in half — "I already cut across here, and s…" — and that
+   sentence is the thing the visitor chose, held on screen so the flow reads as
+   finishing it rather than as following instructions. Two lines, then clamp:
+   long enough for every line in the phrasebook at this size, short enough that
+   the box cannot grow taller than the control it is pointing at. */
+.coach-callout-sentence {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  margin: 0 0 3px;
+  font-size: var(--font-size-2xs);
+  line-height: 1.35;
+  color: color-mix(in srgb, var(--ink) 55%, transparent);
+}
+
+.coach-callout-ask {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+  color: var(--ink-strong);
+}
+
+.coach-callout-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-2);
+}
+
+.coach-callout-btn {
+  padding: 4px var(--space-2);
+  border: 1px solid var(--hairline-strong, var(--hairline));
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-size-2xs);
+  color: var(--ink-strong);
+  cursor: pointer;
+}
+
+.coach-callout-btn:hover {
+  border-color: var(--ink-strong);
+}
+
+.coach-callout-close {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  padding: 2px 5px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  line-height: 1;
+  color: color-mix(in srgb, var(--ink) 55%, transparent);
+  cursor: pointer;
+}
+
+.coach-callout-close:hover {
+  color: var(--ink-strong);
+}
+
+/* ── The tip ─────────────────────────────────────────────────────────────
+   A rotated square with two of its borders showing, sitting half outside the
+   box so the seam falls inside it. `--coach-arrow-left` is the tip's centre
+   measured from the box's own left edge, set by calloutPlacement.ts — it is NOT
+   the box's midpoint, and that is the whole point: when the box is clamped to a
+   viewport edge the box stops moving and the tip keeps sliding, so it stays
+   over the control at every width. */
+.coach-callout-tip {
+  position: absolute;
+  left: var(--coach-arrow-left, 50%);
+  width: 10px;
+  height: 10px;
+  background: var(--paper);
+  border: 1px solid var(--ink-strong);
+}
+
+.coach-callout--below .coach-callout-tip {
+  top: -6px;
+  border-right: none;
+  border-bottom: none;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.coach-callout--above .coach-callout-tip {
+  bottom: -6px;
+  border-left: none;
+  border-top: none;
+  transform: translateX(-50%) rotate(45deg);
+}

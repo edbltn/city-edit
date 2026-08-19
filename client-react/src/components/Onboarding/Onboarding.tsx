@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMap, useRoute } from "../../context";
 import { pointTypeForLabel } from "../../themes";
-import { fitPoints } from "../../utils/mapViewState";
 import { dlog } from "../../utils/debugLog";
 import { hasPendingSticker } from "../../sticker";
-import { AddressSearch } from "../AddressSearch";
 import { MapNotice } from "../MapNotice";
+import { CoachCallout } from "./CoachCallout";
 import { OpenerWall } from "./OpenerWall";
 import { openerFor } from "../../onboarding/phrasebook";
 import { buildTiles, type OpenerTile } from "../../onboarding/tiles";
@@ -15,7 +15,7 @@ import {
 } from "../../onboarding/state";
 import { hasVisitedBefore, isSuppressed, suppress } from "../../onboarding/firstRun";
 import { setOnboardingActive, useOnboardingRequests } from "../../onboarding/active";
-import type { LatLng } from "../../types";
+import { useCoachAnchor, type CoachTarget } from "../../onboarding/coachAnchor";
 import "./Onboarding.css";
 
 // ==========================================================================
@@ -48,11 +48,37 @@ import "./Onboarding.css";
 // The only bit of state that belongs to the flow is "the optional end was
 // declined", and it holds no fact the selection also holds.
 //
-// The strip is a MapNotice: the app has exactly one place it speaks from, and a
-// first-run coach is not special enough to earn a second. That also inherits the
-// rule the notice was built for — the strip is transparent to the pointer and
-// sits UNDER the map's cards, so a coach can never be why a proposal underneath
-// it won't take a tap.
+// WHERE THE COACH SPEAKS FROM, and why it moved. It used to be a MapNotice — the
+// one bottom strip the app says everything from — on the reasoning that a
+// first-run coach is not special enough to earn a second place to speak. That
+// was right about the strip and wrong about the coach. A strip at the BOTTOM of
+// the screen cannot point, so every step had to DESCRIBE its control instead of
+// indicating it ("Tap the map where that stretch starts"), and two of the three
+// controls it was describing are in a bar at the TOP of the screen that a
+// first-timer has not looked at yet. The instruction and the thing it was about
+// were as far apart as the screen allows.
+//
+// So the steps are now CALLOUTS ANCHORED TO THE REAL CONTROL, with an arrow tip
+// on them, and the rest of the chrome greys out behind them so there is exactly
+// one lit thing on the screen at a time (coachAnchor.ts finds the control,
+// calloutPlacement.ts decides where the box goes, Onboarding.css does the
+// greying). One thing kept the strip, and deliberately: the CLOSING LINE. It is
+// not an instruction, it has no control to point at, and it is the one moment
+// the flow is reporting rather than asking.
+//
+// Three consequences worth stating, because each is a thing the strip used to do:
+//
+//   · THE COACH NO LONGER CARRIES ITS OWN CONTROLS. It had an address search and
+//     its own +/− pair, because a strip that cannot point has to bring the
+//     controls to the reader. Pointing at the real ones is strictly better —
+//     what somebody learns in the first run is then the app they will use — so
+//     the copies are gone.
+//   · IT STANDS DOWN WHILE SOMEBODY IS TYPING AN ADDRESS. Clicking the Start
+//     field opens a search inside that same plate; a callout hanging off the
+//     plate would be over the suggestion list. See `typing` in coachAnchor.ts.
+//   · IT FALLS BACK TO THE STRIP WHEN THERE IS NOTHING TO POINT AT. The legend
+//     is `display:none` in short landscape and absent entirely on a point-only
+//     map. An arrow tip pointing at nothing is worse than the strip it replaced.
 // ==========================================================================
 
 /** How long the closing line stays up after the first vote lands. */
@@ -75,9 +101,8 @@ export function Onboarding() {
 function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   const map = useMap();
   const {
-    start, end, routeData, splitDesirePaths, pointType, isCalculating,
-    isCalculatingSplit, hasVoted, requestedVoteType, voteType,
-    setVoteType, setStartPoint, setEndPoint, setActiveTool, castVote,
+    start, end, isCalculating, isCalculatingSplit, hasVoted,
+    requestedVoteType, voteType, setVoteType, setActiveTool,
   } = useRoute();
 
   // A scan of a still-unbound sticker. Read once: the code is spent by the first
@@ -110,10 +135,6 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   });
   const [dismissed, setDismissed] = useState(false);
   const [endSkipped, setEndSkipped] = useState(false);
-  // Which step's address field is open, rather than a bare boolean: the field
-  // closes by itself when the flow moves under it, with no effect to keep in
-  // step with the step.
-  const [searchingFor, setSearchingFor] = useState<"start" | "end" | null>(null);
   const [finished, setFinished] = useState(false);
   // A hand-opened flow reopens the WALL even though a sentence (and possibly a
   // whole selection) is already in play, because choosing a different sentence
@@ -166,11 +187,16 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   };
   const step = onboardingStep(facts);
 
-  // The cast control's own condition, spelled the same way the topbar spells it:
-  // a routed path, a split path, or a single point in point mode.
-  const canCast =
-    !!routeData || splitDesirePaths.length > 0 ||
-    (pointType === "point" && !!start.coords);
+  // Which control this step is about. `wall` covers the screen and `done` is a
+  // report rather than an instruction, so neither of them points at anything.
+  const target: CoachTarget | null =
+    step === "start" ? "start" : step === "end" ? "end" : step === "cast" ? "cast" : null;
+  const anchor = useCoachAnchor(active ? target : null);
+  // Anchored = there is a live control to hang the box off AND nobody is in the
+  // middle of typing an address into it. Either failure falls back to the strip
+  // (or, for typing, to silence) rather than to a tip pointing at nothing.
+  const anchored = !!anchor.box && !anchor.typing;
+
   const calculating = isCalculating || isCalculatingSplit;
 
   // ── Effects that DRIVE the model (never shadow it) ────────────────────────
@@ -215,6 +241,25 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   // the endpoint recording on the cast instead of on the open, which is a
   // different change to a different layer.
 
+  // Grey the chrome down to the one thing this step is about.
+  //
+  // A body attribute rather than a class on each control, and the greying rules
+  // live in Onboarding.css keyed off it (`body[data-coach-focus="start"] …`).
+  // That is the whole coupling: this flow never touches another component's DOM,
+  // and the bar never learns that a coach exists beyond the three `data-coach`
+  // attributes naming its own controls.
+  //
+  // It cannot be done with opacity on a CONTAINER, which is the obvious version
+  // and the wrong one: opacity makes a group, and nothing inside a faded group
+  // can be brought back to full — so fading `.topbar` and un-fading the Start
+  // field inside it is not expressible. The rules therefore fade the bar's
+  // controls INDIVIDUALLY, each one excluded by `:not([data-coach="…"])`.
+  useEffect(() => {
+    if (!active || !target || !anchored) return;
+    document.body.setAttribute("data-coach-focus", target);
+    return () => document.body.removeAttribute("data-coach-focus");
+  }, [active, target, anchored]);
+
   // A cast finishes the flow. Suppress — this and the dismissal are the only two
   // writes — then let the closing line stand for a few seconds and leave.
   useEffect(() => {
@@ -246,18 +291,6 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
     setDismissed(true);
   }, []);
 
-  function handleAddress(coords: LatLng, address: string) {
-    if (step === "end") {
-      setEndPoint(coords, address);
-      setActiveTool("start");
-      fitPoints([start.coords, coords]);
-    } else {
-      setStartPoint(coords, address);
-      fitPoints([coords, end.coords]);
-    }
-    setSearchingFor(null);
-  }
-
   if (!active) return null;
 
   if (step === "wall") {
@@ -276,68 +309,62 @@ function OnboardingFlow({ openedByHand }: { openedByHand: boolean }) {
   // `vt=`. One lookup, so a sticker scan and a wall pick read identically.
   const sentence = pickedLabel ? openerFor(pickedLabel) : null;
   const optionalEnd = endIsOptional(facts);
+  const line = ask(step, facts, voteType, calculating);
 
+  // The one decision the chrome cannot make for us: an end point the flow was
+  // only GUESSING might exist, on a label whose kind is unknown. Everything else
+  // the coach used to carry — an address search, its own +/− pair — is now the
+  // real control with an arrow pointing at it.
+  const actions =
+    step === "end" && optionalEnd ? (
+      <button type="button" className="coach-callout-btn" onClick={() => setEndSkipped(true)}>
+        It's one spot
+      </button>
+    ) : null;
+
+  // Somebody is typing an address into the very field we would be pointing at.
+  // Say nothing at all until they are done — see `typing` in coachAnchor.ts.
+  if (target && anchor.typing) return null;
+
+  if (target && anchor.box) {
+    return (
+      <>
+        {/* Only the cast step takes the map away. Placing a point IS a map
+            gesture, so greying the map out during `start` or `end` would grey
+            out the thing being asked for; by `cast` the points are placed and
+            the only move left is in the bar. The scrim sits one rung under the
+            chrome, so it covers the map, its furniture and any open proposal
+            card, while the bar stays above it and is greyed by the rules
+            instead — which is what leaves the +/− the single lit thing. */}
+        {step === "cast" && createPortal(
+          <div className="coach-scrim" aria-hidden="true" />,
+          document.body
+        )}
+        <CoachCallout
+          anchor={anchor.box}
+          sentence={sentence}
+          ask={line}
+          actions={actions}
+          onDismiss={handleDismiss}
+        />
+      </>
+    );
+  }
+
+  // No control to point at — a point-only map (no legend at all), short
+  // landscape (the legend is display:none), or a cast that is not yet possible
+  // so its plate is still reserved-but-hidden. And the closing line, which is a
+  // report rather than an instruction and never had a control. The strip is
+  // still the right answer for all of them.
   return (
     <MapNotice tone="notice" anchor aria-label="Getting started">
       <div className="onboard-coach map-notice-body">
         <div className="onboard-lines">
           {sentence && <p className="onboard-sentence">{sentence}</p>}
-          <p className="onboard-ask">{ask(step, facts, voteType, calculating)}</p>
+          <p className="onboard-ask">{line}</p>
         </div>
 
-        {searchingFor === step ? (
-          <div className="onboard-search">
-            <AddressSearch
-              onSelect={handleAddress}
-              onClose={() => setSearchingFor(null)}
-              placeholder={step === "end" ? "Search the other end…" : "Search an address…"}
-              accentColor={step === "end" ? "var(--color-end)" : "var(--color-start)"}
-            />
-          </div>
-        ) : (
-          <div className="onboard-actions map-notice-actions">
-            {(step === "start" || step === "end") && (
-              <button
-                type="button"
-                className="map-notice-btn"
-                onClick={() => setSearchingFor(step === "end" ? "end" : "start")}
-              >
-                Search instead
-              </button>
-            )}
-            {step === "end" && optionalEnd && (
-              <button
-                type="button"
-                className="map-notice-btn"
-                onClick={() => setEndSkipped(true)}
-              >
-                It's one spot
-              </button>
-            )}
-            {step === "cast" && (
-              <>
-                <button
-                  type="button"
-                  className="map-notice-btn onboard-cast onboard-cast-down"
-                  onClick={() => castVote(-1)}
-                  disabled={!canCast}
-                  title={`Vote against ${voteType} here`}
-                >
-                  − Not here
-                </button>
-                <button
-                  type="button"
-                  className="map-notice-btn map-notice-btn-primary onboard-cast onboard-cast-up"
-                  onClick={() => castVote(1)}
-                  disabled={!canCast}
-                  title={`Vote for ${voteType} here`}
-                >
-                  + Yes, here
-                </button>
-              </>
-            )}
-          </div>
-        )}
+        {actions && <div className="onboard-actions map-notice-actions">{actions}</div>}
 
         <button
           type="button"
@@ -360,10 +387,14 @@ function ask(
   calculating: boolean
 ): string {
   switch (step) {
+    // The box now hangs off the field these fill in, so each line says what the
+    // gesture is and lets the arrow say where the result lands. "This field
+    // fills in" is the half a first-timer cannot guess: the map and the bar
+    // look like separate things until one visibly answers the other.
     case "start":
-      if (facts.isStationNetwork) return "Tap the station on the map.";
-      if (requiresEnd(facts)) return "Tap the map where that stretch starts.";
-      return "Tap the map on the spot you mean.";
+      if (facts.isStationNetwork) return "Tap the station on the map. This fills in.";
+      if (requiresEnd(facts)) return "Tap the map where that stretch starts. This fills in.";
+      return "Tap the map on the spot you mean. This fills in.";
     case "end":
       if (requiresEnd(facts)) return "Now tap the far end of it.";
       return "Tap the far end too, if it's a stretch rather than a spot.";
@@ -374,12 +405,16 @@ function ask(
       // makes every one of them read as a verb phrase in the middle of a
       // question. Quoted, it also shows exactly what the vote will be recorded
       // as — including when a label of unknown kind let the map's default
-      // resolve one. Say so, and say where to change it: this is the only place
-      // the app tells a newcomer that the Proposal picker is theirs to move.
-      const tail = facts.pointType === null ? " — or pick another above." : "";
-      return facts.hasEnd
-        ? `“${effectiveVoteType}”, all along this stretch?${tail}`
-        : `“${effectiveVoteType}”, right here?${tail}`;
+      // resolve one.
+      //
+      // The old line ended "— or pick another above", pointing at the vote-type
+      // picker. That was written for a strip with nothing lit and nothing dimmed;
+      // the picker is now one of the greyed controls, so an instruction to use it
+      // contradicts the screen. The quoted label still says what will be recorded.
+      const question = facts.hasEnd
+        ? `“${effectiveVoteType}”, all along this stretch?`
+        : `“${effectiveVoteType}”, right here?`;
+      return `${question} + for yes, − for no.`;
     }
     case "done":
       return "Cast. It's on the map — and it's yours to take back any time.";

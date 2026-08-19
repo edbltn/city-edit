@@ -137,6 +137,13 @@ export const TopBar = memo(function TopBar() {
         </svg>
       </div>
 
+      {/* `data-coach` marks the three controls the first-run coach hangs its
+          callout off (onboarding/coachAnchor.ts). They are hooks for a reader,
+          not for layout: nothing here styles them, and the coach queries them
+          rather than holding a ref, so this file keeps no state for it. Moving
+          a control is fine — the callout is measured from wherever it lands.
+          Deleting an attribute is not: that step silently falls back to the
+          bottom strip. */}
       <div className="topbar-content">
         {/* Point-only maps vote on a single clicked location — no start/end
             route legend at all (covers desktop and mobile). */}
@@ -150,7 +157,7 @@ export const TopBar = memo(function TopBar() {
                 collapse to `display: contents`, so that layout is untouched. */}
             <div className="legend-pair legend-pair-tools">
               {typingField === "start" ? (
-                <div className={`${startToolClass.join(" ")} typing`}>
+                <div className={`${startToolClass.join(" ")} typing`} data-coach="start">
                   <span className="legend-icon-slot">
                     <span className="legend-char-start">◆</span>
                   </span>
@@ -166,6 +173,7 @@ export const TopBar = memo(function TopBar() {
                 <button
                   type="button"
                   className={startToolClass.join(" ")}
+                  data-coach="start"
                   onClick={handleStartClick}
                   aria-pressed={activeTool === "start"}
                 >
@@ -180,7 +188,7 @@ export const TopBar = memo(function TopBar() {
               )}
 
               {typingField === "end" ? (
-                <div className={`${endToolClass.join(" ")} typing`}>
+                <div className={`${endToolClass.join(" ")} typing`} data-coach="end">
                   <span className="legend-icon-slot">
                     <span className="legend-char-end">◆</span>
                   </span>
@@ -196,6 +204,7 @@ export const TopBar = memo(function TopBar() {
                 <button
                   type="button"
                   className={endToolClass.join(" ")}
+                  data-coach="end"
                   onClick={handleEndClick}
                   aria-pressed={activeTool === "end"}
                 >
@@ -265,6 +274,7 @@ export const TopBar = memo(function TopBar() {
 
             <div
               className={`cast-group ${canVote && !isLoading ? "" : "hidden-reserve"}`}
+              data-coach="cast"
               role="group"
               aria-label="Cast a vote for or against"
             >
