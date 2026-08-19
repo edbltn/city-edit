@@ -76,6 +76,7 @@ nav:
   - Architecture:
       - Three-layer model: three-layer-model.md
       - Voting architecture: voting-architecture.md
+      - Map labels: map-labels.md
       - URL routing: url-routing.md
       - Flask considerations: flask-considerations.md
   - Working on City Edit:
