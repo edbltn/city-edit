@@ -994,8 +994,6 @@
    the bar had no visible focus at all on the plates. Same treatment, so the
    whole band answers the keyboard the same way. */
 .topbar[data-chrome="float"] .legend-tool:focus-visible,
-.topbar[data-chrome="float"] .mode-btn:focus-visible,
-.topbar[data-chrome="float"] .vote-type-control:focus-within,
 .topbar[data-chrome="float"] .btn-cast:focus-visible,
 .topbar[data-chrome="float"] .btn-header:focus-visible {
   outline: 1px solid var(--ink-strong);
@@ -1139,3 +1137,56 @@
 }
 
 
+
+
+/* ==========================================================================
+   Focus on the two pickers.
+
+   The black rectangle across the search field was this, and it was doing the
+   FOCUS job — not a selection style. Two things made it look broken rather
+   than like a focus ring:
+
+     - it was `:focus-within`, not `:focus-visible`, so it fired on a mouse
+       click as well and read as a resting treatment on an open control;
+     - `--ink-strong` is #000 on the light theme, drawn at `outline-offset:
+       -1px` inside a control that carries `overflow: hidden`, with the panel
+       hanging over its lower edge — so what rendered was a clipped fragment of
+       a black box sitting across the placeholder.
+
+   (The genuine open/selected style is `.vote-type-selector.active
+   .vote-type-control { border-color }` in VoteTypeSelector.css, which this
+   sheet already neutralises by giving the control no border of its own. So
+   nothing was lost by removing the outline except the focus indicator, which
+   is replaced here rather than deleted.)
+
+   The replacement is the pill's own edge lifting to full --ink, plus the same
+   surface it uses on hover. Square, no box, and it reads as the same object
+   getting brighter rather than a rectangle landing on top of it.
+
+   `:not(:has(.active))` is what keeps it off the mouse path: a text input
+   matches :focus-visible even when focused by pointer (the browser assumes
+   typing follows), but clicking these opens the menu, and an open menu is its
+   own announcement. So keyboard focus — which lands without opening — shows
+   the edge, and a click does not.
+   ========================================================================== */
+
+.topbar[data-chrome="float"] .mode-switcher-group:has(.mode-btn:focus-visible):not(:has(.mode-selector.active)),
+.topbar[data-chrome="float"] .vote-switcher-group:has(.vote-type-input:focus-visible):not(:has(.vote-type-selector.active)) {
+  border-color: var(--ink);
+  background:
+    linear-gradient(var(--hover-bg), var(--hover-bg)),
+    var(--plate-bg);
+}
+
+/* The pill's edge IS the indicator, so the trigger inside it hands its own
+   over. Removing a UA focus ring is only safe as a SWAP, and this is one: the
+   rule above fires on exactly the condition this suppresses. Left in place,
+   Chrome draws `outline: auto` in rgb(0, 95, 204) — a rounded blue ring in a
+   band that has no radius and no blue in it. While the menu is OPEN neither
+   shows, and that is deliberate: the open panel and its highlighted row are a
+   louder statement of where the keyboard is than any ring on the trigger. */
+.topbar[data-chrome="float"] .mode-btn:focus-visible,
+.topbar[data-chrome="float"] .vote-type-input:focus-visible,
+.topbar[data-chrome="float"] .vote-type-control:focus-visible {
+  outline: none;
+}

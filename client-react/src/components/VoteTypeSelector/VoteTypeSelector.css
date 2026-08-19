@@ -217,12 +217,24 @@
   opacity: 0.55;
   /* section headers carry the list; strongest step */
   font-weight: var(--weight-strong);
+  /* One line, always. The panel takes the width of the control that opens it,
+     and once that was capped the row was narrow enough that a two-word title
+     and a bracketed count started wrapping against each other. Neither may
+     wrap; if a panel is ever genuinely too narrow for both, the TITLE is the
+     half that truncates, because the count is short and fixed. */
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* How much of this group is drawn. Lower-case on purpose — the heading is
    uppercased, and a readout is a measurement, not a label. */
 .vt-section-count {
   margin-left: auto;
+  white-space: nowrap;
+  /* Never shrinks and never wraps — it is the fixed half of the pair. */
+  flex: none;
   padding-left: var(--space-3);
   letter-spacing: 0;
   text-transform: none;
