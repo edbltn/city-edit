@@ -73,7 +73,10 @@
   border: none;
   background: transparent;
   font-family: var(--font-main);
-  font-size: var(--control-font-size);
+  /* Floored --control-font-size — see .mode-search. This one is an input that
+     LOOKS like a label until you focus it, which makes the auto-zoom worse:
+     the page jumps on what reads as a tap on a dropdown. */
+  font-size: var(--control-font-size-input);
   font-weight: var(--weight-body);
   letter-spacing: 0;
   color: var(--ink);

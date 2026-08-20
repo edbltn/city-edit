@@ -13,7 +13,11 @@
   box-sizing: border-box;
   padding: var(--space-2) var(--space-3);
   font-family: var(--font-main);
-  font-size: var(--control-font-size);
+  /* --control-font-size, floored: a focusable field, so it also answers to
+     --form-control-floor (globals.css) or iOS Safari zooms the page the moment
+     it takes focus. On a mouse viewport the floor is 0 and this resolves to
+     exactly --control-font-size, as it always did. */
+  font-size: var(--control-font-size-input);
   color: var(--ink);
   background: rgba(212, 212, 212, 0.04);
   border: none;

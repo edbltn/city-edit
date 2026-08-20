@@ -1,19 +1,48 @@
 .address-search {
   position: relative;
   width: 250px;
+  /* THE SHARED SLOT, half two — `.legend-coords` (globals.css) sets the same
+     height on the resting half. This wrapper is what the legend cell measures,
+     so pinning it here is what makes tapping in cost zero pixels: the field
+     that appears is exactly as tall as the span it replaced, because both are
+     as tall as the slot.
+
+     Centred rather than stretched: the input keeps its own intrinsic height
+     (line box + --address-field-pad + --address-field-rule) and sits in the
+     middle of the slot, so the underline lands where it always did relative to
+     the text rather than being dragged to the bottom of a taller box. */
+  display: flex;
+  align-items: center;
+  /* height, not min-height, and the resting half is given the same height —
+     two different ways of arriving at "27.4px" round to different 1/64ths in
+     Blink and left a 0.02px step on tap-in. One property, one rounding. */
+  height: var(--address-slot-height);
+  box-sizing: border-box;
+  /* As a flex container that is itself a flex child, its automatic minimum is
+     its content's min-content — which for a text field is the field's default
+     intrinsic size, so without this the slot stopped shrinking to the width
+     the resting address slot has and grew past the cell. */
+  min-width: 0;
 }
 
 .address-search-input {
-  width: 100%;
-  padding: 2px 0;
+  /* flex + min-width:0 rather than width:100%: the wrapper is a flex container
+     now, and a nowrap text field's automatic minimum is its whole value. */
+  flex: 1;
+  min-width: 0;
+  /* Tokens, because --address-slot-height is computed FROM them — the slot and
+     the thing it reserves room for cannot drift apart. */
+  padding: var(--address-field-pad) 0;
   border: none;
-  border-bottom: 1px solid var(--color-start);
+  border-bottom: var(--address-field-rule) solid var(--color-start);
   background: transparent;
   font-family: var(--font-main);
-  /* Shared topbar field token (see globals.css :root). The matching autocomplete
-     results use the same token, so input + dropdown resize together on mobile —
-     do NOT reintroduce a per-breakpoint px font-size here; it will drift. */
-  font-size: var(--control-font-size-compact);
+  /* Shared topbar field token (see globals.css :root), FLOORED: below 16px iOS
+     Safari zooms the viewport the instant this field takes focus and the only
+     way out is a pinch. The matching autocomplete results use the unfloored
+     token, so they stay on the reading scale — do NOT reintroduce a
+     per-breakpoint px font-size here; it will drift. */
+  font-size: var(--control-font-size-input-compact);
   color: var(--ink);
   outline: none;
   box-sizing: border-box;

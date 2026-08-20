@@ -200,7 +200,8 @@
   box-sizing: border-box;
   padding: 0 var(--space-3) 0 38px;
   font-family: var(--font-main);
-  font-size: var(--landing-ui);
+  /* Floored — see --form-control-floor in globals.css. */
+  font-size: max(var(--landing-ui), var(--form-control-floor));
   color: var(--ink);
   background: var(--landing-surface);
   border: 1px solid var(--hairline);

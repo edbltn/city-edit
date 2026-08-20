@@ -99,6 +99,65 @@
      --control-font-size* token. */
   --control-font-size-compact: var(--font-secondary);
 
+  /* ==========================================================================
+     THE FORM-CONTROL FLOOR — the one number in this file that is a DEVICE
+     constraint rather than a typographic decision, which is why it is not a
+     step of the scale above and why nothing but a focusable form control may
+     read it.
+
+     iOS Safari zooms the layout viewport whenever a focused input, textarea or
+     select computes below 16px, and the only way back out is a pinch — which
+     is the "tap the Start field and you are stuck zoomed in" report. Every
+     text field in the app sizes from --control-font-size* (11px at the narrow
+     breakpoint) or from a role token (13/15px), so every one of them trips it.
+
+     It is a FLOOR, not a size: each control keeps the token it already reads
+     and wraps it in `max(…, var(--form-control-floor))`. On a viewport where
+     the floor is 0 that resolves to exactly what it resolved to before, so the
+     desktop scale is untouched — the value only bites where it is raised.
+
+     Scoped to `pointer: coarse` (see the Responsive section), NOT to a width:
+     auto-zoom is a property of the input method, not of the viewport. A 380px
+     desktop window never zooms and keeps the shared scale; a 1024px iPad does
+     zoom and gets the floor.
+
+     What this must NEVER be fixed with: `maximum-scale=1` / `user-scalable=no`
+     on the viewport meta. That takes pinch-zoom away from everyone, which is
+     an accessibility regression, not a fix. index.html's meta stays
+     `width=device-width, initial-scale=1.0`. ====================== */
+  --form-control-floor: 0px;
+
+  /* The two --control-font-size* tokens, floored. Text CONTROLS read these;
+     the text around them keeps reading the unfloored pair, so a label and its
+     field can differ on a phone (they must: only one of them zooms Safari). */
+  --control-font-size-input: max(var(--control-font-size), var(--form-control-floor));
+  --control-font-size-input-compact: max(var(--control-font-size-compact), var(--form-control-floor));
+
+  /* ---- The address slot ----------------------------------------------------
+     ONE height, obeyed by BOTH states of a Start/End field: the resting
+     `.legend-coords` span and the `.address-search` that replaces it while you
+     type. They used to size themselves independently — a bare span against an
+     input carrying 2px of vertical padding and a 1px rule — so tapping in grew
+     the cell by exactly that chrome (measured at 390px: 31px → 36px) and the
+     End row jumped down under the thumb mid-tap.
+
+     The slot is the TALLER state's box, reserved up front, so the resting
+     state already occupies it and there is nothing left to grow into. It is
+     derived, not a magic min-height: the field's own line box at the floored
+     control size, plus the field's own padding and rule, both of which are
+     tokens below so the formula cannot drift from what AddressSearch.css
+     actually draws.
+
+     1.4 is the same line factor --float-row uses (TopBarFloat.css) and clears
+     Red Hat Mono's 1.323 normal line-height with room for descenders. */
+  --address-field-pad: 2px;
+  --address-field-rule: 1px;
+  --address-slot-height: calc(
+    1.4 * var(--control-font-size-input-compact)
+    + 2 * var(--address-field-pad)
+    + var(--address-field-rule)
+  );
+
   /* Control Heights */
   --control-height: 44px;
 
@@ -825,6 +884,18 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* THE SHARED SLOT, half one. `.address-search` (AddressSearch.css) sets the
+     same height on the other half, so the resting address and the field that
+     replaces it occupy one identical box and tapping in moves nothing.
+     line-height rather than min-height because this is a single-line flex item
+     whose parent centres its children: a min-height would reserve the space
+     and then leave the text sitting at the top of it. The line box IS the
+     slot, so the text stays centred and `text-overflow: ellipsis` — which a
+     flex/`align-items` fix would have cost — still works. The explicit height
+     pins the box to the same rounded value `.address-search` resolves to; a
+     bare line box and a bare min-height land on different 1/64ths. */
+  height: var(--address-slot-height);
+  line-height: var(--address-slot-height);
 }
 
 
@@ -1507,7 +1578,8 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
   border: 1px solid var(--hairline);
   background: var(--paper);
   font-family: var(--font-main);
-  font-size: var(--font-body);
+  /* Floored — a focusable field, so it answers to --form-control-floor. */
+  font-size: max(var(--font-body), var(--form-control-floor));
   color: var(--ink);
   box-sizing: border-box;
   transition: border-color 0.15s ease;
@@ -1583,6 +1655,18 @@ body.dragging-from-path .leaflet-desirePathPane-pane {
 /* ==========================================================================
    Responsive
    ========================================================================== */
+
+/* Raise the form-control floor wherever iOS Safari's focus auto-zoom exists.
+   `pointer: coarse` is the whole touch population and nothing else — see the
+   token's note in the type-scale block for why this is keyed to the input
+   method and not to a breakpoint. Everything else about the coarse-pointer
+   scale is untouched: this only takes effect inside the `max()` that each text
+   field wraps its own size token in. */
+@media (pointer: coarse) {
+  :root {
+    --form-control-floor: 16px;
+  }
+}
 
 @media (max-width: 1080px) {
   :root {

@@ -86,7 +86,8 @@
 .propose-custom-row select {
   padding: var(--space-2) var(--space-3);
   font-family: var(--font-main);
-  font-size: var(--font-size-xs);
+  /* Floored — focusable fields, including the selects (iOS zooms on those too). */
+  font-size: max(var(--font-size-xs), var(--form-control-floor));
   color: var(--ink);
   background: rgba(212, 212, 212, 0.04);
   border: 1px solid var(--hairline);

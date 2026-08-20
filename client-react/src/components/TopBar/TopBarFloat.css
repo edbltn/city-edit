@@ -97,6 +97,31 @@
      1.4x the type leaves room for descenders and clears the 20px icons. */
   --float-row: calc(1.4 * var(--control-font-size) + 2 * var(--space-2));
 
+  /* The Start/End rows, which are --float-row unless the address slot needs
+     more. They are the only rows in the band that hold a FIELD rather than a
+     label, and a field is taller than the text it replaces: its own padding
+     and underline, on top of a line box the form-control floor may have raised
+     to 16px (globals.css). Reserving that here is what stops the End row
+     jumping down under the thumb the moment Start switches into typing mode —
+     the resting row is already the typing row's height, so nothing grows.
+
+     max(), so this is a floor and never a shrink: wherever --float-row is
+     already the taller of the two (every viewport whose control text is at or
+     above the compact field size) the legend rows are --float-row exactly and
+     the band is unchanged.
+
+     The + 1.5px is the pair's OWN lines, shared out over the two rows it
+     spans. The plate is a grid item stretched to both rows, so everything it
+     draws comes out of that height before a cell sees any of it: its 1px top
+     edge, its 1px bottom edge and the 1px divider between the two cells — 3px
+     over 2 rows. Leave it off and the reservation is 3px short, the End cell
+     lands past the plate's bottom edge and `overflow: hidden` eats it, which
+     is the same jump wearing a different hat. */
+  --legend-row: max(
+    var(--float-row),
+    calc(var(--address-slot-height) + 2 * var(--space-2) + 1.5px)
+  );
+
   /* The widest the Map/Vote column ever needs to be, derived from the content
      rather than picked. The longest strings the app actually holds are
      "NYC Tactical Urbanism" (21 chars) and "Repaint this call box or utility
@@ -355,7 +380,11 @@
      cell in the band is one line at --control-font-size with --space-2 above
      and below, so a row is that, and two rows are the pair. No px anywhere,
      and it follows the type scale if that moves. */
-  grid-template-rows: var(--float-row) var(--float-row);
+  /* --legend-row, not --float-row: the legend pair spans both of these rows,
+     so a row too short for the address slot is a row the pair overflows the
+     moment you tap into Start. On this grid the pills share the rows, so they
+     take the same height — which is correct, they are one band. */
+  grid-template-rows: var(--legend-row) var(--legend-row);
   align-items: stretch;
   /* Was --space-2; the pills read as crowded against their neighbours at 8. */
   column-gap: var(--float-gap);
@@ -496,6 +525,10 @@
 .topbar[data-chrome="float"] .legend-pair > * {
   flex: 1 1 0;
   min-width: 0;
+  /* So the divider below rides INSIDE the first cell's share of the row rather
+     than adding a third pixel the row never reserved. --legend-row is written
+     against this. */
+  box-sizing: border-box;
   background: none;
   border: 0;
   box-shadow: none;
@@ -891,10 +924,15 @@
        -/+ block: that block stretches across two rows, so a top margin came
        out of its height and its cells measured 30.4 x 26.4 instead of square.
        A spacer row pushes instead of shrinking. */
+    /* Start and End are --legend-row: they hold the address slot, which on a
+       touch viewport is taller than a pill (the form-control floor puts the
+       field at 16px). Map and Vote stay --float-row — nothing in them is a
+       text field, so the growth is confined to the two rows that need it
+       instead of inflating the whole band. */
     grid-template-rows:
       auto                  /* wordmark + rail */
-      var(--float-row)      /* Start           */
-      var(--float-row)      /* End             */
+      var(--legend-row)     /* Start           */
+      var(--legend-row)     /* End             */
       var(--float-gap)      /* the gap         */
       var(--float-row)      /* Map             */
       var(--float-row);     /* Vote            */
