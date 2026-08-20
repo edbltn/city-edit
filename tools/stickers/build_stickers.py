@@ -123,7 +123,7 @@ def pair_up(keys: list[str]) -> list[tuple[str, str | None]]:
 
 
 def plan(stock, keys: list[str], sheets: int, style: str = "flat",
-         way: str = "dark") -> list[dict]:
+         way: str = "dark", base: int = 0) -> list[dict]:
     """Mint every sticker in the run and assign it a sheet + grid cell.
 
     TWO messages to a sheet, split down the middle (see half_split). A sheet of
@@ -135,6 +135,14 @@ def plan(stock, keys: list[str], sheets: int, style: str = "flat",
     The index a code is minted at is per message and starts at 0, so asking for
     more sheets EXTENDS the run rather than reshuffling it — codes already
     printed keep their identity.
+
+    `base` slides that whole window further along the same sequence, which is
+    how a LATER print run gets codes of its own. It is deliberately not a new
+    campaign string: bumping the campaign would re-mint the codes already on
+    poles, so re-running an old build would stop reproducing the stickers it
+    printed — the one guarantee codes_mod promises. Extending the index keeps
+    one ordered namespace per (campaign, stock, message), so "no code is ever
+    printed twice" is checkable by looking at the ranges.
     """
     axis, span = half_split(stock)
     per_half = stock.per_sheet // 2
@@ -150,7 +158,7 @@ def plan(stock, keys: list[str], sheets: int, style: str = "flat",
             # case the SAME message fills both halves, so the second half has to
             # start after the first or the two would be the same twelve codes —
             # and two stickers with one identity share a pole.
-            start = 0 if b else half * per_half * sheets
+            start = base + (0 if b else half * per_half * sheets)
             run = codes_mod.mint_run(key, per_half * sheets, stock.key, start=start)
             for i, code in enumerate(run):
                 sheet_no, slot = divmod(i, per_half)
@@ -288,7 +296,7 @@ PAGE_PT = (8.5 * 72, 11 * 72)
 PX_PER_PT = 96 / 72
 
 
-def write_pdf(stock, sheet_svgs: list[Path], out: Path) -> Path:
+def write_pdf(stock, sheet_svgs: list[Path], out: Path, suffix: str = "") -> Path:
     """Every sheet of a stock, joined into one print-ready PDF.
 
     Vector all the way through — the pages are the SVG masters, not the PNGs —
@@ -311,7 +319,7 @@ def write_pdf(stock, sheet_svgs: list[Path], out: Path) -> Path:
         writer.append(str(tmp))
         tmp.unlink()
 
-    path = out / f'cityedit-stickers-{stock.key}in.pdf'
+    path = out / f'cityedit-stickers-{stock.key}in{suffix}.pdf'
     with path.open("wb") as fh:
         writer.write(fh)
 
@@ -375,13 +383,14 @@ def write_seed(rows, out: Path) -> Path:
     return path
 
 
-def contact_sheet(stock, keys: list[str], rows, out: Path) -> Path:
+def contact_sheet(stock, keys: list[str], rows, out: Path,
+                  base: int = 0) -> Path:
     """A page that proofs every design at its real size and carries the runbook,
     so the print decisions live next to the thing they apply to."""
     cards = []
     for key in keys:
         s = campaign.BY_KEY[key]
-        url = codes_mod.url_for(codes_mod.mint(key, 0, stock.key))
+        url = codes_mod.url_for(codes_mod.mint(key, base, stock.key))
         first = next((r for r in rows if r["message"] == key), None)
         art_path = Path(first["art"]) if first and first.get("art") else None
         style = first["style"] if first and first.get("style") else "flat"
@@ -478,6 +487,13 @@ def main():
     ap.add_argument("--proof", action="store_true",
                     help="also write registration proofs with die outlines")
     ap.add_argument("--clean", action="store_true", help="wipe out/ first")
+    ap.add_argument("--start-index", type=int, default=0, metavar="N",
+                    help="mint from index N instead of 0, so a later print run "
+                         "gets codes of its own without re-minting the ones "
+                         "already on poles (see plan())")
+    ap.add_argument("--suffix", default="", metavar="S",
+                    help="tag the output dir and PDF, e.g. -2026-08-20, so a "
+                         "new run never overwrites a printed one")
     ap.add_argument("--colourway", choices=sorted(art.COLOURWAYS), default="dark",
                     help='"dark" (default) prints the app\'s terminal palette: '
                          'white on black with the amber band. "light" is dark '
@@ -539,7 +555,7 @@ def main():
 
     sheets = max(1, args.sheets)
 
-    out = OUT / stock.key
+    out = OUT / f"{stock.key}{args.suffix}"
     if args.clean and out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -550,7 +566,8 @@ def main():
         if stray.is_file():
             stray.unlink()
 
-    rows = plan(stock, keys, sheets, args.style, args.colourway)
+    rows = plan(stock, keys, sheets, args.style, args.colourway,
+                base=args.start_index)
 
     if args.art or args.art_dry_run:
         if not args.art:
@@ -564,14 +581,15 @@ def main():
         ), dry_run=args.art_dry_run)
 
     sheet_svgs = write_sheets(stock, rows, out, proof=args.proof)
-    pdf = write_pdf(stock, sheet_svgs, out)
+    pdf = write_pdf(stock, sheet_svgs, out, args.suffix)
     write_manifest(rows, out)
     write_seed(rows, out)
-    contact_sheet(stock, keys, rows, out)
+    contact_sheet(stock, keys, rows, out, args.start_index)
 
     (out / "run.json").write_text(json.dumps({
         "stock": stock.key, "asin": stock.asin, "campaign": codes_mod.CAMPAIGN,
         "messages": keys, "sheetsPerPair": sheets, "stickers": len(rows),
+        "startIndex": args.start_index, "suffix": args.suffix,
         "sheets": len({(r.get("pair"), r["sheet"]) for r in rows}),
     }, indent=2) + "\n")
 
@@ -580,7 +598,7 @@ def main():
           f'two messages per sheet')
     for key in keys:
         s = campaign.BY_KEY[key]
-        url = codes_mod.url_for(codes_mod.mint(key, 0, stock.key))
+        url = codes_mod.url_for(codes_mod.mint(key, args.start_index, stock.key))
         m = art.metrics(s.display, url, stock.die, stock.bleed, args.style)
         print(f'  {s.display:26s} {" / ".join(m["lines"]):28s} '
               f'{m["type_pt"]:5.1f}pt  {m["qr_modules"]}mod '

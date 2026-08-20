@@ -116,16 +116,18 @@ def check_pdf(rows: list[dict]) -> list[str]:
     miss it.
     """
     problems = []
-    for stock_key in sorted({r["stock"] for r in rows}):
+    for run_key in sorted({r["_run"] for r in rows}):
+        stock_key = next(r["stock"] for r in rows if r["_run"] == run_key)
         stock = sheet_mod.STOCKS[stock_key]
-        pdf = OUT / stock_key / f"cityedit-stickers-{stock_key}in.pdf"
+        suffix = run_key[len(stock_key):]
+        pdf = OUT / run_key / f"cityedit-stickers-{stock_key}in{suffix}.pdf"
         if not pdf.exists():
             problems.append(f"{pdf.name}: missing")
             continue
 
         want: dict[int, dict[tuple[int, int], str]] = {}
         for r in rows:
-            if r["stock"] == stock_key:
+            if r["_run"] == run_key:
                 want.setdefault(int(r["sheet"]), {})[
                     (int(r["col"]), int(r["row"]))] = r["url"]
 
@@ -161,7 +163,14 @@ def check_pdf(rows: list[dict]) -> list[str]:
 def load_run() -> list[dict]:
     rows = []
     for manifest in sorted(OUT.glob("*/manifest.csv")):
-        rows += list(csv.DictReader(manifest.open()))
+        for r in csv.DictReader(manifest.open()):
+            # The run directory, not the stock, is what identifies a print run:
+            # `out/3` and `out/3-2026-08-20` are both stock "3" but are two
+            # different sets of poles. Keying the PDF lookup on the stock alone
+            # checked a dated run's manifest against the ORIGINAL run's PDF and
+            # reported all twelve as mismatched.
+            r["_run"] = manifest.parent.name
+            rows.append(r)
     return rows
 
 
