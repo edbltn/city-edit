@@ -598,6 +598,33 @@
   padding: 0 var(--space-4);
 }
 
+/* ONE SEAM, ONE LINE.
+
+   The Map pill and the Vote pill are a stacked pair, and the rule at the top
+   of this sheet says a stacked pair is one container holding cells divided by
+   hairlines. `.legend-pair` is built that way and its Start/End divider is a
+   single 1px line. These two are not: they are two grid items sharing an edge
+   under `row-gap: 0`, so each brought its own full plate edge to that edge —
+   the Map pill's border-bottom AND the Vote pill's border-top, 2px of ink
+   where the pair beside it draws 1 — and the Vote pill's inset sheen then put
+   a highlight directly underneath, which is what turned a divider into a
+   groove. Measured at 390px on the shipping build: 5 device rows of ink at
+   dpr 2.55 against the legend divider's 2.5.
+
+   Collapsing it here rather than by rewrapping the markup, because the pair
+   cannot become one box without also becoming one stacking context, and each
+   pill has to be able to raise ITSELF above its neighbour when its menu opens
+   (see the :has(.active) rungs below). So: the seam is the Vote pill's top
+   border and nothing else, and the top highlight belongs to the top of the
+   stack — one plate's worth of edge for what reads as one plate. */
+.topbar[data-chrome="float"] .mode-switcher-group {
+  border-bottom-width: 0;
+}
+
+.topbar[data-chrome="float"] .vote-switcher-group {
+  box-shadow: var(--plate-shadow);
+}
+
 /* The group is the pill, so the trigger inside it is bare — one box, not two —
    and simply fills whatever the label leaves. */
 .topbar[data-chrome="float"] .mode-selector,
@@ -1407,6 +1434,19 @@
    ========================================================================== */
 
 @media (min-width: 580px) and (max-width: 1080px) {
+  /* The seam collapse is undone here, because in THIS band there is no seam:
+     the two pills are side by side, so the Map pill's bottom edge is its own
+     outside edge and dropping it leaves an open-bottomed plate rather than a
+     shared divider. The collapse belongs to the two layouts where they stack
+     (above 1080 and below 580) and to no other. */
+  .topbar[data-chrome="float"] .mode-switcher-group {
+    border-bottom-width: 1px;
+  }
+
+  .topbar[data-chrome="float"] .vote-switcher-group {
+    box-shadow: var(--plate-shadow), inset 0 1px 0 var(--plate-sheen);
+  }
+
   .topbar[data-chrome="float"] {
     /* max-content, NOT auto: an `auto` track can be handed free space, and a
        track that grows for no reason is what handed the action block 251px for
