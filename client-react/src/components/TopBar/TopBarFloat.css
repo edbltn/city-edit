@@ -105,10 +105,49 @@
      jumping down under the thumb the moment Start switches into typing mode —
      the resting row is already the typing row's height, so nothing grows.
 
-     max(), so this is a floor and never a shrink: wherever --float-row is
-     already the taller of the two (every viewport whose control text is at or
-     above the compact field size) the legend rows are --float-row exactly and
-     the band is unchanged.
+     max() is a floor and never a shrink — but be clear about which arm wins,
+     because an earlier draft of this comment claimed --float-row wins on any
+     viewport whose control text is at or above the compact field size, and
+     that is false. It never wins. The two arms are
+
+       --float-row  =  1.4 * CFS   + 16          (2 * --space-2)
+       slot arm     =  1.4 * CFSIC + 22.5        (the same 16, plus the
+                                                  field's 2*2px padding and
+                                                  1px rule, plus the 1.5px
+                                                  below)
+
+     so --float-row only wins when 1.4 * (CFS - CFSIC) > 6.5, i.e. when the
+     control text runs more than 4.64px ahead of the field text. The widest
+     that gap ever gets is 2px (15 vs 13, mouse, above 1080). Measured, every
+     configuration the app can produce:
+
+       mouse, >1080    CFS 15  CFSIC 13   37.00 -> 40.69   (+3.69)
+       mouse, <=1080   CFS 11  CFSIC 11   31.39 -> 37.89   (+6.50)
+       touch, >1080    CFS 15  CFSIC 16   37.00 -> 44.89   (+7.89)
+       touch, <=1080   CFS 11  CFSIC 16   31.39 -> 44.89   (+13.50)
+
+     That growth is the price of the reservation and it is the correct price:
+     the field genuinely is taller than the span it replaces, on every one of
+     those viewports, and before this the difference came out of the End row's
+     position mid-tap (+5px at 390, +2px at 1440).
+
+     Do NOT try to buy the --float-row branch back by reserving less — e.g. by
+     deriving --address-slot-height from Red Hat Mono's 1.323 normal
+     line-height instead of 1.4. It cannot work: at the widest gap the app has,
+     flipping the comparison needs a line factor of 3.25 or more, so no value
+     under 1.4 reaches it (1.323 lands desktop at 39.7, still above 37 — it
+     buys 1px and changes no branch). What it would buy is a reservation
+     measured against ONE font: --font-main falls back to Courier New and then
+     to generic monospace, and it is a webfont, so the field renders in a
+     fallback for as long as Google Fonts takes to answer and forever if it
+     never does. 1.4 is a deliberate cover over `normal` for anything in that
+     stack; a metric-exact reservation is short precisely when the metric is
+     not the one you measured, and short means the tap-in jump is back.
+
+     The max() stays anyway. It is what keeps this a floor if the type scale
+     ever moves the two tokens far enough apart to make --float-row the taller
+     arm; it is simply unreachable at today's values, and this comment should
+     say so rather than describe a branch nobody has ever taken.
 
      The + 1.5px is the pair's OWN lines, shared out over the two rows it
      spans. The plate is a grid item stretched to both rows, so everything it
