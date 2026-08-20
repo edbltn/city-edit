@@ -267,6 +267,29 @@
    Reset & Base
    ========================================================================== */
 
+html {
+  /* iOS Safari "text autosizing" (font boosting) is ON by default and rewrites
+     the computed font-size of any block it decides is a wide run of body copy,
+     ignoring the cascade entirely. It is meant for desktop-width pages opened
+     on a phone; this app is responsive and its type scale is deliberate, so
+     the boost is only ever damage.
+
+     What it did: the proposal card's body is the one plain block of wrapping
+     text in the chrome — everything else is a flex row, a fixed-height cell or
+     a nowrap/ellipsis field, all of which the autosizer skips. So the card's
+     address rendered at ~16px while every control around it stayed at the
+     --font-caption 11px both were written to use. Measured off a real iPhone
+     screenshot (390pt, Safari page zoom 85%): the card's monospace advance was
+     1.45x the topbar's, and within the SAME card the eyebrow — 11px, same
+     token, but inside a flex header — was not boosted at all. Chrome at the
+     identical layout width renders the two at 1.00x.
+
+     100%, not `none`: `none` also blocks the reader's own text-size control in
+     Safari's aA menu. 100% only says "do not adjust", which is all we want. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 html,
 body {
   height: 100%;
