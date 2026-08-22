@@ -77,6 +77,37 @@ def map_urls(base_url: str, m: dict) -> list[str]:
     return [f"https://{subdomain}.cityedit.org", slug_url] if subdomain else [slug_url]
 
 
+SUPPRESS_KEY = "cityedit.onboarded"
+
+# The onboarding flow is decided by a SERVER probe (GET /api/visitor, keyed on a
+# hash of the client IP — see client-react/src/onboarding/firstRun.ts), not by
+# anything this script can see in the page. That is why the wall showed up in
+# previews only SOMETIMES: the probe both reads and records, so whichever map a
+# run captured first was the one that got the welcome, and a rotated Cloud Run
+# egress IP made even that non-deterministic. Hiding the wall after the fact
+# cannot fix a race — the capture would still sometimes land mid-animation, and
+# a "sometimes" bug that reproduces once a day is one nobody can confirm fixed.
+#
+# So this stops the flow at its source. firstRun's suppressant is a localStorage
+# flag that can only END the flow, never start it, and Onboarding.tsx reads it in
+# a lazy initializer at mount: when it is already set, `visitedBefore` starts
+# true, the wall never renders AND the probe is never sent. Set as an init script
+# so it lands before the app's first line runs, on every navigation.
+#
+# It also stops the capture job counting itself as a first-time visitor thirteen
+# times a day, which it has been doing every time it primed the probe.
+async def suppress_onboarding(page):
+    await page.add_init_script(f"""
+        try {{
+            window.localStorage.setItem({SUPPRESS_KEY!r}, '1');
+            window.sessionStorage.setItem({SUPPRESS_KEY!r}, '1');
+        }} catch (_) {{
+            // Storage can be unavailable on an opaque origin; the DOM sweep in
+            // capture_url is the backstop for that case.
+        }}
+    """)
+
+
 async def capture_url(page, url: str) -> bytes:
     print(f"  Navigating to {url}", flush=True)
     await page.goto(url, wait_until="networkidle")
@@ -112,7 +143,20 @@ async def capture_url(page, url: str) -> bytes:
     await page.wait_for_timeout(RENDER_WAIT_MS)
 
     await page.evaluate("""() => {
-        const hide = ['.leaflet-control-container', '.topbar', '.address-search', '.sidebar'];
+        const hide = ['.leaflet-control-container', '.topbar', '.address-search', '.sidebar',
+                      // Onboarding, in case the suppressant above could not be
+                      // written. `.coach-scrim` and the wall are portaled to
+                      // <body>, which an element screenshot still captures:
+                      // Playwright crops the composited page to the element's
+                      // box, so anything painted OVER the map is in the shot.
+                      '.opener-wall', '.coach-scrim', '.coach-callout', '.onboard-coach',
+                      // The announcement/error strip. A preview is a cached
+                      // thumbnail of a MAP, and this list already strips every
+                      // other piece of chrome; a dated banner ("Aug. 22") baked
+                      // into an image served for a day is chrome that is also
+                      // wrong. Covers the onboard coach's strip too, which
+                      // renders inside a MapNotice.
+                      '.map-notice'];
         hide.forEach(sel => {
             document.querySelectorAll(sel).forEach(el => { el.style.display = 'none'; });
         });
@@ -148,6 +192,7 @@ async def capture_map(p, base_url: str, m: dict) -> bytes:
         urls = map_urls(base_url, m)
         for i, url in enumerate(urls):
             page = await browser.new_page(viewport=VIEWPORT)
+            await suppress_onboarding(page)
             try:
                 return await capture_url(page, url)
             except Exception as e:
